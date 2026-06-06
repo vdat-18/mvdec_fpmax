@@ -1,0 +1,48 @@
+[project]
+name = "mvdec-fpmax"
+version = "0.1.0"
+description = "Enhancing Multi-View Deep Embedded Clustering using Maximal Frequent Itemset Mining."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gower",
+    "kmodes",
+    "loguru>=0.7.3",
+    "matplotlib",
+    "mlxtend",
+    "numpy",
+    "openpyxl",
+    "pandas",
+    "scikit-learn",
+    "seaborn",
+]
+
+[project.scripts]
+mvdec-fpmax = "cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+py-modules = ["cli", "config"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.format]
+line-ending = "auto"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

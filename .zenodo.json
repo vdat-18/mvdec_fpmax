@@ -1,0 +1,28 @@
+{
+  "title": "mvdec-fpmax",
+  "description": "Source code and processed experiment artifacts for MiMvDEC: Multi-View Deep Embedded Clustering enhanced with Maximal Frequent Itemset Mining for e-commerce store segmentation.",
+  "license": "MIT",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Nguyen, Van Dat",
+      "affiliation": "Faculty of Information Technology, HUTECH University, Ho Chi Minh City, Vietnam"
+    },
+    {
+      "name": "Le, Nhat Tung",
+      "affiliation": "Dong Nai Technology University, Dong Nai, Vietnam"
+    },
+    {
+      "name": "Bui, Huong",
+      "affiliation": "Faculty of Information Technology, HUTECH University, Ho Chi Minh City, Vietnam"
+    }
+  ],
+  "keywords": [
+    "multi-view clustering",
+    "deep embedded clustering",
+    "FP-Max",
+    "maximal frequent itemset mining",
+    "K-Prototypes",
+    "e-commerce segmentation"
+  ]
+}

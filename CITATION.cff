@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite the associated manuscript."
+title: "mvdec-fpmax"
+version: 0.1.0
+license: MIT
+authors:
+  - family-names: Nguyen
+    given-names: Van Dat
+    email: ngvdat.w@gmail.com
+    affiliation: "Faculty of Information Technology, HUTECH University, Ho Chi Minh City, Vietnam"
+  - family-names: Le
+    given-names: Nhat Tung
+    email: lenhattung@dntu.edu.vn
+    affiliation: "Dong Nai Technology University, Dong Nai, Vietnam"
+  - family-names: Bui
+    given-names: Huong
+    email: bd.huong@hutech.edu.vn
+    affiliation: "Faculty of Information Technology, HUTECH University, Ho Chi Minh City, Vietnam"
+preferred-citation:
+  type: article
+  title: "Enhancing Multi-View Deep Embedded Clustering using Maximal Frequent Itemset Mining: Application to E-Commerce Store Segmentation"
+  authors:
+    - family-names: Nguyen
+      given-names: Van Dat
+    - family-names: Le
+      given-names: Nhat Tung
+    - family-names: Bui
+      given-names: Huong
