@@ -22,9 +22,9 @@ data/
     seller_store_urls.csv        # seller storefront URLs used during collection
 output/
   without_ffs_results.csv
-  without_ffs_results.jsonl
   ffs_results.csv
-  ffs_results.jsonl
+  post_without_ffs_intuitive_results.csv
+  post_ffs_intuitive_results.csv
 src/
   data_preprocessing/            # raw-data preprocessing utilities
   representation_learning/       # Colab GPU notebook for MvDEC representation
@@ -99,34 +99,148 @@ Run smoke checks for the two experiment variants:
 
 ```bash
 uv run mvdec-fpmax without-ffs-smoke
+uv run mvdec-fpmax without-ffs-smoke --backend intuitive
 uv run mvdec-fpmax ffs-smoke
 ```
 
 Run the full sensitivity grids:
 
 ```bash
-uv run mvdec-fpmax without-ffs
-uv run mvdec-fpmax ffs
+uv run mvdec-fpmax without-ffs-kprototypes
+uv run mvdec-fpmax without-ffs-intuitive
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted
+uv run mvdec-fpmax without-ffs-intuitive-native
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-native
+uv run mvdec-fpmax ffs-kprototypes
+uv run mvdec-fpmax ffs-intuitive
+uv run mvdec-fpmax ffs-intuitive-view-weighted
+uv run mvdec-fpmax ffs-intuitive-native
+uv run mvdec-fpmax ffs-intuitive-view-weighted-native
 ```
 
 Run full grids with parallel worker processes:
 
 ```bash
-uv run mvdec-fpmax without-ffs --workers 4
-uv run mvdec-fpmax ffs --workers 4
+uv run mvdec-fpmax without-ffs-kprototypes --workers 4
+uv run mvdec-fpmax without-ffs-intuitive --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-best --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-exhaustive-best --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-best --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-exhaustive-best --param-workers 3
+uv run mvdec-fpmax without-ffs-intuitive-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-paper-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-exhaustive-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-paper-exhaustive-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-paper-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-exhaustive-native --workers 4 --param-workers 1
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-paper-exhaustive-native --workers 4 --param-workers 1
+uv run mvdec-fpmax ffs-kprototypes --workers 4 --candidate-workers 5
+uv run mvdec-fpmax ffs-intuitive --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-best --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-exhaustive-best --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-view-weighted --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-view-weighted-best --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-view-weighted-exhaustive-best --param-workers 3
+uv run mvdec-fpmax ffs-intuitive-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-paper-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-exhaustive-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-paper-exhaustive-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-view-weighted-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-view-weighted-paper-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-view-weighted-exhaustive-native --workers 4 --candidate-workers 5 --param-workers 1
+uv run mvdec-fpmax ffs-intuitive-view-weighted-paper-exhaustive-native --workers 4 --candidate-workers 5 --param-workers 1
 ```
 
 Run only the first few jobs for a quick check:
 
 ```bash
-uv run mvdec-fpmax without-ffs --limit 2
-uv run mvdec-fpmax ffs --limit 2
+uv run mvdec-fpmax without-ffs-kprototypes --limit 2
+uv run mvdec-fpmax ffs-kprototypes --limit 2
 ```
 
-Grid modes run `(strategy, n_bins)` groups in parallel. Within each group,
-`min_support` values are processed sequentially and saved as soon as each one
-finishes. Existing output is resumed by default; add `--no-resume` to rerun the
-selected jobs from scratch.
+Grid modes run `(strategy, n_bins)` groups in parallel by default. Existing
+output is resumed by default; add `--no-resume` to rerun the selected jobs
+from scratch. `--workers` parallelizes outer grid groups. `--candidate-workers`
+parallelizes candidate feature sets inside each FFS step for `ffs-kprototypes`
+and native FFS Intuitive modes. Post-FFS modes do not perform FFS candidate
+selection, so use `--param-workers` for those modes instead.
+
+`without-ffs-intuitive` reads completed without-FFS K-Prototypes rows,
+rebuilds each exact FP-Max feature set, keeps that feature set fixed, and
+grid-searches Intuitive-K-prototypes parameters on top of each row's
+features. `ffs-intuitive` does the same for every usable K-Prototypes
+FFS-selected feature set. The `*-view-weighted` post modes keep those fixed
+feature sets but run Intuitive with an additional `alpha` grid that balances
+MVDEC latent distance against FP-Max pattern distance. The `*-best` post modes
+use two-stage Intuitive tuning and keep one best row per base result instead
+of writing one row per parameter combination. The `*-exhaustive-best` and
+`*-exhaustive-native` modes use the full Intuitive parameter grid and write to
+separate output files. `without-ffs-intuitive-native`
+runs Intuitive as the clustering backend directly inside the main grid.
+`ffs-intuitive-native` runs forward feature selection with Intuitive as the
+native evaluator, so candidate features are selected by their best Intuitive
+silhouette rather than by K-Prototypes. The `*-view-weighted-native` modes
+apply the same native logic with `alpha` inside Intuitive's clustering
+distance. When no FP-Max or FFS feature survives, the native modes keep the
+baseline score and mark rows with no FP-Max features as `baseline_no_features`.
+FFS-native rows that have candidate features but no improving feature are marked
+as `baseline_no_improvement`. FFS-native rows that have FP-Max candidates but no
+valid Intuitive candidate are marked as `baseline_no_valid_candidate`.
+
+Outputs keep only the fields needed to compare configurations: grid settings,
+final score columns, selected features, cluster sizes, Intuitive parameters
+when applicable, and status/error details. K-Prototypes FFS and native
+Intuitive FFS outputs use `final_score` as the selected-feature score.
+Post-FFS Intuitive follow-up uses `final_score` when that column is
+available. On Windows, prefer one inner parallelism axis at a time. For native
+FFS Intuitive modes, either use `--candidate-workers > 1 --param-workers 1` or
+use `--candidate-workers 1 --param-workers > 1`; the CLI rejects using both
+above 1 because that would create nested multiprocessing. A practical resume
+command is:
+
+```bash
+uv run mvdec-fpmax ffs-intuitive-native --workers 4 --candidate-workers 5 --param-workers 1
+```
+
+Native Intuitive modes without `paper` in the name use deterministic
+`farthest_first` initialization for robustness. The `*-paper-native` modes use
+the paper's Algorithm-1 initialization (`init_strategy="paper"`,
+`strict_init=True`) and write to separate output files so resume never mixes
+initialization strategies. Runtime failures that are not algorithm-defined
+statuses are not persisted; those missing `job_index` rows are retried on the
+next resume run. CSV writes are atomic, so a crash during save keeps either the
+previous complete CSV or the new complete CSV. FP-Max itemset feature names are
+sorted deterministically before FFS so repeated runs keep stable candidate
+order.
+
+The Intuitive parameter grid follows the current two-stage tuning policy used
+consistently across Intuitive modes:
+
+```text
+coarse mu_param = 0.2, 0.5, 0.8
+coarse gamma    = 0.2, 0.5, 0.8
+beta            = 2.0, 3.0, 4.0, 5.0
+refine          = mu_param/gamma +/- 0.1 around the best coarse trial
+```
+
+`beta` is not refined. Exhaustive modes use the full candidate range for
+`mu_param` and `gamma`:
+
+```text
+mu_param = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+gamma    = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+beta     = 2.0, 3.0, 4.0, 5.0
+```
+
+The view-weighted modes additionally tune `alpha` with the same coarse/refine
+logic:
+
+```text
+coarse alpha = 0.2, 0.5, 0.8
+full alpha   = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+```
 
 ## Outputs
 
@@ -134,10 +248,40 @@ Default experiment outputs are written to:
 
 ```text
 output/without_ffs_results.csv
-output/without_ffs_results.jsonl
 output/ffs_results.csv
-output/ffs_results.jsonl
+output/without_ffs_intuitive_native_results.csv
+output/without_ffs_intuitive_paper_native_results.csv
+output/without_ffs_intuitive_exhaustive_native_results.csv
+output/without_ffs_intuitive_paper_exhaustive_native_results.csv
+output/without_ffs_intuitive_view_weighted_native_results.csv
+output/without_ffs_intuitive_view_weighted_paper_native_results.csv
+output/without_ffs_intuitive_view_weighted_exhaustive_native_results.csv
+output/without_ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
+output/ffs_intuitive_native_results.csv
+output/ffs_intuitive_paper_native_results.csv
+output/ffs_intuitive_exhaustive_native_results.csv
+output/ffs_intuitive_paper_exhaustive_native_results.csv
+output/ffs_intuitive_view_weighted_native_results.csv
+output/ffs_intuitive_view_weighted_paper_native_results.csv
+output/ffs_intuitive_view_weighted_exhaustive_native_results.csv
+output/ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
+output/post_without_ffs_intuitive_results.csv
+output/post_without_ffs_intuitive_best_results.csv
+output/post_without_ffs_intuitive_exhaustive_best_results.csv
+output/post_without_ffs_intuitive_view_weighted_results.csv
+output/post_without_ffs_intuitive_view_weighted_best_results.csv
+output/post_without_ffs_intuitive_view_weighted_exhaustive_best_results.csv
+output/post_ffs_intuitive_results.csv
+output/post_ffs_intuitive_best_results.csv
+output/post_ffs_intuitive_exhaustive_best_results.csv
+output/post_ffs_intuitive_view_weighted_results.csv
+output/post_ffs_intuitive_view_weighted_best_results.csv
+output/post_ffs_intuitive_view_weighted_exhaustive_best_results.csv
 ```
+
+Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
+coarse/refine parameter trials. Summary CSV files keep only the best valid trial
+per grid row or FFS candidate selection result.
 
 The included outputs reproduce the sensitivity-analysis tables used in the
 manuscript.

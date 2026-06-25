@@ -49,15 +49,49 @@ def load_preprocessed_dataset(
     )
 
 
-def load_mvdec_result(result_path: Path = FUSED_REPRESENTATION_PATH) -> MvdecResult:
+def load_mvdec_result(
+    result_path: Path = FUSED_REPRESENTATION_PATH,
+    data_path: Path = PREPROCESSED_DATA_PATH,
+) -> MvdecResult:
     """Load the cached MvDEC result and recompute its silhouette score."""
 
     with result_path.open("rb") as file:
         best_result = pickle.load(file)
 
-    h_fused = best_result["h_fused"]
+    h_fused = np.asarray(best_result["h_fused"])
+    if h_fused.ndim != 2:
+        msg = "h_fused must be a 2D array."
+        raise ValueError(msg)
+    if h_fused.shape[1] != len(H_FUSED_COLUMNS):
+        msg = (
+            "h_fused column count does not match H_FUSED_COLUMNS: "
+            f"{h_fused.shape[1]} != {len(H_FUSED_COLUMNS)}."
+        )
+        raise ValueError(msg)
+    if not np.isfinite(h_fused).all():
+        msg = "h_fused contains NaN or infinite values."
+        raise ValueError(msg)
+
+    labels = np.asarray(best_result["labels"])
+    if labels.ndim != 1:
+        msg = "MvDEC labels must be a 1D array."
+        raise ValueError(msg)
+    if len(labels) != h_fused.shape[0]:
+        msg = (
+            "MvDEC labels length does not match h_fused rows: "
+            f"{len(labels)} != {h_fused.shape[0]}."
+        )
+        raise ValueError(msg)
+
+    preprocessed_rows = len(pd.read_csv(data_path))
+    if preprocessed_rows != h_fused.shape[0]:
+        msg = (
+            "Preprocessed dataset row count does not match h_fused rows: "
+            f"{preprocessed_rows} != {h_fused.shape[0]}."
+        )
+        raise ValueError(msg)
+
     h_fused_df = pd.DataFrame(h_fused, columns=H_FUSED_COLUMNS)
-    labels = best_result["labels"]
     score_check = silhouette_score(h_fused, labels)
 
     return MvdecResult(

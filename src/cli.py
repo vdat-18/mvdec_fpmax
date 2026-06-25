@@ -7,9 +7,44 @@ import numpy as np
 from loguru import logger
 
 from config import RANDOM_STATE
-from pipeline.clustering import run_kprototypes
+from pipeline.clustering import (
+    ClusteringBackend,
+    run_intuitive_kprototypes,
+    run_kprototypes,
+)
 from pipeline.data import load_mvdec_result, load_preprocessed_dataset
-from pipeline.experiments import run_ffs, run_without_ffs
+from pipeline.experiments import (
+    run_ffs,
+    run_ffs_intuitive_exhaustive_native,
+    run_ffs_intuitive_native,
+    run_ffs_intuitive_paper_exhaustive_native,
+    run_ffs_intuitive_paper_native,
+    run_ffs_intuitive_view_weighted_exhaustive_native,
+    run_ffs_intuitive_view_weighted_native,
+    run_ffs_intuitive_view_weighted_paper_exhaustive_native,
+    run_ffs_intuitive_view_weighted_paper_native,
+    run_post_ffs_intuitive,
+    run_post_ffs_intuitive_best,
+    run_post_ffs_intuitive_exhaustive_best,
+    run_post_ffs_intuitive_view_weighted,
+    run_post_ffs_intuitive_view_weighted_best,
+    run_post_ffs_intuitive_view_weighted_exhaustive_best,
+    run_post_without_ffs_intuitive,
+    run_post_without_ffs_intuitive_best,
+    run_post_without_ffs_intuitive_exhaustive_best,
+    run_post_without_ffs_intuitive_view_weighted,
+    run_post_without_ffs_intuitive_view_weighted_best,
+    run_post_without_ffs_intuitive_view_weighted_exhaustive_best,
+    run_without_ffs,
+    run_without_ffs_intuitive_exhaustive_native,
+    run_without_ffs_intuitive_native,
+    run_without_ffs_intuitive_paper_exhaustive_native,
+    run_without_ffs_intuitive_paper_native,
+    run_without_ffs_intuitive_view_weighted_exhaustive_native,
+    run_without_ffs_intuitive_view_weighted_native,
+    run_without_ffs_intuitive_view_weighted_paper_exhaustive_native,
+    run_without_ffs_intuitive_view_weighted_paper_native,
+)
 from pipeline.forward_selection import run_forward_selection
 from pipeline.fpmax import extract_fpmax_features
 
@@ -30,7 +65,7 @@ def run_smoke_test() -> None:
     logger.info("Silhouette (recomputed): {:.4f}", mvdec_result.score_check)
 
 
-def run_without_ffs_smoke_test() -> None:
+def run_without_ffs_smoke_test(backend: ClusteringBackend) -> None:
     """Run one without-FFS configuration for a quick correctness check."""
 
     mvdec_result = load_mvdec_result()
@@ -40,14 +75,29 @@ def run_without_ffs_smoke_test() -> None:
         strategy="kmeans",
         min_support=0.2,
     )
-    clustering = run_kprototypes(
-        continuous_df=mvdec_result.h_fused_df,
-        binary_df=fpmax_features.features,
-    )
+    if backend == "kprototypes":
+        clustering = run_kprototypes(
+            continuous_df=mvdec_result.h_fused_df,
+            binary_df=fpmax_features.features,
+        )
+    elif backend == "intuitive":
+        clustering = run_intuitive_kprototypes(
+            continuous_df=mvdec_result.h_fused_df,
+            binary_df=fpmax_features.features,
+        )
+    else:
+        msg = f"Unsupported backend: {backend!r}."
+        raise ValueError(msg)
 
     logger.info("Itemsets found: {}", len(fpmax_features.itemsets))
+    logger.info("Backend: {}", backend)
     logger.info("Binary features used: {}", len(clustering.binary_feature_names))
     logger.info("Best init: {}", clustering.init)
+    logger.info("Fit time: {:.3f}s", clustering.fit_time_seconds)
+    logger.info("Cluster sizes: {}", clustering.cluster_sizes)
+    if backend == "intuitive":
+        logger.info("Converged: {}", clustering.converged)
+        logger.info("Iterations: {}", clustering.n_iter)
     logger.info("Final silhouette: {:.4f}", clustering.score)
 
 
@@ -84,8 +134,36 @@ def parse_args() -> argparse.Namespace:
             "smoke",
             "without-ffs-smoke",
             "ffs-smoke",
-            "without-ffs",
-            "ffs",
+            "without-ffs-kprototypes",
+            "without-ffs-intuitive",
+            "without-ffs-intuitive-best",
+            "without-ffs-intuitive-exhaustive-best",
+            "without-ffs-intuitive-view-weighted",
+            "without-ffs-intuitive-view-weighted-best",
+            "without-ffs-intuitive-view-weighted-exhaustive-best",
+            "without-ffs-intuitive-native",
+            "without-ffs-intuitive-paper-native",
+            "without-ffs-intuitive-exhaustive-native",
+            "without-ffs-intuitive-paper-exhaustive-native",
+            "without-ffs-intuitive-view-weighted-native",
+            "without-ffs-intuitive-view-weighted-paper-native",
+            "without-ffs-intuitive-view-weighted-exhaustive-native",
+            "without-ffs-intuitive-view-weighted-paper-exhaustive-native",
+            "ffs-kprototypes",
+            "ffs-intuitive",
+            "ffs-intuitive-best",
+            "ffs-intuitive-exhaustive-best",
+            "ffs-intuitive-view-weighted",
+            "ffs-intuitive-view-weighted-best",
+            "ffs-intuitive-view-weighted-exhaustive-best",
+            "ffs-intuitive-native",
+            "ffs-intuitive-paper-native",
+            "ffs-intuitive-exhaustive-native",
+            "ffs-intuitive-paper-exhaustive-native",
+            "ffs-intuitive-view-weighted-native",
+            "ffs-intuitive-view-weighted-paper-native",
+            "ffs-intuitive-view-weighted-exhaustive-native",
+            "ffs-intuitive-view-weighted-paper-exhaustive-native",
         ],
         nargs="?",
         default="smoke",
@@ -98,6 +176,25 @@ def parse_args() -> argparse.Namespace:
         help="Number of parallel worker processes for grid modes.",
     )
     parser.add_argument(
+        "--param-workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of inner worker processes for Intuitive parameter configs. "
+            "Applies to Intuitive grid modes."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of inner worker processes for FFS candidate feature sets. "
+            "Use with FFS K-Prototypes and FFS native Intuitive modes. "
+            "For native Intuitive, keep --param-workers at 1 when this is above 1."
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -107,6 +204,12 @@ def parse_args() -> argparse.Namespace:
         "--no-resume",
         action="store_true",
         help="Ignore existing output files and rerun selected jobs.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["kprototypes", "intuitive"],
+        default="kprototypes",
+        help="Clustering backend for the without-FFS smoke test.",
     )
     return parser.parse_args()
 
@@ -123,10 +226,10 @@ def main() -> None:
     if args.mode == "smoke":
         run_smoke_test()
     elif args.mode == "without-ffs-smoke":
-        run_without_ffs_smoke_test()
+        run_without_ffs_smoke_test(args.backend)
     elif args.mode == "ffs-smoke":
         run_ffs_smoke_test()
-    elif args.mode == "without-ffs":
+    elif args.mode == "without-ffs-kprototypes":
         mvdec_result = load_mvdec_result()
         run_without_ffs(
             h_fused_df=mvdec_result.h_fused_df,
@@ -135,12 +238,265 @@ def main() -> None:
             limit=args.limit,
             resume=not args.no_resume,
         )
-    elif args.mode == "ffs":
+    elif args.mode == "without-ffs-intuitive":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-exhaustive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive_exhaustive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive_view_weighted(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-best":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive_view_weighted_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-exhaustive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_without_ffs_intuitive_view_weighted_exhaustive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-paper-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_paper_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-paper-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_paper_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_view_weighted_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-paper-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_view_weighted_paper_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_view_weighted_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "without-ffs-intuitive-view-weighted-paper-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_without_ffs_intuitive_view_weighted_paper_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-kprototypes":
         mvdec_result = load_mvdec_result()
         run_ffs(
             h_fused_df=mvdec_result.h_fused_df,
             baseline_score=mvdec_result.score,
             workers=args.workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-exhaustive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive_exhaustive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive_view_weighted(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-best":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive_view_weighted_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-exhaustive-best":
+        mvdec_result = load_mvdec_result()
+        run_post_ffs_intuitive_view_weighted_exhaustive_best(
+            h_fused_df=mvdec_result.h_fused_df,
+            param_workers=args.param_workers,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-paper-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_paper_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-paper-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_paper_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_view_weighted_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-paper-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_view_weighted_paper_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_view_weighted_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
+            limit=args.limit,
+            resume=not args.no_resume,
+        )
+    elif args.mode == "ffs-intuitive-view-weighted-paper-exhaustive-native":
+        mvdec_result = load_mvdec_result()
+        run_ffs_intuitive_view_weighted_paper_exhaustive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            baseline_score=mvdec_result.score,
+            workers=args.workers,
+            param_workers=args.param_workers,
+            candidate_workers=args.candidate_workers,
             limit=args.limit,
             resume=not args.no_resume,
         )

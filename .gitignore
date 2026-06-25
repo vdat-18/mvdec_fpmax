@@ -24,7 +24,7 @@ dist/
 *.egg-info/
 
 # Reference papers and large document exports
-docs/*.pdf
+# docs/*.pdf
 
 # Local environment files
 .env

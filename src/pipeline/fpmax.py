@@ -27,6 +27,15 @@ class FpmaxFeatures:
     itemsets: pd.DataFrame
 
 
+@dataclass(frozen=True)
+class FpmaxPreparedData:
+    """Discretized and one-hot encoded data reused across support values."""
+
+    discrete_df: pd.DataFrame
+    onehot: pd.DataFrame
+    numeric_cols: list[str]
+
+
 def get_numeric_columns(df: pd.DataFrame) -> list[str]:
     """Return numeric column names in dataframe order."""
 
@@ -80,6 +89,29 @@ def extract_fpmax_features(
 ) -> FpmaxFeatures:
     """Discretize numeric columns and convert FP-Max itemsets into binary features."""
 
+    prepared = prepare_fpmax_data(
+        df=df,
+        numeric_cols=numeric_cols,
+        n_bins=n_bins,
+        bin_labels=bin_labels,
+        strategy=strategy,
+    )
+    return extract_fpmax_features_from_prepared(
+        prepared=prepared,
+        min_support=min_support,
+        drop_original_numeric=drop_original_numeric,
+    )
+
+
+def prepare_fpmax_data(
+    df: pd.DataFrame,
+    numeric_cols: list[str] | None = None,
+    n_bins: int = 7,
+    bin_labels: list[str] | None = None,
+    strategy: DiscretizeStrategy = "kmeans",
+) -> FpmaxPreparedData:
+    """Discretize once and build one-hot data reusable for many support values."""
+
     if numeric_cols is None:
         numeric_cols = get_numeric_columns(df)
 
@@ -91,20 +123,45 @@ def extract_fpmax_features(
         bin_labels=bin_labels,
     )
     onehot = pd.get_dummies(df_discrete, dtype=bool)
-    itemsets = fpmax(onehot, min_support=min_support, use_colnames=True).sort_values(
-        by="support",
-        ascending=False,
+    return FpmaxPreparedData(
+        discrete_df=df_discrete,
+        onehot=onehot,
+        numeric_cols=numeric_cols,
     )
 
-    features = df_discrete.copy()
+
+def extract_fpmax_features_from_prepared(
+    prepared: FpmaxPreparedData,
+    min_support: float = 0.2,
+    drop_original_numeric: bool = True,
+) -> FpmaxFeatures:
+    """Run FP-Max on prepared data and convert itemsets into binary features."""
+
+    itemsets = fpmax(
+        prepared.onehot,
+        min_support=min_support,
+        use_colnames=True,
+    )
+    if not itemsets.empty:
+        itemsets = itemsets.assign(
+            feature_name=itemsets["itemsets"].map(lambda items: "+".join(sorted(items)))
+        ).sort_values(
+            by=["support", "feature_name"],
+            ascending=[False, True],
+        )
+
+    features = prepared.discrete_df.copy()
     if not itemsets.empty:
         new_features = {
-            "+".join(items): onehot.loc[:, list(items)].all(axis=1).astype(int)
-            for items in itemsets["itemsets"]
+            row.feature_name: prepared.onehot.loc[:, sorted(row.itemsets)]
+            .all(axis=1)
+            .astype(int)
+            for row in itemsets.itertuples(index=False)
         }
         features = pd.concat([features, pd.DataFrame(new_features)], axis=1)
+        itemsets = itemsets.drop(columns="feature_name")
 
-    if drop_original_numeric and numeric_cols:
-        features = features.drop(columns=numeric_cols)
+    if drop_original_numeric and prepared.numeric_cols:
+        features = features.drop(columns=prepared.numeric_cols)
 
     return FpmaxFeatures(features=features, itemsets=itemsets)
