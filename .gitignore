@@ -34,6 +34,11 @@ dist/
 *.log
 logs/
 
+# Downloaded public experiment datasets
+data/public/raw/
+data/public/processed/
+!data/public/README.md
+
 # OS and editors
 .DS_Store
 Thumbs.db

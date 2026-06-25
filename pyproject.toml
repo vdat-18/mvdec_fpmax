@@ -17,6 +17,11 @@ dependencies = [
     "seaborn",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "torch",
+]
+
 [project.scripts]
 mvdec-fpmax = "cli:main"
 

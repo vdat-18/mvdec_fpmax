@@ -1,0 +1,96 @@
+{
+  "raw_root": "data/public/raw",
+  "processed_root": "data/public/processed",
+  "datasets": [
+    {
+      "name": "uci_gas_sensor_drift",
+      "title": "UCI Gas Sensor Array Drift at Different Concentrations",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/270/gas+sensor+array+drift+dataset+at+different+concentrations.zip",
+      "parser": "gas_sensor_drift",
+      "n_clusters": 6,
+      "priority": "main"
+    },
+    {
+      "name": "uci_sensorless_drive",
+      "title": "UCI Dataset for Sensorless Drive Diagnosis",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/325/dataset+for+sensorless+drive+diagnosis.zip",
+      "parser": "sensorless_drive",
+      "n_clusters": 11,
+      "priority": "main"
+    },
+    {
+      "name": "uci_wine_quality",
+      "title": "UCI Wine Quality",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/186/wine+quality.zip",
+      "parser": "wine_quality",
+      "n_clusters": 7,
+      "priority": "main"
+    },
+    {
+      "name": "uci_seeds",
+      "title": "UCI Seeds",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/236/seeds.zip",
+      "parser": "seeds",
+      "n_clusters": 3,
+      "priority": "main"
+    },
+    {
+      "name": "uci_wine",
+      "title": "UCI Wine",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/109/wine.zip",
+      "parser": "wine",
+      "n_clusters": 3,
+      "priority": "main"
+    },
+    {
+      "name": "uci_wdbc",
+      "title": "UCI Breast Cancer Wisconsin Diagnostic",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/17/breast+cancer+wisconsin+diagnostic.zip",
+      "parser": "wdbc",
+      "n_clusters": 2,
+      "priority": "main"
+    },
+    {
+      "name": "uci_sonar",
+      "title": "UCI Sonar Mines vs Rocks",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/151/connectionist+bench+sonar+mines+vs+rocks.zip",
+      "parser": "sonar",
+      "n_clusters": 2,
+      "priority": "main"
+    },
+    {
+      "name": "uci_parkinsons",
+      "title": "UCI Parkinsons",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/174/parkinsons.zip",
+      "parser": "parkinsons",
+      "n_clusters": 2,
+      "priority": "main"
+    },
+    {
+      "name": "uci_glass",
+      "title": "UCI Glass Identification",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/42/glass+identification.zip",
+      "parser": "glass",
+      "n_clusters": 6,
+      "priority": "main"
+    },
+    {
+      "name": "uci_libras",
+      "title": "UCI Libras Movement",
+      "source": "UCI Machine Learning Repository",
+      "url": "https://archive.ics.uci.edu/static/public/181/libras+movement.zip",
+      "parser": "libras",
+      "n_clusters": 15,
+      "priority": "main"
+    }
+  ]
+}

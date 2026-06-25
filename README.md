@@ -18,6 +18,7 @@ data/
   preprocessed_data/
     tiki_preprocessed.csv        # 1,799 x 7 preprocessed Tiki features
     fused_representation.pkl     # cached MvDEC fused representation
+  public/                        # reproducible public dataset workspace
   raw_data/
     seller_store_urls.csv        # seller storefront URLs used during collection
 output/
@@ -46,6 +47,39 @@ representation-learning stage is expected to run in Google Colab with a GPU
 runtime enabled.
 
 ## Workflow
+
+### 0. Public Dataset Benchmarks
+
+Public continuous-feature benchmarks are managed by a dataset registry and a
+fetch script. Raw downloads and standardized processed files are created under
+`data/public/` and are ignored by git to keep the repository clean.
+
+```bash
+uv run python scripts/fetch_public_datasets.py
+```
+
+The registry is stored at:
+
+```text
+configs/public_datasets.json
+```
+
+Each processed dataset is written as:
+
+```text
+data/public/processed/<dataset_name>/
+  X.csv          # numeric continuous features only
+  y.csv          # labels/sample metadata for external evaluation only
+  views.json     # natural or constructed feature views
+  metadata.json  # source, parser, cleaning notes, n_clusters, shape
+```
+
+Use `X.csv` as clustering input. Do not feed `y.csv` into clustering; it is only
+for external evaluation or auditing. To fetch a subset first, run:
+
+```bash
+uv run python scripts/fetch_public_datasets.py --datasets uci_seeds uci_wine
+```
 
 ### 1. Data Preprocessing
 
