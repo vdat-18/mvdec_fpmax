@@ -115,8 +115,19 @@ def parse_args() -> argparse.Namespace:
         "--modes",
         nargs="+",
         default=("mvdec", "fused-kmeans"),
-        choices=("mvdec", "fused-kmeans"),
-        help="Method modes to run. Defaults to mvdec and fused-kmeans.",
+        choices=(
+            "mvdec",
+            "fused-kmeans",
+            "fused-only-kmeans",
+            "legacy-fused-kmeans",
+            "legacy-notebook",
+        ),
+        help=(
+            "Method modes to run. fused-only-kmeans clusters the fused "
+            "representation directly without L3/L4; legacy-fused-kmeans uses "
+            "the Tiki notebook dims in PyTorch; legacy-notebook runs the "
+            "TensorFlow notebook logic."
+        ),
     )
     parser.add_argument(
         "--orthonormal-weight",
@@ -198,6 +209,23 @@ def selection_score(result) -> float:
     score = float(result.silhouette)
     return score if math.isfinite(score) else float("-inf")
 
+def mode_config(config, method_mode: str, kmeans_init: str):
+    """Return mode-specific configuration."""
+
+    config = replace(config, method_mode=method_mode, kmeans_init=kmeans_init)
+    if method_mode in {"legacy-fused-kmeans", "legacy-notebook"}:
+        config = replace(
+            config,
+            architecture="legacy_notebook",
+            hidden_dims=(250, 250, 1000),
+            latent_dim=4,
+            learning_rate=1e-4,
+            batch_size=128,
+            pretrain_epochs=100,
+            kmeans_n_init=10,
+        )
+    return config
+
 
 def main() -> None:
     """Run MvDEC paper baselines and save one Excel workbook."""
@@ -216,6 +244,7 @@ def main() -> None:
         metadata_frame,
         resolve_processed_root,
         run_fused_kmeans_baseline,
+        run_legacy_notebook_baseline,
         run_mvdec_paper_baseline,
         selected_datasets,
         write_workbook,
@@ -245,17 +274,21 @@ def main() -> None:
         )
         candidate_results = []
         for method_mode in args.modes:
-            runner = (
-                run_fused_kmeans_baseline
-                if method_mode == "fused-kmeans"
-                else run_mvdec_paper_baseline
-            )
-            for kmeans_init in args.kmeans_inits:
-                candidate_config = replace(
-                    config,
-                    method_mode=method_mode,
-                    kmeans_init=kmeans_init,
-                )
+            if method_mode == "legacy-notebook":
+                runner = run_legacy_notebook_baseline
+                kmeans_inits = (args.kmeans_inits[0],)
+            elif method_mode in {
+                "fused-kmeans",
+                "fused-only-kmeans",
+                "legacy-fused-kmeans",
+            }:
+                runner = run_fused_kmeans_baseline
+                kmeans_inits = args.kmeans_inits
+            else:
+                runner = run_mvdec_paper_baseline
+                kmeans_inits = args.kmeans_inits
+            for kmeans_init in kmeans_inits:
+                candidate_config = mode_config(config, method_mode, kmeans_init)
                 logger.info(
                     "Running {} mode={} K-Means init={}",
                     dataset["name"],

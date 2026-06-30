@@ -34,7 +34,14 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only
 
 KMeansInit = Literal["k-means++", "random"]
 LossReduction = Literal["sum"]
-MethodMode = Literal["mvdec", "fused-kmeans"]
+MethodMode = Literal[
+    "mvdec",
+    "fused-kmeans",
+    "fused-only-kmeans",
+    "legacy-fused-kmeans",
+    "legacy-notebook",
+]
+ArchitectureMode = Literal["paper", "legacy_notebook"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +50,7 @@ class MvDECPaperConfig:
 
     paper_strict: bool = False
     method_mode: MethodMode = "mvdec"
+    architecture: ArchitectureMode = "paper"
     hidden_dims: tuple[int, ...] = (500, 500, 2000)
     latent_dim: int = 10
     learning_rate: float = 1e-3
@@ -170,33 +178,38 @@ class TabularUNetAutoencoder(nn.Module):
         hidden_dims: tuple[int, ...],
         latent_dim: int,
         dropout: float,
+        architecture: ArchitectureMode,
     ) -> None:
         super().__init__()
         del hidden_dims
         embedding_dim = input_dim + latent_dim
-        self.e1 = nn.Sequential(*_dense_block(input_dim, 64, dropout))
-        self.e2 = nn.Sequential(*_dense_block(64, 64, dropout))
-        self.e3 = nn.Sequential(*_dense_block(64, 128, dropout))
-        self.e4 = nn.Sequential(*_dense_block(128, 128, dropout))
-        self.e5 = nn.Sequential(*_dense_block(128, 256, dropout))
-        self.e6 = nn.Sequential(*_dense_block(256, 256, dropout))
-        self.e7 = nn.Sequential(*_dense_block(256, 512, dropout))
-        self.e8 = nn.Sequential(*_dense_block(512, 512, dropout))
-        self.e9 = nn.Sequential(*_dense_block(512, 1024, dropout))
-        self.e10 = nn.Sequential(*_dense_block(1024, 512, dropout))
-        self.e11 = nn.Sequential(*_dense_block(512, 256, dropout))
+        self.architecture = architecture
+        dims = _unet_dims(architecture)
+        self.e1 = nn.Sequential(*_dense_block(input_dim, dims[0], dropout))
+        self.e2 = nn.Sequential(*_dense_block(dims[0], dims[1], dropout))
+        self.e3 = nn.Sequential(*_dense_block(dims[1], dims[2], dropout))
+        self.e4 = nn.Sequential(*_dense_block(dims[2], dims[3], dropout))
+        self.e5 = nn.Sequential(*_dense_block(dims[3], dims[4], dropout))
+        self.e6 = nn.Sequential(*_dense_block(dims[4], dims[5], dropout))
+        self.e7 = nn.Sequential(*_dense_block(dims[5], dims[6], dropout))
+        self.e8 = nn.Sequential(*_dense_block(dims[6], dims[7], dropout))
+        self.e9 = nn.Sequential(*_dense_block(dims[7], dims[8], dropout))
+        self.e10 = nn.Sequential(*_dense_block(dims[8], dims[9], dropout))
+        self.e11 = nn.Sequential(*_dense_block(dims[9], dims[10], dropout))
 
-        self.d1 = nn.Sequential(*_dense_block(512 + 256, 512, dropout))
-        self.d2 = nn.Sequential(*_dense_block(512, 256, dropout))
-        self.d3 = nn.Sequential(*_dense_block(256, 128, dropout))
-        self.d4 = nn.Sequential(*_dense_block(256 + 128, 256, dropout))
-        self.d5 = nn.Sequential(*_dense_block(256, 128, dropout))
-        self.d6 = nn.Sequential(*_dense_block(128, 64, dropout))
-        self.d7 = nn.Sequential(*_dense_block(128 + 64, 128, dropout))
-        self.d8 = nn.Sequential(*_dense_block(128, 64, dropout))
-        self.d9 = nn.Sequential(*_dense_block(64, 32, dropout))
-        self.d10 = nn.Sequential(*_dense_block(64 + 32, 64, dropout))
-        self.to_embedding = nn.Linear(64, embedding_dim)
+        self.d1 = nn.Sequential(*_dense_block(dims[7] + dims[10], dims[9], dropout))
+        self.d2 = nn.Sequential(*_dense_block(dims[9], dims[10], dropout))
+        self.d3 = nn.Sequential(*_dense_block(dims[10], dims[3], dropout))
+        self.d4 = nn.Sequential(*_dense_block(dims[5] + dims[3], dims[5], dropout))
+        self.d5 = nn.Sequential(*_dense_block(dims[5], dims[3], dropout))
+        self.d6 = nn.Sequential(*_dense_block(dims[3], dims[1], dropout))
+        self.d7 = nn.Sequential(*_dense_block(dims[2] + dims[1], dims[2], dropout))
+        self.d8 = nn.Sequential(*_dense_block(dims[2], dims[1], dropout))
+        self.d9 = nn.Sequential(*_dense_block(dims[1], dims[0] // 2, dropout))
+        self.d10 = nn.Sequential(
+            *_dense_block(dims[0] + dims[0] // 2, dims[0], dropout)
+        )
+        self.to_embedding = nn.Linear(dims[0], embedding_dim)
         self.output = nn.Linear(embedding_dim, input_dim)
 
     def encode(self, x: Tensor) -> Tensor:
@@ -220,10 +233,12 @@ class TabularUNetAutoencoder(nn.Module):
         hidden = self.d4(torch.cat([x6, hidden], dim=1))
         hidden = self.d5(hidden)
         hidden = self.d6(hidden)
-        hidden = self.d7(torch.cat([x4, hidden], dim=1))
+        third_skip = x3 if self.architecture == "legacy_notebook" else x4
+        first_skip = x1 if self.architecture == "legacy_notebook" else x2
+        hidden = self.d7(torch.cat([third_skip, hidden], dim=1))
         hidden = self.d8(hidden)
         hidden = self.d9(hidden)
-        hidden = self.d10(torch.cat([x2, hidden], dim=1))
+        hidden = self.d10(torch.cat([first_skip, hidden], dim=1))
         return self.to_embedding(hidden)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
@@ -249,6 +264,7 @@ class MvDECPaperModel(nn.Module):
             hidden_dims=config.hidden_dims,
             latent_dim=config.latent_dim,
             dropout=config.dropout,
+            architecture=config.architecture,
         )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
@@ -279,6 +295,13 @@ def _dense_block(input_dim: int, output_dim: int, dropout: float) -> list[nn.Mod
     if dropout > 0:
         layers.append(nn.Dropout(dropout))
     return layers
+
+def _unet_dims(architecture: ArchitectureMode) -> tuple[int, ...]:
+    """Return second-view hidden widths for paper-style or legacy notebook runs."""
+
+    if architecture == "legacy_notebook":
+        return (32, 32, 64, 64, 128, 128, 256, 256, 512, 256, 128)
+    return (64, 64, 128, 128, 256, 256, 512, 512, 1024, 512, 256)
 
 
 def set_random_seed(seed: int) -> None:
@@ -868,6 +891,103 @@ def run_fused_kmeans_baseline(
         config.kmeans_init,
     ), history
 
+def run_legacy_notebook_baseline(
+    inputs: DatasetInputs,
+    config: MvDECPaperConfig,
+) -> tuple[MvDECPaperResult, pd.DataFrame, list[TrainingHistoryRow]]:
+    """Run the TensorFlow pipeline from legacy/representation.ipynb."""
+
+    from representation_learning.mvdec_representation import (  # noqa: PLC0415
+        MvDECRepresentationConfig,
+        train_mvdec_representation,
+    )
+
+    set_random_seed(config.random_state)
+    X = feature_matrix(inputs.X)
+    legacy_config = MvDECRepresentationConfig(
+        seed=config.random_state,
+        n_iterations=20,
+        n_clusters=inputs.n_clusters,
+        batch_size=128,
+        epochs=100,
+        validation_split=0.1,
+        early_stopping_patience=10,
+        learning_rate=1e-4,
+        view1_latent_dim=4,
+        kmeans_n_init=10,
+        init_methods=("k-means++", "random"),
+    )
+
+    start = perf_counter()
+    legacy_result, legacy_history = train_mvdec_representation(
+        X=X,
+        config=legacy_config,
+        expected_fused_dim=None,
+    )
+    fit_time = perf_counter() - start
+
+    embeddings = np.asarray(legacy_result["h_fused"], dtype=np.float32)
+    labels = np.asarray(legacy_result["labels"], dtype=int)
+    best_init = str(legacy_result["init"])
+    y_true = true_labels(inputs.y)
+    acc, nmi, ari = external_metrics(y_true, labels)
+    silhouette = safe_silhouette(embeddings, labels) or float("nan")
+    n_distinct_clusters = len(np.unique(labels))
+    is_degenerate = n_distinct_clusters < inputs.n_clusters
+
+    history = [
+        TrainingHistoryRow(
+            dataset=inputs.name,
+            method_mode=config.method_mode,
+            kmeans_init=str(row["init"]),
+            phase="legacy_notebook",
+            epoch=int(row["iteration"]),
+            reconstruction_loss=float("nan"),
+            kmeans_loss=None,
+            orthonormal_loss=None,
+            greedy_loss=None,
+            total_loss=float("nan"),
+            acc=None,
+            nmi=None,
+            ari=None,
+            silhouette=float(row["silhouette"]),
+            label_change_rate=None,
+        )
+        for row in legacy_history.to_dict("records")
+    ]
+
+    result = MvDECPaperResult(
+        dataset=inputs.name,
+        method_mode=config.method_mode,
+        kmeans_init=best_init,
+        selected=True,
+        acc=acc,
+        nmi=nmi,
+        ari=ari,
+        silhouette=silhouette,
+        cluster_sizes=np.bincount(labels, minlength=inputs.n_clusters)
+        .astype(int)
+        .tolist(),
+        inertia=float("nan"),
+        best_epoch=int(legacy_result["iteration"]),
+        converged=False,
+        fit_time_seconds=float(fit_time),
+        device="tensorflow",
+        status="failed_degenerate_clusters" if is_degenerate else "ok",
+        error_message=(
+            f"K-Means found {n_distinct_clusters} distinct clusters, "
+            f"expected {inputs.n_clusters}."
+            if is_degenerate
+            else None
+        ),
+    )
+    return result, make_label_frame(
+        inputs,
+        labels,
+        config.method_mode,
+        best_init,
+    ), history
+
 
 def device_description(device: torch.device) -> str:
     """Return a readable device description for logs and workbooks."""
@@ -958,7 +1078,10 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
     rows["method_mode_note"] = (
         "mvdec uses the full joint objective L1+L2+L3+L4; fused-kmeans pretrains "
         "the two autoencoders, then clusters the average fused representation "
-        "directly with K-Means."
+        "directly with K-Means; fused-only-kmeans is an explicit alias for the "
+        "same no-L3/L4 comparison; legacy-fused-kmeans uses the legacy Tiki "
+        "notebook architecture in PyTorch; legacy-notebook runs the TensorFlow "
+        "notebook pipeline with 20 representation iterations."
     )
     return pd.DataFrame(
         [{"parameter": parameter, "value": value} for parameter, value in rows.items()]
