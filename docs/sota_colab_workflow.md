@@ -141,12 +141,18 @@ data/public/processed/20news/
 data/public/processed/rcv1_10k/
 ```
 
-If the UCI public data are not present in the Colab clone, fetch them. The
-paper text datasets above are `processed_only` registry entries and should be
-copied/synced as processed folders:
+If the public data are not present in the Colab clone, fetch/rebuild them from
+the registry:
 
 ```python
 !uv run python scripts/fetch_public_datasets.py
+```
+
+To fetch only the DEKM/MvDEC text benchmarks:
+
+```python
+!uv run python scripts/fetch_public_datasets.py \
+  --datasets reuters10k 20news rcv1_10k
 ```
 
 Smoke test:

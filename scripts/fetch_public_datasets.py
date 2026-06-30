@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import shutil
+import subprocess
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import StringIO
@@ -15,6 +18,10 @@ from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 from loguru import logger
+from scipy import sparse
+from sklearn.datasets import fetch_20newsgroups_vectorized
+from sklearn.feature_selection import chi2
+from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
@@ -90,8 +97,18 @@ def download_file(url: str, output_path: Path, force: bool) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     request = Request(url, headers={"User-Agent": USER_AGENT})
     tmp_path = output_path.with_name(f"{output_path.name}.tmp")
-    with urlopen(request, timeout=180) as response, tmp_path.open("wb") as file:
-        shutil.copyfileobj(response, file)
+    try:
+        with urlopen(request, timeout=180) as response, tmp_path.open("wb") as file:
+            shutil.copyfileobj(response, file)
+    except Exception:
+        curl = shutil.which("curl") or shutil.which("curl.exe")
+        if curl is None:
+            raise
+        logger.warning("urllib download failed for {}; retrying with curl", url)
+        subprocess.run(
+            [curl, "-L", url, "-o", str(tmp_path), "--retry", "2"],
+            check=True,
+        )
     tmp_path.replace(output_path)
 
 
@@ -601,6 +618,184 @@ def parse_waveform_raw_only(extract_dir: Path) -> ProcessedDataset:
         "or generated-data policy is added."
     )
 
+def top_k_chi2_features(X: sparse.spmatrix, y: np.ndarray, k: int) -> sparse.spmatrix:
+    """Select up to k sparse text features by chi-square score."""
+
+    if X.shape[1] <= k:
+        return X
+    scores, _ = chi2(X, y)
+    scores = np.nan_to_num(scores, nan=-np.inf, posinf=-np.inf, neginf=-np.inf)
+    selected = np.argsort(scores)[-k:]
+    selected.sort()
+    return X[:, selected]
+
+def balanced_label_indices(y: np.ndarray, per_class: int) -> np.ndarray:
+    """Return first per-class indices in stable label order."""
+
+    indices: list[int] = []
+    for label in sorted(np.unique(y)):
+        label_indices = np.flatnonzero(y == label)[:per_class]
+        indices.extend(label_indices.tolist())
+    return np.asarray(indices, dtype=int)
+
+def make_text_processed_dataset(
+    X: np.ndarray,
+    y: np.ndarray,
+    dataset_name: str,
+    notes: list[str],
+) -> ProcessedDataset:
+    """Build a processed payload for 2,000-dimensional text benchmarks."""
+
+    columns = make_columns("text", X.shape[1])
+    X_df = pd.DataFrame(np.asarray(X, dtype=np.float32), columns=columns)
+    y_df = pd.DataFrame({"label": np.asarray(y, dtype=int)})
+    X_df, y_df, clean_notes = clean_X_y(X_df, y_df, dataset_name)
+    return ProcessedDataset(
+        X=X_df,
+        y=y_df,
+        views=make_auto_views(columns, n_views=2),
+        notes=[*notes, *clean_notes],
+    )
+
+def parse_reuters10k(raw_dir: Path, force: bool) -> ProcessedDataset:
+    """Fetch and parse the REUTERS-10K 2,000-dimensional text benchmark."""
+
+    train_path = raw_dir / "train.npy"
+    test_path = raw_dir / "test.npy"
+    download_file(
+        "https://huggingface.co/datasets/wwydmanski/reuters10k/resolve/main/train.npy",
+        train_path,
+        force=force,
+    )
+    download_file(
+        "https://huggingface.co/datasets/wwydmanski/reuters10k/resolve/main/test.npy",
+        test_path,
+        force=force,
+    )
+    payload = np.load(train_path, allow_pickle=True).item()
+    X = MinMaxScaler().fit_transform(payload["data"])
+    y = LabelEncoder().fit_transform(payload["label"])
+    return make_text_processed_dataset(
+        X=X,
+        y=y,
+        dataset_name="reuters10k",
+        notes=[
+            "Fetched train.npy/test.npy from Hugging Face wwydmanski/reuters10k.",
+            "Processed train.npy as the 10k benchmark split.",
+            "Features are 2,000-dimensional and min-max scaled.",
+        ],
+    )
+
+def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
+    """Fetch and parse the 2,000-sample 20 Newsgroups text benchmark."""
+
+    del force
+    cache_dir = raw_dir / "sklearn_cache"
+    data = fetch_20newsgroups_vectorized(
+        subset="all",
+        data_home=str(cache_dir),
+        remove=(),
+    )
+    y_all = data.target.astype(int)
+    selected_rows = balanced_label_indices(y_all, per_class=100)
+    X = data.data[selected_rows]
+    y = y_all[selected_rows]
+    X = top_k_chi2_features(X, y, 2000)
+    X = MaxAbsScaler().fit_transform(X).astype(np.float32)
+    return make_text_processed_dataset(
+        X=X.toarray(),
+        y=y,
+        dataset_name="20news",
+        notes=[
+            "Fetched with sklearn fetch_20newsgroups_vectorized(subset='all').",
+            "Balanced subset: first 100 documents per class, total 2,000 samples.",
+            "Selected top 2,000 features by chi-square against labels.",
+        ],
+    )
+
+def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
+    """Fetch and parse the RCV1-10K top-level four-class benchmark."""
+
+    vectors_path = raw_dir / "lyrl2004_vectors_test_pt0.dat.gz"
+    topics_path = raw_dir / "rcv1v2.topics.qrels.gz"
+    download_file(
+        "https://ndownloader.figshare.com/files/5976069",
+        vectors_path,
+        force=force,
+    )
+    download_file(
+        "https://ndownloader.figshare.com/files/5976048",
+        topics_path,
+        force=force,
+    )
+
+    classes = ("CCAT", "ECAT", "GCAT", "MCAT")
+    class_to_idx = {label: index for index, label in enumerate(classes)}
+    labels_by_doc: defaultdict[int, set[str]] = defaultdict(set)
+    with gzip.open(topics_path, "rt", encoding="latin1") as file:
+        for line in file:
+            parts = line.split()
+            if len(parts) >= 3 and parts[0] in class_to_idx and parts[2] == "1":
+                labels_by_doc[int(parts[1])].add(parts[0])
+
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+    y: list[int] = []
+    counts = {label: 0 for label in classes}
+    max_feature = 0
+    row_index = 0
+    with gzip.open(vectors_path, "rt", encoding="latin1") as file:
+        for line in file:
+            parts = line.split()
+            if not parts:
+                continue
+            doc_id = int(parts[0])
+            doc_labels = labels_by_doc.get(doc_id, set())
+            if len(doc_labels) != 1:
+                continue
+            label = next(iter(doc_labels))
+            if counts[label] >= 2500:
+                continue
+            for token in parts[1:]:
+                column, value = token.split(":", maxsplit=1)
+                column_index = int(column) - 1
+                rows.append(row_index)
+                cols.append(column_index)
+                vals.append(float(value))
+                max_feature = max(max_feature, column_index)
+            y.append(class_to_idx[label])
+            counts[label] += 1
+            row_index += 1
+            if all(count >= 2500 for count in counts.values()):
+                break
+
+    if row_index == 0:
+        msg = "No RCV1 rows were collected from the downloaded raw files."
+        raise ValueError(msg)
+    if any(count < 2500 for count in counts.values()):
+        logger.warning("RCV1-10K class counts are below target: {}", counts)
+
+    X = sparse.csr_matrix(
+        (vals, (rows, cols)),
+        shape=(row_index, max_feature + 1),
+        dtype=np.float32,
+    )
+    y_arr = np.asarray(y, dtype=int)
+    X = top_k_chi2_features(X, y_arr, 2000)
+    X = MaxAbsScaler().fit_transform(X).astype(np.float32)
+    return make_text_processed_dataset(
+        X=X.toarray(),
+        y=y_arr,
+        dataset_name="rcv1_10k",
+        notes=[
+            "Fetched RCV1 test part 0 and rcv1v2.topics.qrels from Figshare.",
+            "Kept documents with exactly one of CCAT/ECAT/GCAT/MCAT labels.",
+            f"Balanced target: 2,500 documents per class; observed counts: {counts}.",
+            "Selected top 2,000 features by chi-square against labels.",
+        ],
+    )
+
 
 PARSERS = {
     "mfeat": parse_mfeat,
@@ -622,6 +817,12 @@ PARSERS = {
     "glass": parse_glass,
     "libras": parse_libras,
     "waveform_raw_only": parse_waveform_raw_only,
+}
+
+PAPER_TEXT_PARSERS = {
+    "reuters10k": parse_reuters10k,
+    "20news": parse_20news,
+    "rcv1_10k": parse_rcv1_10k,
 }
 
 
@@ -697,6 +898,40 @@ def process_dataset(
     extract_dir = raw_dir / "extracted"
     processed_dir = processed_root / name
     archive_path = raw_dir / "source.zip"
+
+    if dataset["parser"] in PAPER_TEXT_PARSERS:
+        if raw_only:
+            PAPER_TEXT_PARSERS[dataset["parser"]](raw_dir, force=force)
+            return {
+                "name": name,
+                "status": "raw_only",
+                "n_samples": None,
+                "n_features": None,
+            }
+
+        if processed_dir.exists() and not force and (processed_dir / "X.csv").exists():
+            metadata_path = processed_dir / "metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            return {
+                "name": name,
+                "status": "exists",
+                "n_samples": metadata["n_samples"],
+                "n_features": metadata["n_features"],
+            }
+
+        if processed_dir.exists():
+            safe_rmtree(processed_dir, processed_root)
+
+        logger.info("Fetching and processing {}", name)
+        processed = PAPER_TEXT_PARSERS[dataset["parser"]](raw_dir, force=force)
+        write_processed_dataset(dataset, processed, processed_dir)
+        write_raw_metadata(dataset, raw_dir, status="downloaded", message=None)
+        return {
+            "name": name,
+            "status": "processed",
+            "n_samples": int(processed.X.shape[0]),
+            "n_features": int(processed.X.shape[1]),
+        }
 
     if dataset["parser"] == "processed_only":
         metadata_path = processed_dir / "metadata.json"
