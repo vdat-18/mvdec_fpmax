@@ -24,7 +24,6 @@ from sklearn.preprocessing import LabelEncoder
 try:
     import torch
     from torch import Tensor, nn
-    from torch.nn import functional as F
     from torch.utils.data import DataLoader, TensorDataset
 except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only envs.
     msg = (
@@ -33,7 +32,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only
     )
     raise ModuleNotFoundError(msg) from error
 
-LossReduction = Literal["mean"]
+LossReduction = Literal["sum"]
 
 
 @dataclass(frozen=True)
@@ -53,7 +52,7 @@ class MvDECPaperConfig:
     convergence_tol: float = 1e-4
     kmeans_n_init: int = 20
     kmeans_max_iter: int = 300
-    loss_reduction: LossReduction = "mean"
+    loss_reduction: LossReduction = "sum"
     reconstruction_weight: float = 1.0
     kmeans_weight: float = 1.0
     orthonormal_weight: float = 1.0
@@ -479,7 +478,12 @@ def greedy_adjustment_loss(
 
     adjusted = transformed.detach().clone()
     adjusted[:, -1] = centroids[labels, -1]
-    return F.mse_loss(transformed, adjusted)
+    return squared_distance_sum(transformed, adjusted)
+
+def squared_distance_sum(left: Tensor, right: Tensor) -> Tensor:
+    """Return the sum of squared Euclidean distances used in the paper losses."""
+
+    return torch.sum((left - right) ** 2)
 
 
 def train_pretrain_phase(
@@ -540,9 +544,12 @@ def reconstruction_pair_loss(
     reconstruction1: Tensor,
     reconstruction2: Tensor,
 ) -> Tensor:
-    """Compute the normalized reconstruction loss for both views."""
+    """Compute the paper reconstruction loss for both views."""
 
-    return F.mse_loss(reconstruction1, batch) + F.mse_loss(reconstruction2, batch)
+    return squared_distance_sum(reconstruction1, batch) + squared_distance_sum(
+        reconstruction2,
+        batch,
+    )
 
 def train_joint_phase(
     model: MvDECPaperModel,
@@ -560,9 +567,11 @@ def train_joint_phase(
     best_labels: np.ndarray | None = None
     best_embeddings: np.ndarray | None = None
     best_silhouette = -np.inf
+    best_selection_score = -np.inf
     best_epoch = 0
     stale_epochs = 0
     converged = False
+    select_by_acc = y_true is not None
     batch_size = min(config.batch_size, len(x_tensor))
     sample_indices = torch.arange(len(x_tensor), device=x_tensor.device)
 
@@ -608,11 +617,9 @@ def train_joint_phase(
             reconstruction_loss = reconstruction_pair_loss(
                 batch, reconstruction1, reconstruction2
             )
-            kmeans_loss = torch.mean(torch.sum((fused - batch_centroids) ** 2, dim=1))
+            kmeans_loss = squared_distance_sum(fused, batch_centroids)
             batch_scatter = within_class_scatter(fused, batch_labels, centroids)
-            orthonormal_loss = torch.trace(
-                transform @ batch_scatter @ transform.T
-            ) / len(batch)
+            orthonormal_loss = torch.trace(transform @ batch_scatter @ transform.T)
             transformed = fused @ transform.T
             greedy_loss = greedy_adjustment_loss(
                 transformed, batch_labels, transformed_centroids
@@ -652,8 +659,10 @@ def train_joint_phase(
             )
         )
 
-        if silhouette is not None and silhouette > best_silhouette:
-            best_silhouette = silhouette
+        selection_score = acc if select_by_acc else silhouette
+        if selection_score is not None and selection_score > best_selection_score:
+            best_selection_score = selection_score
+            best_silhouette = silhouette if silhouette is not None else float("nan")
             best_epoch = epoch
             best_labels = labels_np.copy()
             best_embeddings = embeddings_np.copy()
@@ -842,9 +851,13 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
         "within-class scatter eigenvectors, orthonormal transform, greedy loss"
     )
     rows["loss_reduction_note"] = (
-        "Paper equations are written as sums; this implementation logs and "
-        "optimizes mean-normalized mini-batch losses for consistent training across "
-        "datasets with different sample and feature counts."
+        "Losses follow the paper equations as sums of squared distances on each "
+        "mini-batch: L1 reconstruction, L2 K-Means, L3 Tr(V Sw V^T), and L4 "
+        "greedy adjustment."
+    )
+    rows["best_epoch_selection_note"] = (
+        "Datasets with ground-truth labels select the best epoch by ACC; unlabeled "
+        "datasets select the best epoch by Silhouette."
     )
     return pd.DataFrame(
         [{"parameter": parameter, "value": value} for parameter, value in rows.items()]
