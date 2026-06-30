@@ -796,6 +796,51 @@ def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
         ],
     )
 
+def parse_local_airpollution_demvk(raw_dir: Path, force: bool) -> ProcessedDataset:
+    """Export the local DEMVK air-pollution case study as paper-baseline input."""
+
+    del force
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    source_path = PROJECT_DIR / "data" / "preprocessed_data" / "data_demvk.csv"
+    if not source_path.exists():
+        msg = f"Missing local air-pollution source file: {source_path}"
+        raise FileNotFoundError(msg)
+
+    X = pd.read_csv(source_path)
+    X, _, notes = clean_X_y(X, None, "airpollution_demvk")
+    views = {
+        "satellite_no2": ["satellite_no2"],
+        "traffic_distance": [
+            "highway_primary",
+            "high_traffic",
+            "medium_traffic",
+            "low_traffic",
+        ],
+        "land_use": [
+            "landuse_industrial_variance",
+            "landuse_industrial_distance_mean",
+            "landuse_industrial_b5",
+            "landuse_residential_b5",
+            "landuse_forest_b5",
+        ],
+        "neighbour_no2": [
+            "neighbours_no2_variance",
+            "neighbours_no2_distance_mean",
+            "neighbours_no2_distance_max",
+        ],
+    }
+    return ProcessedDataset(
+        X=X,
+        y=None,
+        views=views,
+        notes=[
+            "Loaded local preprocessed Luxembourg air-pollution feature matrix.",
+            "No ground-truth labels are available; evaluate with Silhouette only.",
+            "Use n_clusters=4 following the paper's elbow-method case study.",
+            *notes,
+        ],
+    )
+
 
 PARSERS = {
     "mfeat": parse_mfeat,
@@ -823,6 +868,7 @@ PAPER_TEXT_PARSERS = {
     "reuters10k": parse_reuters10k,
     "20news": parse_20news,
     "rcv1_10k": parse_rcv1_10k,
+    "local_airpollution_demvk": parse_local_airpollution_demvk,
 }
 
 

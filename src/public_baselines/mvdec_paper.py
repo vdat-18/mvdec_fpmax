@@ -33,7 +33,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only
     )
     raise ModuleNotFoundError(msg) from error
 
-ScalerName = Literal["minmax", "standard"]
+ScalerName = Literal["none", "minmax", "standard"]
 LossReduction = Literal["mean"]
 
 
@@ -282,6 +282,8 @@ def resolve_device(device_name: str) -> torch.device:
 def scale_features(X: pd.DataFrame, scaler_name: ScalerName) -> np.ndarray:
     """Scale continuous features before neural representation learning."""
 
+    if scaler_name == "none":
+        return X.to_numpy(dtype=np.float32)
     scaler = MinMaxScaler() if scaler_name == "minmax" else StandardScaler()
     return scaler.fit_transform(X.to_numpy(dtype=np.float32)).astype(np.float32)
 
@@ -492,13 +494,14 @@ def train_pretrain_phase(
             reconstruction_loss = reconstruction_pair_loss(
                 batch, reconstruction1, reconstruction2
             )
-            variance_loss = embedding_variance_loss(
-                fused, config.embedding_variance_target
-            )
-            total_loss = (
-                reconstruction_loss
-                + config.embedding_variance_weight * variance_loss
-            )
+            total_loss = reconstruction_loss
+            if config.embedding_variance_weight > 0:
+                variance_loss = embedding_variance_loss(
+                    fused, config.embedding_variance_target
+                )
+                total_loss = (
+                    total_loss + config.embedding_variance_weight * variance_loss
+                )
             total_loss.backward()
             optimizer.step()
             reconstruction_losses.append(float(reconstruction_loss.detach().cpu()))
@@ -618,16 +621,20 @@ def train_joint_phase(
             greedy_loss = greedy_adjustment_loss(
                 transformed, batch_labels, transformed_centroids
             )
-            variance_loss = embedding_variance_loss(
-                fused, config.embedding_variance_target
-            )
             total_loss = (
                 config.reconstruction_weight * reconstruction_loss
                 + config.kmeans_weight * kmeans_loss
                 + config.orthonormal_weight * orthonormal_loss
                 + config.greedy_weight * greedy_loss
-                + config.embedding_variance_weight * variance_loss
             )
+            variance_loss = fused.new_tensor(0.0)
+            if config.embedding_variance_weight > 0:
+                variance_loss = embedding_variance_loss(
+                    fused, config.embedding_variance_target
+                )
+                total_loss = (
+                    total_loss + config.embedding_variance_weight * variance_loss
+                )
             total_loss.backward()
             optimizer.step()
 

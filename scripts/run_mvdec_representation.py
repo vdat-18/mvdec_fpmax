@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from loguru import logger
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_DIR / "src"
@@ -65,6 +66,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
+        "--scaler",
+        choices=("none", "minmax", "standard"),
+        default="none",
+        help="Scale numeric features before representation learning.",
+    )
+    parser.add_argument(
+        "--allow-dynamic-fused-dim",
+        action="store_true",
+        help=(
+            "Allow fused representation width to follow input_dim + latent_dim. "
+            "Use this for non-Tiki datasets such as air pollution."
+        ),
+    )
+    parser.add_argument(
         "--allow-cpu",
         action="store_true",
         help="Allow running without a TensorFlow-visible GPU.",
@@ -118,6 +133,14 @@ def ensure_output_paths(args: argparse.Namespace) -> None:
         msg = f"Output already exists: {joined}. Use --force to overwrite."
         raise FileExistsError(msg)
 
+def scale_feature_matrix(X, scaler_name: str):
+    """Scale feature matrix for neural representation learning."""
+
+    if scaler_name == "none":
+        return X
+    scaler = MinMaxScaler() if scaler_name == "minmax" else StandardScaler()
+    return scaler.fit_transform(X).astype(X.dtype, copy=False)
+
 
 def main() -> None:
     """Train and save the fused MvDEC representation."""
@@ -135,16 +158,20 @@ def main() -> None:
     logger.info("TensorFlow GPUs: {}", gpu_names or ["none"])
 
     df, X = load_feature_matrix(args.input)
+    X = scale_feature_matrix(X, args.scaler)
     config = build_config(args)
     logger.info("Input shape: {}", X.shape)
+    logger.info("Input scaler: {}", args.scaler)
     logger.info("Config: {}", config)
 
+    expected_fused_dim = None if args.allow_dynamic_fused_dim else len(H_FUSED_COLUMNS)
     result, history = train_mvdec_representation(
         X=X,
         config=config,
-        expected_fused_dim=len(H_FUSED_COLUMNS),
+        expected_fused_dim=expected_fused_dim,
     )
     result["input_path"] = str(args.input)
+    result["input_scaler"] = args.scaler
     result["n_samples"] = int(X.shape[0])
     result["input_dim"] = int(X.shape[1])
     result["feature_columns"] = df.columns.tolist()

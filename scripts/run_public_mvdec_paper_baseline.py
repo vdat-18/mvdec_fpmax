@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--scaler",
-        choices=("minmax", "standard"),
+        choices=("none", "minmax", "standard"),
         default=None,
         help="Override feature scaler.",
     )
@@ -142,8 +142,17 @@ def parse_args() -> argparse.Namespace:
         "--paper-strict",
         action="store_true",
         help=(
-            "Use the paper-style text benchmark defaults and, when --datasets "
-            "is omitted, run REUTERS-10K, 20NEWS, and RCV1-10K."
+            "Use paper-style defaults explicitly and, when --datasets is omitted, "
+            "run REUTERS-10K, 20NEWS, and RCV1-10K. Paper-style defaults are "
+            "also used unless --stable is passed."
+        ),
+    )
+    parser.add_argument(
+        "--stable",
+        action="store_true",
+        help=(
+            "Use a stabilized non-paper configuration with standard scaling, "
+            "reduced clustering losses, and anti-collapse variance loss."
         ),
     )
     return parser.parse_args()
@@ -152,8 +161,12 @@ def parse_args() -> argparse.Namespace:
 def build_config(args: argparse.Namespace, config_cls):
     """Build the shared MvDEC paper configuration from CLI options."""
 
-    config = config_cls(device=args.device, paper_strict=args.paper_strict)
-    if not args.paper_strict:
+    if args.paper_strict and args.stable:
+        msg = "--paper-strict and --stable are mutually exclusive."
+        raise ValueError(msg)
+
+    config = config_cls(device=args.device, paper_strict=not args.stable)
+    if args.stable:
         config = replace(
             config,
             scaler="standard",
@@ -162,7 +175,7 @@ def build_config(args: argparse.Namespace, config_cls):
             greedy_weight=0.0,
             embedding_variance_weight=0.1,
         )
-    if args.paper_strict:
+    else:
         config = replace(
             config,
             scaler="minmax",

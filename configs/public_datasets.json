@@ -3,6 +3,15 @@
   "processed_root": "data/public/processed",
   "datasets": [
     {
+      "name": "airpollution_demvk",
+      "title": "Luxembourg Air Pollution DEMVK Case Study",
+      "source": "Local preprocessed air pollution feature matrix from data/preprocessed_data/data_demvk.csv",
+      "url": "data/preprocessed_data/data_demvk.csv",
+      "parser": "local_airpollution_demvk",
+      "n_clusters": 4,
+      "priority": "paper_airpollution"
+    },
+    {
       "name": "reuters10k",
       "title": "REUTERS-10K Text Benchmark",
       "source": "Hugging Face dataset wwydmanski/reuters10k; processed locally",

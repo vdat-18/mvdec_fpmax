@@ -11,6 +11,14 @@ from sklearn.metrics import silhouette_score
 from config import FUSED_REPRESENTATION_PATH, H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 
 
+def fused_embedding_columns(n_columns: int) -> list[str]:
+    """Return stable fused embedding column names for any representation width."""
+
+    if n_columns == len(H_FUSED_COLUMNS):
+        return H_FUSED_COLUMNS
+    return [f"fused_{index}" for index in range(1, n_columns + 1)]
+
+
 @dataclass(frozen=True)
 class PreprocessedDataset:
     """Preprocessed tabular dataset used by the clustering pipeline."""
@@ -62,12 +70,6 @@ def load_mvdec_result(
     if h_fused.ndim != 2:
         msg = "h_fused must be a 2D array."
         raise ValueError(msg)
-    if h_fused.shape[1] != len(H_FUSED_COLUMNS):
-        msg = (
-            "h_fused column count does not match H_FUSED_COLUMNS: "
-            f"{h_fused.shape[1]} != {len(H_FUSED_COLUMNS)}."
-        )
-        raise ValueError(msg)
     if not np.isfinite(h_fused).all():
         msg = "h_fused contains NaN or infinite values."
         raise ValueError(msg)
@@ -91,7 +93,10 @@ def load_mvdec_result(
         )
         raise ValueError(msg)
 
-    h_fused_df = pd.DataFrame(h_fused, columns=H_FUSED_COLUMNS)
+    h_fused_df = pd.DataFrame(
+        h_fused,
+        columns=fused_embedding_columns(h_fused.shape[1]),
+    )
     score_check = silhouette_score(h_fused, labels)
 
     return MvdecResult(
