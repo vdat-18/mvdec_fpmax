@@ -19,7 +19,7 @@ from sklearn.metrics import (
     normalized_mutual_info_score,
     silhouette_score,
 )
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
+from sklearn.preprocessing import LabelEncoder
 
 try:
     import torch
@@ -33,7 +33,6 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only
     )
     raise ModuleNotFoundError(msg) from error
 
-ScalerName = Literal["none", "minmax", "standard"]
 LossReduction = Literal["mean"]
 
 
@@ -42,7 +41,6 @@ class MvDECPaperConfig:
     """Configuration shared by every public dataset run."""
 
     paper_strict: bool = False
-    scaler: ScalerName = "minmax"
     hidden_dims: tuple[int, ...] = (500, 500, 2000)
     latent_dim: int = 10
     learning_rate: float = 1e-3
@@ -60,8 +58,6 @@ class MvDECPaperConfig:
     kmeans_weight: float = 1.0
     orthonormal_weight: float = 1.0
     greedy_weight: float = 1.0
-    embedding_variance_weight: float = 0.0
-    embedding_variance_target: float = 0.1
     random_state: int = 42
     device: str = "auto"
 
@@ -152,7 +148,9 @@ class DenseAutoencoder(nn.Module):
         """Return reconstruction and latent representation."""
 
         z = self.encode(x)
-        return self.decoder(z), z
+        reconstruction = self.decoder(z)
+        embedding = torch.cat([z, reconstruction], dim=1)
+        return reconstruction, embedding
 
 
 class TabularUNetAutoencoder(nn.Module):
@@ -166,47 +164,65 @@ class TabularUNetAutoencoder(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
-        self.encoder_blocks = nn.ModuleList()
-        previous_dim = input_dim
-        for hidden_dim in hidden_dims:
-            self.encoder_blocks.append(
-                nn.Sequential(*_dense_block(previous_dim, hidden_dim, dropout))
-            )
-            previous_dim = hidden_dim
-        self.to_latent = nn.Linear(previous_dim, latent_dim)
+        del hidden_dims
+        embedding_dim = input_dim + latent_dim
+        self.e1 = nn.Sequential(*_dense_block(input_dim, 64, dropout))
+        self.e2 = nn.Sequential(*_dense_block(64, 64, dropout))
+        self.e3 = nn.Sequential(*_dense_block(64, 128, dropout))
+        self.e4 = nn.Sequential(*_dense_block(128, 128, dropout))
+        self.e5 = nn.Sequential(*_dense_block(128, 256, dropout))
+        self.e6 = nn.Sequential(*_dense_block(256, 256, dropout))
+        self.e7 = nn.Sequential(*_dense_block(256, 512, dropout))
+        self.e8 = nn.Sequential(*_dense_block(512, 512, dropout))
+        self.e9 = nn.Sequential(*_dense_block(512, 1024, dropout))
+        self.e10 = nn.Sequential(*_dense_block(1024, 512, dropout))
+        self.e11 = nn.Sequential(*_dense_block(512, 256, dropout))
 
-        self.decoder_blocks = nn.ModuleList()
-        previous_dim = latent_dim
-        for hidden_dim in reversed(hidden_dims):
-            self.decoder_blocks.append(
-                nn.Sequential(
-                    *_dense_block(previous_dim + hidden_dim, hidden_dim, dropout)
-                )
-            )
-            previous_dim = hidden_dim
-        self.output = nn.Linear(previous_dim, input_dim)
+        self.d1 = nn.Sequential(*_dense_block(512 + 256, 512, dropout))
+        self.d2 = nn.Sequential(*_dense_block(512, 256, dropout))
+        self.d3 = nn.Sequential(*_dense_block(256, 128, dropout))
+        self.d4 = nn.Sequential(*_dense_block(256 + 128, 256, dropout))
+        self.d5 = nn.Sequential(*_dense_block(256, 128, dropout))
+        self.d6 = nn.Sequential(*_dense_block(128, 64, dropout))
+        self.d7 = nn.Sequential(*_dense_block(128 + 64, 128, dropout))
+        self.d8 = nn.Sequential(*_dense_block(128, 64, dropout))
+        self.d9 = nn.Sequential(*_dense_block(64, 32, dropout))
+        self.d10 = nn.Sequential(*_dense_block(64 + 32, 64, dropout))
+        self.to_embedding = nn.Linear(64, embedding_dim)
+        self.output = nn.Linear(embedding_dim, input_dim)
 
     def encode(self, x: Tensor) -> Tensor:
         """Return the second-view latent representation."""
 
-        for block in self.encoder_blocks:
-            x = block(x)
-        return self.to_latent(x)
+        x1 = self.e1(x)
+        x2 = self.e2(x1)
+        x3 = self.e3(x2)
+        x4 = self.e4(x3)
+        x5 = self.e5(x4)
+        x6 = self.e6(x5)
+        x7 = self.e7(x6)
+        x8 = self.e8(x7)
+        x9 = self.e9(x8)
+        x10 = self.e10(x9)
+        x11 = self.e11(x10)
+
+        hidden = self.d1(torch.cat([x8, x11], dim=1))
+        hidden = self.d2(hidden)
+        hidden = self.d3(hidden)
+        hidden = self.d4(torch.cat([x6, hidden], dim=1))
+        hidden = self.d5(hidden)
+        hidden = self.d6(hidden)
+        hidden = self.d7(torch.cat([x4, hidden], dim=1))
+        hidden = self.d8(hidden)
+        hidden = self.d9(hidden)
+        hidden = self.d10(torch.cat([x2, hidden], dim=1))
+        return self.to_embedding(hidden)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return reconstruction and latent representation."""
 
-        skips = []
-        hidden = x
-        for block in self.encoder_blocks:
-            hidden = block(hidden)
-            skips.append(hidden)
-
-        z = self.to_latent(hidden)
-        hidden = z
-        for block, skip in zip(self.decoder_blocks, reversed(skips), strict=True):
-            hidden = block(torch.cat([hidden, skip], dim=1))
-        return self.output(hidden), z
+        embedding = self.encode(x)
+        return self.output(embedding), embedding
 
 
 class MvDECPaperModel(nn.Module):
@@ -279,13 +295,10 @@ def resolve_device(device_name: str) -> torch.device:
     return device
 
 
-def scale_features(X: pd.DataFrame, scaler_name: ScalerName) -> np.ndarray:
-    """Scale continuous features before neural representation learning."""
+def feature_matrix(X: pd.DataFrame) -> np.ndarray:
+    """Return the already-preprocessed numeric feature matrix."""
 
-    if scaler_name == "none":
-        return X.to_numpy(dtype=np.float32)
-    scaler = MinMaxScaler() if scaler_name == "minmax" else StandardScaler()
-    return scaler.fit_transform(X.to_numpy(dtype=np.float32)).astype(np.float32)
+    return X.to_numpy(dtype=np.float32)
 
 
 def load_registry(config_path: Path) -> dict:
@@ -490,18 +503,11 @@ def train_pretrain_phase(
         total_losses = []
         for (batch,) in loader:
             optimizer.zero_grad(set_to_none=True)
-            reconstruction1, reconstruction2, _, _, fused = model(batch)
+            reconstruction1, reconstruction2, *_ = model(batch)
             reconstruction_loss = reconstruction_pair_loss(
                 batch, reconstruction1, reconstruction2
             )
             total_loss = reconstruction_loss
-            if config.embedding_variance_weight > 0:
-                variance_loss = embedding_variance_loss(
-                    fused, config.embedding_variance_target
-                )
-                total_loss = (
-                    total_loss + config.embedding_variance_weight * variance_loss
-                )
             total_loss.backward()
             optimizer.step()
             reconstruction_losses.append(float(reconstruction_loss.detach().cpu()))
@@ -537,15 +543,6 @@ def reconstruction_pair_loss(
     """Compute the normalized reconstruction loss for both views."""
 
     return F.mse_loss(reconstruction1, batch) + F.mse_loss(reconstruction2, batch)
-
-def embedding_variance_loss(embedding: Tensor, target_std: float) -> Tensor:
-    """Penalize collapsed mini-batch embeddings with near-zero variance."""
-
-    if len(embedding) <= 1 or target_std <= 0:
-        return embedding.new_tensor(0.0)
-    std = torch.sqrt(embedding.var(dim=0, unbiased=False) + 1e-6)
-    return torch.mean(F.relu(target_std - std) ** 2)
-
 
 def train_joint_phase(
     model: MvDECPaperModel,
@@ -601,7 +598,6 @@ def train_joint_phase(
             "kmeans": [],
             "orthonormal": [],
             "greedy": [],
-            "variance": [],
             "total": [],
         }
         for batch, batch_indices in loader:
@@ -627,14 +623,6 @@ def train_joint_phase(
                 + config.orthonormal_weight * orthonormal_loss
                 + config.greedy_weight * greedy_loss
             )
-            variance_loss = fused.new_tensor(0.0)
-            if config.embedding_variance_weight > 0:
-                variance_loss = embedding_variance_loss(
-                    fused, config.embedding_variance_target
-                )
-                total_loss = (
-                    total_loss + config.embedding_variance_weight * variance_loss
-                )
             total_loss.backward()
             optimizer.step()
 
@@ -644,7 +632,6 @@ def train_joint_phase(
             epoch_losses["kmeans"].append(float(kmeans_loss.detach().cpu()))
             epoch_losses["orthonormal"].append(float(orthonormal_loss.detach().cpu()))
             epoch_losses["greedy"].append(float(greedy_loss.detach().cpu()))
-            epoch_losses["variance"].append(float(variance_loss.detach().cpu()))
             epoch_losses["total"].append(float(total_loss.detach().cpu()))
 
         history.append(
@@ -727,9 +714,9 @@ def run_mvdec_paper_baseline(
 
     set_random_seed(config.random_state)
     device = resolve_device(config.device)
-    x_scaled = scale_features(inputs.X, config.scaler)
-    x_tensor = torch.as_tensor(x_scaled, dtype=torch.float32, device=device)
-    model = MvDECPaperModel(input_dim=x_scaled.shape[1], config=config).to(device)
+    X = feature_matrix(inputs.X)
+    x_tensor = torch.as_tensor(X, dtype=torch.float32, device=device)
+    model = MvDECPaperModel(input_dim=X.shape[1], config=config).to(device)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=config.learning_rate,
@@ -856,7 +843,7 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
     )
     rows["loss_reduction_note"] = (
         "Paper equations are written as sums; this implementation logs and "
-        "optimizes mean-normalized mini-batch losses for stable training across "
+        "optimizes mean-normalized mini-batch losses for consistent training across "
         "datasets with different sample and feature counts."
     )
     return pd.DataFrame(
