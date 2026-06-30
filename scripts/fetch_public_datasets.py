@@ -841,6 +841,30 @@ def parse_local_airpollution_demvk(raw_dir: Path, force: bool) -> ProcessedDatas
         ],
     )
 
+def parse_local_tiki(raw_dir: Path, force: bool) -> ProcessedDataset:
+    """Export the local preprocessed Tiki dataset as paper-baseline input."""
+
+    del force
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    source_path = PROJECT_DIR / "data" / "preprocessed_data" / "tiki_preprocessed.csv"
+    if not source_path.exists():
+        msg = f"Missing local Tiki source file: {source_path}"
+        raise FileNotFoundError(msg)
+
+    X = pd.read_csv(source_path)
+    X, _, notes = clean_X_y(X, None, "tiki")
+    return ProcessedDataset(
+        X=X,
+        y=None,
+        views={"all_features": X.columns.tolist()},
+        notes=[
+            "Loaded local preprocessed Tiki feature matrix.",
+            "No ground-truth labels are available; evaluate with Silhouette only.",
+            "Use n_clusters=5 as requested for the Tiki experiment.",
+            *notes,
+        ],
+    )
+
 
 PARSERS = {
     "mfeat": parse_mfeat,
@@ -869,6 +893,7 @@ PAPER_TEXT_PARSERS = {
     "20news": parse_20news,
     "rcv1_10k": parse_rcv1_10k,
     "local_airpollution_demvk": parse_local_airpollution_demvk,
+    "local_tiki": parse_local_tiki,
 }
 
 

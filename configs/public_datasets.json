@@ -12,6 +12,15 @@
       "priority": "paper_airpollution"
     },
     {
+      "name": "tiki",
+      "title": "Tiki Preprocessed Seller Dataset",
+      "source": "Local preprocessed Tiki feature matrix from data/preprocessed_data/tiki_preprocessed.csv",
+      "url": "data/preprocessed_data/tiki_preprocessed.csv",
+      "parser": "local_tiki",
+      "n_clusters": 5,
+      "priority": "paper_style_unlabeled"
+    },
+    {
       "name": "reuters10k",
       "title": "REUTERS-10K Text Benchmark",
       "source": "Hugging Face dataset wwydmanski/reuters10k; processed locally",
