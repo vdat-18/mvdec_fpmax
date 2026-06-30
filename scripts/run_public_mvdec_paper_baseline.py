@@ -117,16 +117,17 @@ def parse_args() -> argparse.Namespace:
         default=("mvdec", "fused-kmeans"),
         choices=(
             "mvdec",
+            "legacy-dims-mvdec",
+            "l1-l2-mvdec",
             "fused-kmeans",
             "fused-only-kmeans",
             "legacy-fused-kmeans",
             "legacy-notebook",
         ),
         help=(
-            "Method modes to run. fused-only-kmeans clusters the fused "
-            "representation directly without L3/L4; legacy-fused-kmeans uses "
-            "the Tiki notebook dims in PyTorch; legacy-notebook runs the "
-            "TensorFlow notebook logic."
+            "Method modes to run. legacy-dims-mvdec is full MvDEC with the "
+            "Tiki notebook dims; l1-l2-mvdec keeps only reconstruction and "
+            "K-Means losses; legacy-notebook runs the TensorFlow notebook logic."
         ),
     )
     parser.add_argument(
@@ -213,17 +214,27 @@ def mode_config(config, method_mode: str, kmeans_init: str):
     """Return mode-specific configuration."""
 
     config = replace(config, method_mode=method_mode, kmeans_init=kmeans_init)
-    if method_mode in {"legacy-fused-kmeans", "legacy-notebook"}:
+    if method_mode in {
+        "legacy-dims-mvdec",
+        "legacy-fused-kmeans",
+        "legacy-notebook",
+    }:
         config = replace(
             config,
             architecture="legacy_notebook",
             hidden_dims=(250, 250, 1000),
             latent_dim=4,
+        )
+    if method_mode in {"legacy-fused-kmeans", "legacy-notebook"}:
+        config = replace(
+            config,
             learning_rate=1e-4,
             batch_size=128,
             pretrain_epochs=100,
             kmeans_n_init=10,
         )
+    if method_mode == "l1-l2-mvdec":
+        config = replace(config, orthonormal_weight=0.0, greedy_weight=0.0)
     return config
 
 

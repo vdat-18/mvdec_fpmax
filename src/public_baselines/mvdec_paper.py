@@ -36,6 +36,8 @@ KMeansInit = Literal["k-means++", "random"]
 LossReduction = Literal["sum"]
 MethodMode = Literal[
     "mvdec",
+    "legacy-dims-mvdec",
+    "l1-l2-mvdec",
     "fused-kmeans",
     "fused-only-kmeans",
     "legacy-fused-kmeans",
@@ -608,6 +610,8 @@ def train_joint_phase(
     select_by_acc = y_true is not None
     batch_size = min(config.batch_size, len(x_tensor))
     sample_indices = torch.arange(len(x_tensor), device=x_tensor.device)
+    use_orthonormal = config.orthonormal_weight != 0.0
+    use_greedy = config.greedy_weight != 0.0
 
     for epoch in range(1, config.joint_epochs + 1):
         embeddings = model.encode_fused(x_tensor, batch_size=batch_size)
@@ -620,10 +624,13 @@ def train_joint_phase(
         centroids = torch.as_tensor(
             kmeans.cluster_centers_, dtype=embeddings.dtype, device=x_tensor.device
         )
-        scatter = within_class_scatter(embeddings.detach(), labels_all, centroids)
-        transform, _ = orthonormal_transform(scatter)
-        transform = transform.detach()
-        transformed_centroids = centroids @ transform.T
+        transform = None
+        transformed_centroids = None
+        if use_orthonormal or use_greedy:
+            scatter = within_class_scatter(embeddings.detach(), labels_all, centroids)
+            transform, _ = orthonormal_transform(scatter)
+            transform = transform.detach()
+            transformed_centroids = centroids @ transform.T
 
         acc, nmi, ari = external_metrics(y_true, labels_np)
         silhouette = safe_silhouette(embeddings_np, labels_np)
@@ -652,12 +659,22 @@ def train_joint_phase(
                 batch, reconstruction1, reconstruction2
             )
             kmeans_loss = squared_distance_sum(fused, batch_centroids)
-            batch_scatter = within_class_scatter(fused, batch_labels, centroids)
-            orthonormal_loss = torch.trace(transform @ batch_scatter @ transform.T)
-            transformed = fused @ transform.T
-            greedy_loss = greedy_adjustment_loss(
-                transformed, batch_labels, transformed_centroids
-            )
+            orthonormal_loss = fused.new_zeros(())
+            greedy_loss = fused.new_zeros(())
+            if use_orthonormal or use_greedy:
+                if transform is None or transformed_centroids is None:
+                    msg = "Missing orthonormal transform for L3/L4 objective."
+                    raise RuntimeError(msg)
+                if use_orthonormal:
+                    batch_scatter = within_class_scatter(fused, batch_labels, centroids)
+                    orthonormal_loss = torch.trace(
+                        transform @ batch_scatter @ transform.T
+                    )
+                if use_greedy:
+                    transformed = fused @ transform.T
+                    greedy_loss = greedy_adjustment_loss(
+                        transformed, batch_labels, transformed_centroids
+                    )
             total_loss = (
                 config.reconstruction_weight * reconstruction_loss
                 + config.kmeans_weight * kmeans_loss
@@ -1076,12 +1093,14 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
         "trial with selected=True."
     )
     rows["method_mode_note"] = (
-        "mvdec uses the full joint objective L1+L2+L3+L4; fused-kmeans pretrains "
-        "the two autoencoders, then clusters the average fused representation "
-        "directly with K-Means; fused-only-kmeans is an explicit alias for the "
-        "same no-L3/L4 comparison; legacy-fused-kmeans uses the legacy Tiki "
-        "notebook architecture in PyTorch; legacy-notebook runs the TensorFlow "
-        "notebook pipeline with 20 representation iterations."
+        "mvdec uses the full joint objective L1+L2+L3+L4 with paper-style dims; "
+        "legacy-dims-mvdec uses full L1+L2+L3+L4 with the legacy Tiki notebook "
+        "dims; l1-l2-mvdec uses joint training with only reconstruction and "
+        "K-Means losses; fused-kmeans/fused-only-kmeans pretrain the two "
+        "autoencoders, then cluster the average fused representation directly; "
+        "legacy-fused-kmeans does the same direct K-Means comparison with legacy "
+        "dims; legacy-notebook runs the TensorFlow notebook pipeline with 20 "
+        "representation iterations."
     )
     return pd.DataFrame(
         [{"parameter": parameter, "value": value} for parameter, value in rows.items()]
