@@ -98,6 +98,42 @@ def parse_args() -> argparse.Namespace:
         help="Override feature scaler.",
     )
     parser.add_argument(
+        "--reconstruction-weight",
+        type=float,
+        default=None,
+        help="Override reconstruction loss weight.",
+    )
+    parser.add_argument(
+        "--kmeans-weight",
+        type=float,
+        default=None,
+        help="Override K-Means loss weight.",
+    )
+    parser.add_argument(
+        "--orthonormal-weight",
+        type=float,
+        default=None,
+        help="Override orthonormal loss weight.",
+    )
+    parser.add_argument(
+        "--greedy-weight",
+        type=float,
+        default=None,
+        help="Override greedy adjustment loss weight.",
+    )
+    parser.add_argument(
+        "--embedding-variance-weight",
+        type=float,
+        default=None,
+        help="Override anti-collapse embedding variance loss weight.",
+    )
+    parser.add_argument(
+        "--embedding-variance-target",
+        type=float,
+        default=None,
+        help="Override anti-collapse embedding target standard deviation.",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="Run a short smoke configuration for code-path validation.",
@@ -117,6 +153,15 @@ def build_config(args: argparse.Namespace, config_cls):
     """Build the shared MvDEC paper configuration from CLI options."""
 
     config = config_cls(device=args.device, paper_strict=args.paper_strict)
+    if not args.paper_strict:
+        config = replace(
+            config,
+            scaler="standard",
+            kmeans_weight=0.1,
+            orthonormal_weight=0.0,
+            greedy_weight=0.0,
+            embedding_variance_weight=0.1,
+        )
     if args.paper_strict:
         config = replace(
             config,
@@ -128,6 +173,7 @@ def build_config(args: argparse.Namespace, config_cls):
             kmeans_weight=1.0,
             orthonormal_weight=1.0,
             greedy_weight=1.0,
+            embedding_variance_weight=0.0,
         )
     if args.pretrain_epochs is not None:
         config = replace(config, pretrain_epochs=args.pretrain_epochs)
@@ -139,6 +185,22 @@ def build_config(args: argparse.Namespace, config_cls):
         config = replace(config, latent_dim=args.latent_dim)
     if args.scaler is not None:
         config = replace(config, scaler=args.scaler)
+    if args.reconstruction_weight is not None:
+        config = replace(config, reconstruction_weight=args.reconstruction_weight)
+    if args.kmeans_weight is not None:
+        config = replace(config, kmeans_weight=args.kmeans_weight)
+    if args.orthonormal_weight is not None:
+        config = replace(config, orthonormal_weight=args.orthonormal_weight)
+    if args.greedy_weight is not None:
+        config = replace(config, greedy_weight=args.greedy_weight)
+    if args.embedding_variance_weight is not None:
+        config = replace(
+            config, embedding_variance_weight=args.embedding_variance_weight
+        )
+    if args.embedding_variance_target is not None:
+        config = replace(
+            config, embedding_variance_target=args.embedding_variance_target
+        )
     if args.smoke:
         config = replace(
             config,

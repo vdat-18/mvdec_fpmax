@@ -60,6 +60,8 @@ class MvDECPaperConfig:
     kmeans_weight: float = 1.0
     orthonormal_weight: float = 1.0
     greedy_weight: float = 1.0
+    embedding_variance_weight: float = 0.0
+    embedding_variance_target: float = 0.1
     random_state: int = 42
     device: str = "auto"
 
@@ -482,28 +484,38 @@ def train_pretrain_phase(
     )
     for epoch in range(1, config.pretrain_epochs + 1):
         model.train()
-        losses = []
+        reconstruction_losses = []
+        total_losses = []
         for (batch,) in loader:
             optimizer.zero_grad(set_to_none=True)
-            reconstruction1, reconstruction2, *_ = model(batch)
+            reconstruction1, reconstruction2, _, _, fused = model(batch)
             reconstruction_loss = reconstruction_pair_loss(
                 batch, reconstruction1, reconstruction2
             )
-            reconstruction_loss.backward()
+            variance_loss = embedding_variance_loss(
+                fused, config.embedding_variance_target
+            )
+            total_loss = (
+                reconstruction_loss
+                + config.embedding_variance_weight * variance_loss
+            )
+            total_loss.backward()
             optimizer.step()
-            losses.append(float(reconstruction_loss.detach().cpu()))
+            reconstruction_losses.append(float(reconstruction_loss.detach().cpu()))
+            total_losses.append(float(total_loss.detach().cpu()))
 
-        mean_loss = float(np.mean(losses))
+        mean_reconstruction_loss = float(np.mean(reconstruction_losses))
+        mean_total_loss = float(np.mean(total_losses))
         history.append(
             TrainingHistoryRow(
                 dataset=dataset_name,
                 phase="pretrain",
                 epoch=epoch,
-                reconstruction_loss=mean_loss,
+                reconstruction_loss=mean_reconstruction_loss,
                 kmeans_loss=None,
                 orthonormal_loss=None,
                 greedy_loss=None,
-                total_loss=mean_loss,
+                total_loss=mean_total_loss,
                 acc=None,
                 nmi=None,
                 ari=None,
@@ -522,6 +534,14 @@ def reconstruction_pair_loss(
     """Compute the normalized reconstruction loss for both views."""
 
     return F.mse_loss(reconstruction1, batch) + F.mse_loss(reconstruction2, batch)
+
+def embedding_variance_loss(embedding: Tensor, target_std: float) -> Tensor:
+    """Penalize collapsed mini-batch embeddings with near-zero variance."""
+
+    if len(embedding) <= 1 or target_std <= 0:
+        return embedding.new_tensor(0.0)
+    std = torch.sqrt(embedding.var(dim=0, unbiased=False) + 1e-6)
+    return torch.mean(F.relu(target_std - std) ** 2)
 
 
 def train_joint_phase(
@@ -578,6 +598,7 @@ def train_joint_phase(
             "kmeans": [],
             "orthonormal": [],
             "greedy": [],
+            "variance": [],
             "total": [],
         }
         for batch, batch_indices in loader:
@@ -597,11 +618,15 @@ def train_joint_phase(
             greedy_loss = greedy_adjustment_loss(
                 transformed, batch_labels, transformed_centroids
             )
+            variance_loss = embedding_variance_loss(
+                fused, config.embedding_variance_target
+            )
             total_loss = (
                 config.reconstruction_weight * reconstruction_loss
                 + config.kmeans_weight * kmeans_loss
                 + config.orthonormal_weight * orthonormal_loss
                 + config.greedy_weight * greedy_loss
+                + config.embedding_variance_weight * variance_loss
             )
             total_loss.backward()
             optimizer.step()
@@ -612,6 +637,7 @@ def train_joint_phase(
             epoch_losses["kmeans"].append(float(kmeans_loss.detach().cpu()))
             epoch_losses["orthonormal"].append(float(orthonormal_loss.detach().cpu()))
             epoch_losses["greedy"].append(float(greedy_loss.detach().cpu()))
+            epoch_losses["variance"].append(float(variance_loss.detach().cpu()))
             epoch_losses["total"].append(float(total_loss.detach().cpu()))
 
         history.append(
@@ -724,6 +750,8 @@ def run_mvdec_paper_baseline(
     labels = final_kmeans.labels_.astype(int)
     acc, nmi, ari = external_metrics(y_true, labels)
     silhouette = safe_silhouette(embeddings, labels) or float("nan")
+    n_distinct_clusters = len(np.unique(labels))
+    is_degenerate = n_distinct_clusters < inputs.n_clusters
 
     result = MvDECPaperResult(
         dataset=inputs.name,
@@ -739,8 +767,13 @@ def run_mvdec_paper_baseline(
         converged=converged,
         fit_time_seconds=float(fit_time),
         device=device_description(device),
-        status="ok",
-        error_message=None,
+        status="failed_degenerate_clusters" if is_degenerate else "ok",
+        error_message=(
+            f"K-Means found {n_distinct_clusters} distinct clusters, "
+            f"expected {inputs.n_clusters}."
+            if is_degenerate
+            else None
+        ),
     )
     return result, make_label_frame(inputs, labels), history
 
