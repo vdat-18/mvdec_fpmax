@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -104,6 +105,20 @@ def parse_args() -> argparse.Namespace:
         help="Override K-Means loss weight.",
     )
     parser.add_argument(
+        "--kmeans-inits",
+        nargs="+",
+        default=("k-means++", "random"),
+        choices=("k-means++", "random"),
+        help="K-Means init values to grid-search. Defaults to k-means++ and random.",
+    )
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        default=("mvdec", "fused-kmeans"),
+        choices=("mvdec", "fused-kmeans"),
+        help="Method modes to run. Defaults to mvdec and fused-kmeans.",
+    )
+    parser.add_argument(
         "--orthonormal-weight",
         type=float,
         default=None,
@@ -173,6 +188,16 @@ def build_config(args: argparse.Namespace, config_cls):
         )
     return config
 
+def selection_score(result) -> float:
+    """Return the grid-search score for one result row."""
+
+    if result.acc is not None:
+        return float(result.acc)
+    if result.silhouette is None:
+        return float("-inf")
+    score = float(result.silhouette)
+    return score if math.isfinite(score) else float("-inf")
+
 
 def main() -> None:
     """Run MvDEC paper baselines and save one Excel workbook."""
@@ -190,6 +215,7 @@ def main() -> None:
         log_device,
         metadata_frame,
         resolve_processed_root,
+        run_fused_kmeans_baseline,
         run_mvdec_paper_baseline,
         selected_datasets,
         write_workbook,
@@ -211,40 +237,95 @@ def main() -> None:
     label_frames = []
     history_rows = []
     for dataset in datasets:
-        logger.info("Running MvDEC paper baseline for {}", dataset["name"])
-        try:
-            inputs = load_dataset(dataset, processed_root)
-            result, label_frame, history = run_mvdec_paper_baseline(inputs, config)
-            label_frames.append(label_frame)
-            history_rows.extend(history)
-            logger.info(
-                "{} acc={} nmi={} ari={} silhouette={:.4f}",
-                result.dataset,
-                None if result.acc is None else round(result.acc, 4),
-                None if result.nmi is None else round(result.nmi, 4),
-                None if result.ari is None else round(result.ari, 4),
-                result.silhouette,
+        logger.info(
+            "Running MvDEC paper baseline for {} | modes={} | kmeans_inits={}",
+            dataset["name"],
+            list(args.modes),
+            list(args.kmeans_inits),
+        )
+        candidate_results = []
+        for method_mode in args.modes:
+            runner = (
+                run_fused_kmeans_baseline
+                if method_mode == "fused-kmeans"
+                else run_mvdec_paper_baseline
             )
-        except Exception as error:  # noqa: BLE001 - keep long Colab runs alive.
-            logger.exception("{} failed", dataset["name"])
-            if args.fail_fast:
-                raise
-            result = MvDECPaperResult(
-                dataset=dataset["name"],
-                acc=None,
-                nmi=None,
-                ari=None,
-                silhouette=float("nan"),
-                cluster_sizes=[],
-                inertia=float("nan"),
-                best_epoch=0,
-                converged=False,
-                fit_time_seconds=0.0,
-                device=config.device,
-                status="failed",
-                error_message=str(error),
-            )
-        results.append(result)
+            for kmeans_init in args.kmeans_inits:
+                candidate_config = replace(
+                    config,
+                    method_mode=method_mode,
+                    kmeans_init=kmeans_init,
+                )
+                logger.info(
+                    "Running {} mode={} K-Means init={}",
+                    dataset["name"],
+                    method_mode,
+                    kmeans_init,
+                )
+                try:
+                    inputs = load_dataset(dataset, processed_root)
+                    result, label_frame, history = runner(
+                        inputs,
+                        candidate_config,
+                    )
+                    label_frames.append(label_frame)
+                    history_rows.extend(history)
+                    logger.info(
+                        "{} mode={} init={} acc={} nmi={} ari={} silhouette={:.4f}",
+                        result.dataset,
+                        result.method_mode,
+                        result.kmeans_init,
+                        None if result.acc is None else round(result.acc, 4),
+                        None if result.nmi is None else round(result.nmi, 4),
+                        None if result.ari is None else round(result.ari, 4),
+                        result.silhouette,
+                    )
+                except Exception as error:  # noqa: BLE001 - keep long Colab runs alive.
+                    logger.exception(
+                        "{} mode={} init={} failed",
+                        dataset["name"],
+                        method_mode,
+                        kmeans_init,
+                    )
+                    if args.fail_fast:
+                        raise
+                    result = MvDECPaperResult(
+                        dataset=dataset["name"],
+                        method_mode=method_mode,
+                        kmeans_init=kmeans_init,
+                        selected=False,
+                        acc=None,
+                        nmi=None,
+                        ari=None,
+                        silhouette=float("nan"),
+                        cluster_sizes=[],
+                        inertia=float("nan"),
+                        best_epoch=0,
+                        converged=False,
+                        fit_time_seconds=0.0,
+                        device=candidate_config.device,
+                        status="failed",
+                        error_message=str(error),
+                    )
+                candidate_results.append(result)
+
+        best_index = max(
+            range(len(candidate_results)),
+            key=lambda index: selection_score(candidate_results[index]),
+        )
+        selected_results = [
+            replace(result, selected=index == best_index)
+            for index, result in enumerate(candidate_results)
+        ]
+        selected = selected_results[best_index]
+        logger.info(
+            "Selected {} mode={} init={} score={:.6f}",
+            selected.dataset,
+            selected.method_mode,
+            selected.kmeans_init,
+            selection_score(selected),
+        )
+        results.extend(selected_results)
         write_workbook(
             output_path=args.output,
             results=results,

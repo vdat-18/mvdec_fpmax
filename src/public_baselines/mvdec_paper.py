@@ -32,7 +32,9 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only
     )
     raise ModuleNotFoundError(msg) from error
 
+KMeansInit = Literal["k-means++", "random"]
 LossReduction = Literal["sum"]
+MethodMode = Literal["mvdec", "fused-kmeans"]
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ class MvDECPaperConfig:
     """Configuration shared by every public dataset run."""
 
     paper_strict: bool = False
+    method_mode: MethodMode = "mvdec"
     hidden_dims: tuple[int, ...] = (500, 500, 2000)
     latent_dim: int = 10
     learning_rate: float = 1e-3
@@ -50,6 +53,7 @@ class MvDECPaperConfig:
     joint_epochs: int = 200
     early_stopping_patience: int = 30
     convergence_tol: float = 1e-4
+    kmeans_init: KMeansInit = "k-means++"
     kmeans_n_init: int = 20
     kmeans_max_iter: int = 300
     loss_reduction: LossReduction = "sum"
@@ -78,6 +82,9 @@ class MvDECPaperResult:
     """Final MvDEC paper baseline result for one dataset."""
 
     dataset: str
+    method_mode: str
+    kmeans_init: str
+    selected: bool
     acc: float | None
     nmi: float | None
     ari: float | None
@@ -97,6 +104,8 @@ class TrainingHistoryRow:
     """One training-history row for one dataset and phase."""
 
     dataset: str
+    method_mode: str
+    kmeans_init: str
     phase: str
     epoch: int
     reconstruction_loss: float
@@ -445,7 +454,7 @@ def kmeans_on_embeddings(
 
     model = KMeans(
         n_clusters=n_clusters,
-        init="k-means++",
+        init=config.kmeans_init,
         n_init=config.kmeans_n_init,
         max_iter=config.kmeans_max_iter,
         random_state=config.random_state,
@@ -522,6 +531,8 @@ def train_pretrain_phase(
         history.append(
             TrainingHistoryRow(
                 dataset=dataset_name,
+                method_mode=config.method_mode,
+                kmeans_init=config.kmeans_init,
                 phase="pretrain",
                 epoch=epoch,
                 reconstruction_loss=mean_reconstruction_loss,
@@ -644,6 +655,8 @@ def train_joint_phase(
         history.append(
             TrainingHistoryRow(
                 dataset=dataset_name,
+                method_mode=config.method_mode,
+                kmeans_init=config.kmeans_init,
                 phase="joint",
                 epoch=epoch,
                 reconstruction_loss=float(np.mean(epoch_losses["reconstruction"])),
@@ -758,6 +771,9 @@ def run_mvdec_paper_baseline(
 
     result = MvDECPaperResult(
         dataset=inputs.name,
+        method_mode=config.method_mode,
+        kmeans_init=config.kmeans_init,
+        selected=True,
         acc=acc,
         nmi=nmi,
         ari=ari,
@@ -778,7 +794,79 @@ def run_mvdec_paper_baseline(
             else None
         ),
     )
-    return result, make_label_frame(inputs, labels), history
+    return result, make_label_frame(
+        inputs,
+        labels,
+        config.method_mode,
+        config.kmeans_init,
+    ), history
+
+def run_fused_kmeans_baseline(
+    inputs: DatasetInputs,
+    config: MvDECPaperConfig,
+) -> tuple[MvDECPaperResult, pd.DataFrame, list[TrainingHistoryRow]]:
+    """Pretrain the two views, then run K-Means directly on fused embeddings."""
+
+    set_random_seed(config.random_state)
+    device = resolve_device(config.device)
+    X = feature_matrix(inputs.X)
+    x_tensor = torch.as_tensor(X, dtype=torch.float32, device=device)
+    model = MvDECPaperModel(input_dim=X.shape[1], config=config).to(device)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+    )
+
+    start = perf_counter()
+    history = train_pretrain_phase(model, x_tensor, optimizer, config, inputs.name)
+    embeddings = (
+        model.encode_fused(x_tensor, batch_size=min(config.batch_size, len(x_tensor)))
+        .detach()
+        .cpu()
+        .numpy()
+    )
+    final_kmeans = kmeans_on_embeddings(embeddings, inputs.n_clusters, config)
+    labels = final_kmeans.labels_.astype(int)
+    fit_time = perf_counter() - start
+
+    y_true = true_labels(inputs.y)
+    acc, nmi, ari = external_metrics(y_true, labels)
+    silhouette = safe_silhouette(embeddings, labels) or float("nan")
+    n_distinct_clusters = len(np.unique(labels))
+    is_degenerate = n_distinct_clusters < inputs.n_clusters
+
+    result = MvDECPaperResult(
+        dataset=inputs.name,
+        method_mode=config.method_mode,
+        kmeans_init=config.kmeans_init,
+        selected=True,
+        acc=acc,
+        nmi=nmi,
+        ari=ari,
+        silhouette=silhouette,
+        cluster_sizes=np.bincount(labels, minlength=inputs.n_clusters)
+        .astype(int)
+        .tolist(),
+        inertia=float(final_kmeans.inertia_),
+        best_epoch=config.pretrain_epochs,
+        converged=False,
+        fit_time_seconds=float(fit_time),
+        device=device_description(device),
+        status="failed_degenerate_clusters" if is_degenerate else "ok",
+        error_message=(
+            f"K-Means found {n_distinct_clusters} distinct clusters, "
+            f"expected {inputs.n_clusters}."
+            if is_degenerate
+            else None
+        ),
+    )
+    return result, make_label_frame(
+        inputs,
+        labels,
+        config.method_mode,
+        config.kmeans_init,
+    ), history
 
 
 def device_description(device: torch.device) -> str:
@@ -789,12 +877,16 @@ def device_description(device: torch.device) -> str:
     return "cpu"
 
 
-def make_label_frame(inputs: DatasetInputs, labels: np.ndarray) -> pd.DataFrame:
+def make_label_frame(
+    inputs: DatasetInputs, labels: np.ndarray, method_mode: str, kmeans_init: str
+) -> pd.DataFrame:
     """Build per-sample predicted and external-label output rows."""
 
     frame = pd.DataFrame(
         {
             "dataset": inputs.name,
+            "method_mode": method_mode,
+            "kmeans_init": kmeans_init,
             "sample_index": np.arange(len(labels), dtype=int),
             "mvdec_label": labels.astype(int),
         }
@@ -859,6 +951,15 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
         "Datasets with ground-truth labels select the best epoch by ACC; unlabeled "
         "datasets select the best epoch by Silhouette."
     )
+    rows["kmeans_init_grid_note"] = (
+        "Baseline runners may grid-search K-Means init values and mark the best "
+        "trial with selected=True."
+    )
+    rows["method_mode_note"] = (
+        "mvdec uses the full joint objective L1+L2+L3+L4; fused-kmeans pretrains "
+        "the two autoencoders, then clusters the average fused representation "
+        "directly with K-Means."
+    )
     return pd.DataFrame(
         [{"parameter": parameter, "value": value} for parameter, value in rows.items()]
     )
@@ -867,16 +968,18 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
 def paper_table_frame(results: list[MvDECPaperResult]) -> pd.DataFrame:
     """Return the compact ACC/NMI table used for paper-style comparison."""
 
+    selected_results = [result for result in results if result.selected]
     return pd.DataFrame(
         [
             {
                 "dataset": result.dataset,
-                "method": "Proposed method",
+                "method": result.method_mode,
+                "kmeans_init": result.kmeans_init,
                 "ACC": result.acc,
                 "NMI": result.nmi,
                 "status": result.status,
             }
-            for result in results
+            for result in selected_results
         ]
     )
 
