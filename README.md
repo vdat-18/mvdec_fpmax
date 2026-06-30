@@ -28,7 +28,7 @@ output/
   post_ffs_intuitive_results.csv
 src/
   data_preprocessing/            # raw-data preprocessing utilities
-  representation_learning/       # Colab GPU notebook for MvDEC representation
+  representation_learning/       # MvDEC representation code and legacy notebook
   pipeline/                      # FP-Max, K-Prototypes, FFS, experiments
 docs/
   Clustering_English_ver02.docx  # manuscript draft
@@ -42,9 +42,18 @@ The local experiment pipeline is designed for Python 3.11.
 uv sync
 ```
 
-TensorFlow is intentionally not included in `pyproject.toml`. The MvDEC
-representation-learning stage is expected to run in Google Colab with a GPU
-runtime enabled.
+TensorFlow and PyTorch are optional because the local FP-Max/clustering pipeline
+can run without GPU frameworks. Install those frameworks only in GPU runtimes
+that need them:
+
+```bash
+uv pip install tensorflow  # TensorFlow MvDEC representation stage
+uv pip install torch       # PyTorch public MvDEC-paper baseline
+```
+
+The MvDEC representation-learning stage is expected to run in Google Colab with
+a GPU runtime enabled, then the resulting `fused_representation.pkl` is copied
+back into `data/preprocessed_data/` for local full-grid experiments.
 
 ## Workflow
 
@@ -100,26 +109,48 @@ data/preprocessed_data/tiki_preprocessed.csv
 
 ### 2. Representation Learning
 
-Run the Colab notebook below with a GPU runtime:
+Run representation learning on Google Colab with a GPU runtime. The notebook is
+kept as a legacy reference, but the reproducible path is the script below:
 
-```text
-src/representation_learning/mvdec_representation_colab.ipynb
+```bash
+uv run python scripts/run_mvdec_representation.py --force
 ```
 
-The notebook reads:
+On Colab, clone the `dev` branch, sync the repo, and install TensorFlow in
+the Colab environment:
+
+```bash
+git clone -b dev https://github.com/vdat-18/mvdec_fpmax.git
+cd mvdec_fpmax
+pip install -q uv
+uv sync
+uv pip install tensorflow
+uv run python scripts/run_mvdec_representation.py --force
+```
+
+The script reads:
 
 ```text
 data/preprocessed_data/tiki_preprocessed.csv
 ```
 
-and saves:
+and saves the downstream-compatible artifact:
 
 ```text
 data/preprocessed_data/fused_representation.pkl
 ```
 
-The repository already includes the cached fused representation used by the
-downstream experiments.
+It also writes an audit log:
+
+```text
+data/preprocessed_data/mvdec_representation_history.csv
+```
+
+The pickle keeps the legacy keys required by the local pipeline:
+`h_fused`, `labels`, `init`, `score`, and `iteration`. After downloading a fresh
+artifact from Colab, place it at `data/preprocessed_data/fused_representation.pkl`
+and run the local FP-Max/clustering modes. See `docs/sota_colab_workflow.md` for
+the full Colab-to-local workflow.
 
 ### 3. FP-Max and Clustering Experiments
 
@@ -325,8 +356,9 @@ manuscript.
 - Random seeds are fixed at `42` for local experiment code.
 - The cached MvDEC representation contains `h_fused`, `labels`, `init`, `score`,
   and `iteration`.
-- Representation learning is GPU-dependent and should be rerun through the
-  Colab notebook if a fresh `fused_representation.pkl` artifact is required.
+- Representation learning is GPU-dependent and should be rerun through
+  `scripts/run_mvdec_representation.py` on Colab if a fresh
+  `fused_representation.pkl` artifact is required.
 - Raw Tiki storefront data are not fully released due to data governance
   considerations. Processed data required for reproducing the reported
   experiments are included where permitted.
@@ -350,3 +382,4 @@ release metadata for DOI generation.
 ## License
 
 This repository is released under the MIT License. See `LICENSE` for details.
+

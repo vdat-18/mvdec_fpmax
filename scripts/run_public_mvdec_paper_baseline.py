@@ -19,6 +19,7 @@ DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
 DEFAULT_OUTPUT_PATH = (
     PROJECT_DIR / "output" / "public_baselines" / "mvdec_paper_baseline.xlsx"
 )
+PAPER_TEXT_DATASETS = ("reuters10k", "20news", "rcv1_10k")
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,13 +102,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run a short smoke configuration for code-path validation.",
     )
+    parser.add_argument(
+        "--paper-strict",
+        action="store_true",
+        help=(
+            "Use the paper-style text benchmark defaults and, when --datasets "
+            "is omitted, run REUTERS-10K, 20NEWS, and RCV1-10K."
+        ),
+    )
     return parser.parse_args()
 
 
 def build_config(args: argparse.Namespace, config_cls):
     """Build the shared MvDEC paper configuration from CLI options."""
 
-    config = config_cls(device=args.device)
+    config = config_cls(device=args.device, paper_strict=args.paper_strict)
+    if args.paper_strict:
+        config = replace(
+            config,
+            scaler="minmax",
+            hidden_dims=(500, 500, 2000),
+            latent_dim=10,
+            kmeans_n_init=20,
+            reconstruction_weight=1.0,
+            kmeans_weight=1.0,
+            orthonormal_weight=1.0,
+            greedy_weight=1.0,
+        )
     if args.pretrain_epochs is not None:
         config = replace(config, pretrain_epochs=args.pretrain_epochs)
     if args.joint_epochs is not None:
@@ -153,7 +174,12 @@ def main() -> None:
     )
 
     registry = load_registry(args.config)
-    datasets = selected_datasets(registry, args.datasets)
+    dataset_names = (
+        list(PAPER_TEXT_DATASETS)
+        if args.paper_strict and args.datasets is None
+        else args.datasets
+    )
+    datasets = selected_datasets(registry, dataset_names)
     processed_root = resolve_processed_root(PROJECT_DIR, registry, args.processed_root)
     config = build_config(args, MvDECPaperConfig)
     log_device(config)

@@ -3,6 +3,33 @@
   "processed_root": "data/public/processed",
   "datasets": [
     {
+      "name": "reuters10k",
+      "title": "REUTERS-10K Text Benchmark",
+      "source": "Hugging Face dataset wwydmanski/reuters10k; processed locally",
+      "url": "https://huggingface.co/datasets/wwydmanski/reuters10k",
+      "parser": "processed_only",
+      "n_clusters": 4,
+      "priority": "paper_text"
+    },
+    {
+      "name": "20news",
+      "title": "20 Newsgroups Text Benchmark",
+      "source": "scikit-learn fetch_20newsgroups_vectorized; processed locally",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.datasets.fetch_20newsgroups_vectorized.html",
+      "parser": "processed_only",
+      "n_clusters": 20,
+      "priority": "paper_text"
+    },
+    {
+      "name": "rcv1_10k",
+      "title": "RCV1-10K Text Benchmark",
+      "source": "Reuters Corpus Volume I via Figshare/scikit-learn raw files; processed locally",
+      "url": "https://jmlr.csail.mit.edu/papers/v5/lewis04a.html",
+      "parser": "processed_only",
+      "n_clusters": 4,
+      "priority": "paper_text"
+    },
+    {
       "name": "uci_gas_sensor_drift",
       "title": "UCI Gas Sensor Array Drift at Different Concentrations",
       "source": "UCI Machine Learning Repository",

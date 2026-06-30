@@ -41,6 +41,7 @@ LossReduction = Literal["mean"]
 class MvDECPaperConfig:
     """Configuration shared by every public dataset run."""
 
+    paper_strict: bool = False
     scaler: ScalerName = "minmax"
     hidden_dims: tuple[int, ...] = (500, 500, 2000)
     latent_dim: int = 10
@@ -823,6 +824,22 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
     )
 
 
+def paper_table_frame(results: list[MvDECPaperResult]) -> pd.DataFrame:
+    """Return the compact ACC/NMI table used for paper-style comparison."""
+
+    return pd.DataFrame(
+        [
+            {
+                "dataset": result.dataset,
+                "method": "Proposed method",
+                "ACC": result.acc,
+                "NMI": result.nmi,
+                "status": result.status,
+            }
+            for result in results
+        ]
+    )
+
 def write_workbook(
     output_path: Path,
     results: list[MvDECPaperResult],
@@ -842,6 +859,11 @@ def write_workbook(
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         summary.to_excel(writer, sheet_name="summary", index=False)
+        paper_table_frame(results).to_excel(
+            writer,
+            sheet_name="paper_table",
+            index=False,
+        )
         labels.to_excel(writer, sheet_name="labels", index=False)
         history.to_excel(writer, sheet_name="training_history", index=False)
         metadata.to_excel(writer, sheet_name="metadata", index=False)
@@ -852,4 +874,22 @@ def log_device(config: MvDECPaperConfig) -> None:
     """Log selected compute device before a run starts."""
 
     device = resolve_device(config.device)
-    logger.info("Using device={}", device_description(device))
+    cuda_available = torch.cuda.is_available()
+    cuda_count = torch.cuda.device_count() if cuda_available else 0
+    logger.info(
+        "Compute environment | requested_device={} resolved_device={} "
+        "cuda_available={} cuda_device_count={}",
+        config.device,
+        device_description(device),
+        cuda_available,
+        cuda_count,
+    )
+    if cuda_available:
+        for index in range(cuda_count):
+            properties = torch.cuda.get_device_properties(index)
+            logger.info(
+                "CUDA device {} | name={} total_memory_gb={:.2f}",
+                index,
+                properties.name,
+                properties.total_memory / (1024**3),
+            )

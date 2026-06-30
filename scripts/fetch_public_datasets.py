@@ -698,6 +698,28 @@ def process_dataset(
     processed_dir = processed_root / name
     archive_path = raw_dir / "source.zip"
 
+    if dataset["parser"] == "processed_only":
+        metadata_path = processed_dir / "metadata.json"
+        x_path = processed_dir / "X.csv"
+        if metadata_path.exists() and x_path.exists():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            return {
+                "name": name,
+                "status": "processed_only_exists",
+                "n_samples": metadata["n_samples"],
+                "n_features": metadata["n_features"],
+            }
+        return {
+            "name": name,
+            "status": "processed_only_missing",
+            "n_samples": None,
+            "n_features": None,
+            "message": (
+                "This registry entry is used by baseline runners only. "
+                "Create data/public/processed/<name>/X.csv and metadata.json first."
+            ),
+        }
+
     logger.info("Fetching {}", name)
     download_file(dataset["url"], archive_path, force=force)
     extract_zip(archive_path, extract_dir, force=force)

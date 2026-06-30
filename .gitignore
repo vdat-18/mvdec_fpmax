@@ -34,6 +34,10 @@ dist/
 *.log
 logs/
 
+# Experiment outputs
+output/*.csv
+output/*.xlsx
+
 # Downloaded public experiment datasets
 data/public/raw/
 data/public/processed/
