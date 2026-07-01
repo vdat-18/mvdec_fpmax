@@ -37,8 +37,7 @@ dist/
 logs/
 
 # Experiment outputs
-output/*.csv
-output/*.xlsx
+output/*_trials.csv
 
 # Downloaded public experiment datasets
 data/public/raw/
