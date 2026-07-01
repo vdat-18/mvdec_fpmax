@@ -9,6 +9,9 @@
 !git clone -b dev https://github.com/vdat-18/mvdec_fpmax.git
 %cd /content/mvdec_fpmax
 
+%env MPLBACKEND=Agg
+%env UV_LINK_MODE=copy
+
 !pip install -q uv
 !uv sync
 !uv add torch tensorflow
@@ -18,6 +21,9 @@
   --tasks all \
   --force
 ```
+
+`MPLBACKEND=Agg` avoids Kaggle/Colab notebook backend crashes when TensorFlow
+imports Keras/Matplotlib. `UV_LINK_MODE=copy` avoids Kaggle hardlink warnings.
 
 For Tiki, replace the dataset name:
 

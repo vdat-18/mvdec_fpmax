@@ -244,7 +244,6 @@ def main() -> None:
     np.random.seed(RANDOM_STATE)
 
     args = parse_args()
-    mvdec_result = None
 
     if args.mode == "smoke":
         run_smoke_test(args.data_path, args.representation_path)

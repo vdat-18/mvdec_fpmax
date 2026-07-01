@@ -14,6 +14,8 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+tmp/
+tmp_*.txt
 
 # Jupyter
 .ipynb_checkpoints/
@@ -42,6 +44,7 @@ output/*.xlsx
 data/public/raw/
 data/public/processed/
 !data/public/README.md
+public_text_datasets.zip
 
 # OS and editors
 .DS_Store

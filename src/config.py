@@ -18,9 +18,6 @@ FFS_RESULTS_PATH = OUTPUT_DIR / "ffs_results.csv"
 WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH = (
     OUTPUT_DIR / "without_ffs_intuitive_native_results.csv"
 )
-WITHOUT_FFS_INTUITIVE_NATIVE_TRIALS_PATH = (
-    OUTPUT_DIR / "without_ffs_intuitive_native_trials.csv"
-)
 WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH = (
     OUTPUT_DIR / "without_ffs_intuitive_view_weighted_native_results.csv"
 )

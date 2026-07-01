@@ -17,7 +17,7 @@ Forward Feature Selection (FFS).
 data/
   preprocessed_data/
     tiki_preprocessed.csv        # 1,799 x 7 preprocessed Tiki features
-    fused_representation.pkl     # cached MvDEC fused representation
+    *_fused_representation.pkl   # GPU-produced MvDEC representations
   public/                        # reproducible public dataset workspace
   raw_data/
     seller_store_urls.csv        # seller storefront URLs used during collection
@@ -28,10 +28,10 @@ output/
   post_ffs_intuitive_results.csv
 src/
   data_preprocessing/            # raw-data preprocessing utilities
-  representation_learning/       # MvDEC representation code and legacy notebook
+  representation_learning/       # MvDEC representation code
   pipeline/                      # FP-Max, K-Prototypes, FFS, experiments
 docs/
-  Clustering_English_ver02.docx  # manuscript draft
+  *.pdf                         # reference papers
 ```
 
 ## Environment
@@ -51,8 +51,8 @@ uv pip install tensorflow  # TensorFlow MvDEC representation stage
 uv pip install torch       # PyTorch public MvDEC-paper baseline
 ```
 
-The MvDEC representation-learning stage is expected to run in Google Colab with
-a GPU runtime enabled, then the resulting `fused_representation.pkl` is copied
+The MvDEC representation-learning stage is expected to run in a GPU runtime,
+then the dataset-specific `*_fused_representation.pkl` artifacts are pushed
 back into `data/preprocessed_data/` for local full-grid experiments.
 
 ## Workflow
@@ -356,8 +356,8 @@ manuscript.
 - The cached MvDEC representation contains `h_fused`, `labels`, `init`, `score`,
   and `iteration`.
 - Representation learning is GPU-dependent and should be rerun through
-  `scripts/run_mvdec_representation.py` on Colab if a fresh
-  `fused_representation.pkl` artifact is required.
+  `scripts/run_colab_gpu_pipeline.py` if fresh dataset-specific representation
+  artifacts are required.
 - Raw Tiki storefront data are not fully released due to data governance
   considerations. Processed data required for reproducing the reported
   experiments are included where permitted.

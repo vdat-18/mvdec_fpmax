@@ -213,36 +213,6 @@ def _repair_small_clusters(
     return repaired
 
 
-def _repair_empty_clusters(
-    labels: np.ndarray,
-    distances: np.ndarray,
-    n_clusters: int,
-) -> np.ndarray:
-    """Backward-compatible wrapper for the original empty-only repair."""
-
-    repaired = np.asarray(labels, dtype=int).copy()
-    sizes = _cluster_sizes(repaired, n_clusters)
-    empty = np.flatnonzero(sizes == 0)
-    if len(empty) == 0:
-        return repaired
-
-    assigned_cost = distances[np.arange(len(repaired)), repaired].astype(float)
-    for cluster in empty:
-        donor_mask = sizes[repaired] > 1
-        if not np.any(donor_mask):
-            msg = "Cannot repair empty clusters without a non-singleton donor."
-            raise ValueError(msg)
-        donor_candidates = np.flatnonzero(donor_mask)
-        donor = donor_candidates[int(np.argmax(assigned_cost[donor_candidates]))]
-        sizes[repaired[donor]] -= 1
-        repaired[donor] = int(cluster)
-        sizes[cluster] += 1
-        assigned_cost[donor] = -np.inf
-
-    _require_non_empty_clusters(repaired, n_clusters)
-    return repaired
-
-
 def mixed_initial_distance_matrix(
     X_num: Any | None,
     X_cat: Any | None,
