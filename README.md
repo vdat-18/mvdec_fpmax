@@ -109,11 +109,11 @@ data/preprocessed_data/tiki_preprocessed.csv
 
 ### 2. Representation Learning
 
-Run representation learning on Google Colab with a GPU runtime. The notebook is
-kept as a legacy reference, but the reproducible path is the script below:
+Run GPU stages on Google Colab with a GPU runtime. Notebooks are kept as legacy
+references; the reproducible path is the unified Colab entrypoint below:
 
 ```bash
-uv run python scripts/run_mvdec_representation.py --force
+uv run python scripts/run_colab_gpu_pipeline.py --datasets tiki --tasks all --force
 ```
 
 On Colab, clone the `dev` branch, sync the repo, and install TensorFlow in
@@ -124,33 +124,32 @@ git clone -b dev https://github.com/vdat-18/mvdec_fpmax.git
 cd mvdec_fpmax
 pip install -q uv
 uv sync
-uv pip install tensorflow
-uv run python scripts/run_mvdec_representation.py --force
+uv add torch tensorflow
+uv run python scripts/run_colab_gpu_pipeline.py --datasets tiki --tasks all --force
 ```
 
-The script reads:
+For the air-pollution case study, use:
 
-```text
-data/preprocessed_data/tiki_preprocessed.csv
+```bash
+uv run python scripts/run_colab_gpu_pipeline.py \
+  --datasets airpollution_demvk \
+  --tasks all \
+  --force
 ```
 
-and saves the downstream-compatible artifact:
+The representation task reads each dataset's registered numeric matrix and
+saves dataset-specific artifacts:
 
 ```text
-data/preprocessed_data/fused_representation.pkl
-```
-
-It also writes an audit log:
-
-```text
-data/preprocessed_data/mvdec_representation_history.csv
+data/preprocessed_data/<dataset>_fused_representation.pkl
+data/preprocessed_data/<dataset>_mvdec_history.csv
 ```
 
 The pickle keeps the legacy keys required by the local pipeline:
 `h_fused`, `labels`, `init`, `score`, and `iteration`. After downloading a fresh
-artifact from Colab, place it at `data/preprocessed_data/fused_representation.pkl`
-and run the local FP-Max/clustering modes. See `docs/sota_colab_workflow.md` for
-the full Colab-to-local workflow.
+artifact from Colab, pass it to the local FP-Max/clustering modes with
+`--representation-path` and pass the matching CSV with `--data-path`. See
+`RUNBOOK_GPU_TO_LOCAL.md` for the full GPU-to-local workflow.
 
 ### 3. FP-Max and Clustering Experiments
 
