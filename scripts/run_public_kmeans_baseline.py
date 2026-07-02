@@ -1,4 +1,4 @@
-﻿"""Run K-Means baselines for selected public datasets."""
+"""Run K-Means baselines for selected public datasets."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from sklearn.metrics import (
     normalized_mutual_info_score,
     silhouette_score,
 )
-from sklearn.preprocessing import StandardScaler
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
@@ -27,6 +26,7 @@ DEFAULT_OUTPUT_PATH = (
 RANDOM_STATE = 42
 N_INIT = 100
 MAX_ITER = 1000
+KMEANS_INITS = ("k-means++", "random")
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,6 @@ class KMeansBaselineResult:
     n_samples: int
     n_features: int
     n_clusters: int
-    scaler: str
     algorithm: str
     init: str
     n_init: int
@@ -71,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
 
     parser = argparse.ArgumentParser(
-        description="Run StandardScaler + K-Means baselines on public datasets."
+        description="Run K-Means baselines on already-preprocessed public datasets."
     )
     parser.add_argument(
         "--config",
@@ -102,6 +101,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite an existing workbook.",
     )
+
+
     return parser.parse_args()
 
 
@@ -211,24 +212,24 @@ def true_labels(y: pd.DataFrame | None) -> np.ndarray | None:
 
 def run_kmeans_baseline(
     inputs: DatasetInputs,
+    init: str,
 ) -> tuple[KMeansBaselineResult, pd.DataFrame]:
-    """Fit StandardScaler + K-Means and return metrics and labels."""
+    """Fit K-Means directly on the already-preprocessed features."""
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(inputs.X.to_numpy(dtype=float))
+    X = inputs.X.to_numpy(dtype=float)
 
     model = KMeans(
         n_clusters=inputs.n_clusters,
-        init="k-means++",
+        init=init,
         n_init=N_INIT,
         max_iter=MAX_ITER,
         random_state=RANDOM_STATE,
     )
     start = perf_counter()
-    labels = model.fit_predict(X_scaled)
+    labels = model.fit_predict(X)
     fit_time = perf_counter() - start
 
-    silhouette = float(silhouette_score(X_scaled, labels, metric="euclidean"))
+    silhouette = float(silhouette_score(X, labels, metric="euclidean"))
     labels_true = true_labels(inputs.y)
     ari = (
         None if labels_true is None else float(adjusted_rand_score(labels_true, labels))
@@ -248,9 +249,8 @@ def run_kmeans_baseline(
         n_samples=len(inputs.X),
         n_features=inputs.X.shape[1],
         n_clusters=inputs.n_clusters,
-        scaler="StandardScaler",
         algorithm="KMeans",
-        init="k-means++",
+        init=init,
         n_init=N_INIT,
         max_iter=MAX_ITER,
         random_state=RANDOM_STATE,
@@ -264,16 +264,17 @@ def run_kmeans_baseline(
         status="ok",
         error_message=None,
     )
-    label_df = make_label_frame(inputs, labels)
+    label_df = make_label_frame(inputs, labels, init)
     return result, label_df
 
 
-def make_label_frame(inputs: DatasetInputs, labels: np.ndarray) -> pd.DataFrame:
+def make_label_frame(inputs: DatasetInputs, labels: np.ndarray, init: str) -> pd.DataFrame:
     """Build a per-sample label output frame."""
 
     frame = pd.DataFrame(
         {
             "dataset": inputs.name,
+            "kmeans_init": init,
             "sample_index": np.arange(len(labels), dtype=int),
             "kmeans_label": labels.astype(int),
         }
@@ -311,9 +312,10 @@ def config_frame() -> pd.DataFrame:
 
     return pd.DataFrame(
         [
-            {"parameter": "scaler", "value": "StandardScaler"},
+            {"parameter": "feature_input", "value": "already-preprocessed"},
+            {"parameter": "scaler", "value": "none"},
             {"parameter": "algorithm", "value": "KMeans"},
-            {"parameter": "init", "value": "k-means++"},
+            {"parameter": "init_grid", "value": json.dumps(list(KMEANS_INITS))},
             {"parameter": "n_init", "value": N_INIT},
             {"parameter": "max_iter", "value": MAX_ITER},
             {"parameter": "random_state", "value": RANDOM_STATE},
@@ -328,6 +330,7 @@ def result_to_dict(result: KMeansBaselineResult) -> dict:
 
     return {
         "dataset": result.dataset,
+        "kmeans_init": result.init,
         "silhouette": result.silhouette,
         "ari": result.ari,
         "nmi": result.nmi,
@@ -376,18 +379,20 @@ def main() -> None:
     results: list[KMeansBaselineResult] = []
     label_frames: list[pd.DataFrame] = []
     for dataset in datasets:
-        logger.info("Running K-Means baseline for {}", dataset["name"])
         inputs = load_dataset(dataset, processed_root)
-        result, label_frame = run_kmeans_baseline(inputs)
-        results.append(result)
-        label_frames.append(label_frame)
-        logger.info(
-            "{} silhouette={:.4f} ari={} nmi={}",
-            result.dataset,
-            result.silhouette,
-            None if result.ari is None else round(result.ari, 4),
-            None if result.nmi is None else round(result.nmi, 4),
-        )
+        for init in KMEANS_INITS:
+            logger.info("Running K-Means baseline for {} | init={}", dataset["name"], init)
+            result, label_frame = run_kmeans_baseline(inputs, init)
+            results.append(result)
+            label_frames.append(label_frame)
+            logger.info(
+                "{} init={} silhouette={:.4f} ari={} nmi={}",
+                result.dataset,
+                result.init,
+                result.silhouette,
+                None if result.ari is None else round(result.ari, 4),
+                None if result.nmi is None else round(result.nmi, 4),
+            )
 
     metadata = metadata_frame(processed_root, datasets)
     write_workbook(args.output, results, label_frames, metadata)

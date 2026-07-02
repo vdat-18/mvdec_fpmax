@@ -1,4 +1,4 @@
-# Virtual environments
+﻿# Virtual environments
 .venv/
 venv/
 env/
@@ -38,6 +38,7 @@ logs/
 
 # Experiment outputs
 output/*_trials.csv
+output/**/*_trials.csv
 
 # Downloaded public experiment datasets
 data/public/raw/

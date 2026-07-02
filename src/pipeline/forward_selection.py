@@ -113,10 +113,21 @@ def run_forward_selection_candidate(
             random_state=context.random_state,
             verbose=0,
         )
-        labels = model.fit_predict(
-            combined_df.to_numpy(),
-            categorical=categorical_idx,
-        )
+        try:
+            labels = model.fit_predict(
+                combined_df.to_numpy(),
+                categorical=categorical_idx,
+            )
+        except ValueError as error:
+            if "could not initialize" not in str(error):
+                raise
+            logger.warning(
+                "Skip candidate {} with init={} because K-Prototypes could not "
+                "initialize.",
+                candidate.feature_name,
+                init,
+            )
+            continue
         score = compute_silhouette(distance_matrix, labels)
         logs.append((candidate.feature_name, init, float(score)))
 

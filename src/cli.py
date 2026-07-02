@@ -7,7 +7,14 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from config import FUSED_REPRESENTATION_PATH, PREPROCESSED_DATA_PATH, RANDOM_STATE
+from config import (
+    FFS_INTUITIVE_NATIVE_RESULTS_PATH,
+    FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH,
+    FFS_RESULTS_PATH,
+    FUSED_REPRESENTATION_PATH,
+    PREPROCESSED_DATA_PATH,
+    RANDOM_STATE,
+)
 from pipeline.clustering import (
     ClusteringBackend,
     run_intuitive_kprototypes,
@@ -228,6 +235,12 @@ def parse_args() -> argparse.Namespace:
         default=FUSED_REPRESENTATION_PATH,
         help="Fused representation pickle produced by the GPU stage.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Optional directory for result CSV files.",
+    )
     return parser.parse_args()
 
 
@@ -235,6 +248,15 @@ def load_selected_mvdec_result(args: argparse.Namespace):
     """Load the fused representation selected by CLI paths."""
 
     return load_mvdec_result(args.representation_path, args.data_path)
+
+
+def result_path(args: argparse.Namespace, default_path: Path) -> Path:
+    """Return the default result path or the same filename under --output-dir."""
+
+    if args.output_dir is None:
+        return default_path
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    return args.output_dir / default_path.name
 
 
 def main() -> None:
@@ -390,6 +412,7 @@ def main() -> None:
         mvdec_result = load_selected_mvdec_result(args)
         run_ffs(
             h_fused_df=mvdec_result.h_fused_df,
+            save_path=result_path(args, FFS_RESULTS_PATH),
             baseline_score=mvdec_result.score,
             workers=args.workers,
             candidate_workers=args.candidate_workers,
@@ -442,6 +465,7 @@ def main() -> None:
         mvdec_result = load_selected_mvdec_result(args)
         run_ffs_intuitive_native(
             h_fused_df=mvdec_result.h_fused_df,
+            save_path=result_path(args, FFS_INTUITIVE_NATIVE_RESULTS_PATH),
             baseline_score=mvdec_result.score,
             workers=args.workers,
             param_workers=args.param_workers,
@@ -486,6 +510,10 @@ def main() -> None:
         mvdec_result = load_selected_mvdec_result(args)
         run_ffs_intuitive_view_weighted_native(
             h_fused_df=mvdec_result.h_fused_df,
+            save_path=result_path(
+                args,
+                FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH,
+            ),
             baseline_score=mvdec_result.score,
             workers=args.workers,
             param_workers=args.param_workers,
