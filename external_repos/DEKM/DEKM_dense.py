@@ -17,7 +17,7 @@ def model_conv(load_weights=True):
     filters = [500, 500, 2000]
     init = 'uniform'
     activation = 'relu'
-    input = layers.Input(shape=input_shape)
+    input = layers.Input(shape=(input_shape,))
     x = input
     for i in range(len(filters)):
         x = layers.Dense(filters[i], activation=activation, kernel_initializer=init)(x)
@@ -33,7 +33,7 @@ def model_conv(load_weights=True):
     model = Model(inputs=input, outputs=output)
     # model.summary()
     if load_weights:
-        model.load_weights(f'weight_base_{ds_name}.h5')
+        model.load_weights(f'weight_base_{ds_name}.weights.h5')
         print('model_conv: weights was loaded')
     return model
 
@@ -48,7 +48,7 @@ def train_base(ds_xx):
     model = model_conv(load_weights=False)
     model.compile(optimizer='adam', loss=loss_train_base)
     model.fit(ds_xx, epochs=pretrain_epochs, verbose=2)
-    model.save_weights(f'weight_base_{ds_name}.h5')
+    model.save_weights(f'weight_base_{ds_name}.weights.h5')
 
 
 def sorted_eig(X):
@@ -111,7 +111,7 @@ def train(x, y):
             log_csv(log_str.split(';'),file_name=ds_name)
 
         if n_change_assignment <= len(x) * 0.005:
-            model.save_weights(f'weight_final_{ds_name}.h5')
+            model.save_weights(f'weight_final_{ds_name}.weights.h5')
             print('end')
             break
         idx = index_array[index * batch_size: min((index + 1) * batch_size, x.shape[0])]

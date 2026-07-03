@@ -86,7 +86,7 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
 
         # Pre-process the dataset
         ## Filter words based on tf-idf
-        sum_tfidf = np.asarray(sp.spmatrix.sum(data, axis=0))[
+        sum_tfidf = np.asarray(data.sum(axis=0))[
             0]  # Sum of tf-idf for all words based on the filtered dataset
         word_indices = np.argpartition(-sum_tfidf, 2000)[:2000]  # Keep only the 2000 top words in the vocabulary
         data = data[:, word_indices].toarray()  # Switch from sparse matrix to full matrix
