@@ -16,11 +16,10 @@ DEFAULT_BASELINE_OUTPUT_PATH = (
 )
 DEFAULT_GPU_MODES = (
     "mvdec",
-    "legacy-dims-mvdec",
-    "legacy-notebook",
-    "l1-l2-mvdec",
+    "mimvdec",
+    "fused-kmeans",
+    "legacy-fused-kmeans",
 )
-
 
 def parse_args() -> argparse.Namespace:
     """Parse Colab GPU pipeline options."""

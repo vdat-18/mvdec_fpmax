@@ -11,6 +11,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
+import torch
 from loguru import logger
 from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
@@ -20,28 +21,16 @@ from sklearn.metrics import (
     silhouette_score,
 )
 from sklearn.preprocessing import LabelEncoder
-
-try:
-    import torch
-    from torch import Tensor, nn
-    from torch.utils.data import DataLoader, TensorDataset
-except ModuleNotFoundError as error:  # pragma: no cover - exercised on CPU-only envs.
-    msg = (
-        "PyTorch is required for the MvDEC paper baseline. Install it locally or "
-        "run this script in Colab with a GPU runtime."
-    )
-    raise ModuleNotFoundError(msg) from error
+from torch import Tensor, nn
+from torch.utils.data import DataLoader, TensorDataset
 
 KMeansInit = Literal["k-means++", "random"]
-LossReduction = Literal["sum"]
 MethodMode = Literal[
     "mvdec",
-    "legacy-dims-mvdec",
-    "l1-l2-mvdec",
+    "mimvdec",
     "fused-kmeans",
     "fused-only-kmeans",
     "legacy-fused-kmeans",
-    "legacy-notebook",
 ]
 ArchitectureMode = Literal["paper", "legacy_notebook"]
 
@@ -61,16 +50,11 @@ class MvDECPaperConfig:
     batch_size: int = 256
     pretrain_epochs: int = 200
     joint_epochs: int = 200
-    early_stopping_patience: int = 30
-    convergence_tol: float = 1e-4
+    update_interval: int = 10
+    convergence_tol: float = 0.005
     kmeans_init: KMeansInit = "k-means++"
     kmeans_n_init: int = 20
     kmeans_max_iter: int = 300
-    loss_reduction: LossReduction = "sum"
-    reconstruction_weight: float = 1.0
-    kmeans_weight: float = 1.0
-    orthonormal_weight: float = 1.0
-    greedy_weight: float = 1.0
     random_state: int = 42
     device: str = "auto"
 
@@ -498,21 +482,19 @@ def within_class_scatter(
 
 
 def orthonormal_transform(scatter: Tensor) -> tuple[Tensor, Tensor]:
-    """Return scatter eigenvectors with the least-informative direction last."""
-
     eigenvalues, eigenvectors = torch.linalg.eigh(scatter)
-    order = torch.argsort(eigenvalues, descending=True)
+    order = torch.argsort(eigenvalues)
     return eigenvectors[:, order].T, eigenvalues[order]
 
-
-def greedy_adjustment_loss(
-    transformed: Tensor, labels: Tensor, centroids: Tensor
-) -> Tensor:
-    """Pull samples toward centroids along the least-informative dimension."""
-
-    adjusted = transformed.detach().clone()
-    adjusted[:, -1] = centroids[labels, -1]
-    return squared_distance_sum(transformed, adjusted)
+def align_labels_to_previous(previous: np.ndarray, current: np.ndarray) -> np.ndarray:
+    n_labels = max(previous.max(initial=0), current.max(initial=0)) + 1
+    contingency = np.zeros((n_labels, n_labels), dtype=np.int64)
+    for current_label, previous_label in zip(current, previous, strict=True):
+        contingency[current_label, previous_label] += 1
+    row_ind, col_ind = linear_sum_assignment(contingency.max() - contingency)
+    mapping = np.arange(n_labels)
+    mapping[row_ind] = col_ind
+    return mapping[current]
 
 def squared_distance_sum(left: Tensor, right: Tensor) -> Tensor:
     """Return the sum of squared Euclidean distances used in the paper losses."""
@@ -596,8 +578,6 @@ def train_joint_phase(
     config: MvDECPaperConfig,
     dataset_name: str,
 ) -> tuple[list[TrainingHistoryRow], np.ndarray, np.ndarray, int, bool, float]:
-    """Jointly optimize reconstruction and DEKM-style clustering objectives."""
-
     history = []
     previous_labels: np.ndarray | None = None
     best_labels: np.ndarray | None = None
@@ -605,105 +585,113 @@ def train_joint_phase(
     best_silhouette = -np.inf
     best_selection_score = -np.inf
     best_epoch = 0
-    stale_epochs = 0
     converged = False
     select_by_acc = y_true is not None
     batch_size = min(config.batch_size, len(x_tensor))
+    if config.update_interval < 1:
+        msg = 'update_interval must be at least 1.'
+        raise ValueError(msg)
     sample_indices = torch.arange(len(x_tensor), device=x_tensor.device)
-    use_orthonormal = config.orthonormal_weight != 0.0
-    use_greedy = config.greedy_weight != 0.0
+    batch_index = 0
 
-    for epoch in range(1, config.joint_epochs + 1):
-        embeddings = model.encode_fused(x_tensor, batch_size=batch_size)
-        embeddings_np = embeddings.detach().cpu().numpy()
-        kmeans = kmeans_on_embeddings(embeddings_np, n_clusters, config)
-        labels_np = kmeans.labels_.astype(int)
-        labels_all = torch.as_tensor(
-            labels_np, dtype=torch.long, device=x_tensor.device
-        )
-        centroids = torch.as_tensor(
-            kmeans.cluster_centers_, dtype=embeddings.dtype, device=x_tensor.device
-        )
-        transform = None
-        transformed_centroids = None
-        if use_orthonormal or use_greedy:
+    labels_all: Tensor | None = None
+    centroids: Tensor | None = None
+    transform: Tensor | None = None
+    transformed_centroids: Tensor | None = None
+    transformed_embeddings: Tensor | None = None
+    acc: float | None = None
+    nmi: float | None = None
+    ari: float | None = None
+    silhouette: float | None = None
+    label_change_rate: float | None = None
+
+    for step in range(1, config.joint_epochs + 1):
+        should_update_clusters = (step - 1) % config.update_interval == 0
+        if should_update_clusters:
+            embeddings = model.encode_fused(x_tensor, batch_size=batch_size)
+            embeddings_np = embeddings.detach().cpu().numpy()
+            kmeans = kmeans_on_embeddings(embeddings_np, n_clusters, config)
+            labels_np = kmeans.labels_.astype(int)
+            if previous_labels is not None:
+                aligned_labels = align_labels_to_previous(previous_labels, labels_np)
+                label_change_rate = float(np.mean(previous_labels != aligned_labels))
+            previous_labels = labels_np.copy()
+
+            labels_all = torch.as_tensor(
+                labels_np, dtype=torch.long, device=x_tensor.device
+            )
+            centroids = torch.as_tensor(
+                kmeans.cluster_centers_, dtype=embeddings.dtype, device=x_tensor.device
+            )
             scatter = within_class_scatter(embeddings.detach(), labels_all, centroids)
             transform, _ = orthonormal_transform(scatter)
             transform = transform.detach()
             transformed_centroids = centroids @ transform.T
+            transformed_embeddings = embeddings.detach() @ transform.T
 
-        acc, nmi, ari = external_metrics(y_true, labels_np)
-        silhouette = safe_silhouette(embeddings_np, labels_np)
-        label_change_rate = label_delta(previous_labels, labels_np)
-        previous_labels = labels_np.copy()
+            acc, nmi, ari = external_metrics(y_true, labels_np)
+            silhouette = safe_silhouette(embeddings_np, labels_np)
+            selection_score = acc if select_by_acc else silhouette
+            if selection_score is not None and selection_score > best_selection_score:
+                best_selection_score = selection_score
+                best_silhouette = silhouette if silhouette is not None else float('nan')
+                best_epoch = step
+                best_labels = labels_np.copy()
+                best_embeddings = embeddings_np.copy()
+
+            if (
+                label_change_rate is not None
+                and label_change_rate <= config.convergence_tol
+            ):
+                converged = True
+
+        if labels_all is None or centroids is None or transform is None:
+            msg = 'DEKM cluster state was not initialized.'
+            raise RuntimeError(msg)
+        if transformed_centroids is None or transformed_embeddings is None:
+            msg = 'DEKM transformed targets were not initialized.'
+            raise RuntimeError(msg)
+
+        start_index = batch_index * batch_size
+        stop_index = min(start_index + batch_size, len(x_tensor))
+        batch_indices = sample_indices[start_index:stop_index]
+        batch = x_tensor[batch_indices]
+        batch_labels = labels_all[batch_indices]
 
         model.train()
-        loader = DataLoader(
-            TensorDataset(x_tensor, sample_indices),
-            batch_size=batch_size,
-            shuffle=True,
+        optimizer.zero_grad(set_to_none=True)
+        reconstruction1, reconstruction2, _, _, fused = model(batch)
+        reconstruction_loss = reconstruction_pair_loss(
+            batch, reconstruction1, reconstruction2
         )
-        epoch_losses: dict[str, list[float]] = {
-            "reconstruction": [],
-            "kmeans": [],
-            "orthonormal": [],
-            "greedy": [],
-            "total": [],
-        }
-        for batch, batch_indices in loader:
-            optimizer.zero_grad(set_to_none=True)
-            reconstruction1, reconstruction2, _, _, fused = model(batch)
-            batch_labels = labels_all[batch_indices]
-            batch_centroids = centroids[batch_labels]
-            reconstruction_loss = reconstruction_pair_loss(
-                batch, reconstruction1, reconstruction2
-            )
-            kmeans_loss = squared_distance_sum(fused, batch_centroids)
-            orthonormal_loss = fused.new_zeros(())
-            greedy_loss = fused.new_zeros(())
-            if use_orthonormal or use_greedy:
-                if transform is None or transformed_centroids is None:
-                    msg = "Missing orthonormal transform for L3/L4 objective."
-                    raise RuntimeError(msg)
-                if use_orthonormal:
-                    batch_scatter = within_class_scatter(fused, batch_labels, centroids)
-                    orthonormal_loss = torch.trace(
-                        transform @ batch_scatter @ transform.T
-                    )
-                if use_greedy:
-                    transformed = fused @ transform.T
-                    greedy_loss = greedy_adjustment_loss(
-                        transformed, batch_labels, transformed_centroids
-                    )
-            total_loss = (
-                config.reconstruction_weight * reconstruction_loss
-                + config.kmeans_weight * kmeans_loss
-                + config.orthonormal_weight * orthonormal_loss
-                + config.greedy_weight * greedy_loss
-            )
-            total_loss.backward()
-            optimizer.step()
+        kmeans_loss = squared_distance_sum(fused, centroids[batch_labels])
+        batch_scatter = within_class_scatter(fused, batch_labels, centroids)
+        orthonormal_loss = torch.trace(transform @ batch_scatter @ transform.T)
+        transformed = fused @ transform.T
+        target = transformed_embeddings[batch_indices].clone()
+        target[:, -1] = transformed_centroids[batch_labels, -1]
+        greedy_loss = squared_distance_sum(transformed, target)
+        total_loss = reconstruction_loss + kmeans_loss + orthonormal_loss + greedy_loss
+        total_loss.backward()
+        optimizer.step()
 
-            epoch_losses["reconstruction"].append(
-                float(reconstruction_loss.detach().cpu())
-            )
-            epoch_losses["kmeans"].append(float(kmeans_loss.detach().cpu()))
-            epoch_losses["orthonormal"].append(float(orthonormal_loss.detach().cpu()))
-            epoch_losses["greedy"].append(float(greedy_loss.detach().cpu()))
-            epoch_losses["total"].append(float(total_loss.detach().cpu()))
-
+        reconstruction_loss_value = float(reconstruction_loss.detach().cpu())
+        kmeans_loss_value = float(kmeans_loss.detach().cpu())
+        orthonormal_loss_value = float(orthonormal_loss.detach().cpu())
+        greedy_loss_value = float(greedy_loss.detach().cpu())
+        total_loss_value = float(total_loss.detach().cpu())
         history.append(
             TrainingHistoryRow(
                 dataset=dataset_name,
                 method_mode=config.method_mode,
                 kmeans_init=config.kmeans_init,
-                phase="joint",
-                epoch=epoch,
-                reconstruction_loss=float(np.mean(epoch_losses["reconstruction"])),
-                kmeans_loss=float(np.mean(epoch_losses["kmeans"])),
-                orthonormal_loss=float(np.mean(epoch_losses["orthonormal"])),
-                greedy_loss=float(np.mean(epoch_losses["greedy"])),
-                total_loss=float(np.mean(epoch_losses["total"])),
+                phase='joint_l1_l2_l3_l4',
+                epoch=step,
+                reconstruction_loss=reconstruction_loss_value,
+                kmeans_loss=kmeans_loss_value,
+                orthonormal_loss=orthonormal_loss_value,
+                greedy_loss=greedy_loss_value,
+                total_loss=total_loss_value,
                 acc=acc,
                 nmi=nmi,
                 ari=ari,
@@ -712,25 +700,9 @@ def train_joint_phase(
             )
         )
 
-        selection_score = acc if select_by_acc else silhouette
-        if selection_score is not None and selection_score > best_selection_score:
-            best_selection_score = selection_score
-            best_silhouette = silhouette if silhouette is not None else float("nan")
-            best_epoch = epoch
-            best_labels = labels_np.copy()
-            best_embeddings = embeddings_np.copy()
-            stale_epochs = 0
-        else:
-            stale_epochs += 1
-
-        if (
-            label_change_rate is not None
-            and label_change_rate <= config.convergence_tol
-        ):
-            converged = True
+        if converged:
             break
-        if stale_epochs >= config.early_stopping_patience:
-            break
+        batch_index = batch_index + 1 if stop_index < len(x_tensor) else 0
 
     if best_labels is None or best_embeddings is None:
         final_embeddings = (
@@ -740,7 +712,7 @@ def train_joint_phase(
         best_labels = final_kmeans.labels_.astype(int)
         best_embeddings = final_embeddings
         best_epoch = len(history)
-        best_silhouette = safe_silhouette(best_embeddings, best_labels) or float("nan")
+        best_silhouette = safe_silhouette(best_embeddings, best_labels) or float('nan')
 
     return (
         history,
@@ -751,14 +723,13 @@ def train_joint_phase(
         float(best_silhouette),
     )
 
-
-def label_delta(previous: np.ndarray | None, current: np.ndarray) -> float | None:
-    """Return the fraction of changed labels between consecutive epochs."""
-
-    if previous is None:
-        return None
-    return float(np.mean(previous != current))
-
+def inertia_from_labels(embeddings: np.ndarray, labels: np.ndarray) -> float:
+    inertia = 0.0
+    for label in np.unique(labels):
+        cluster_points = embeddings[labels == label]
+        centroid = cluster_points.mean(axis=0)
+        inertia += float(np.sum((cluster_points - centroid) ** 2))
+    return inertia
 
 def safe_silhouette(embeddings: np.ndarray, labels: np.ndarray) -> float | None:
     """Compute silhouette unless labels are degenerate."""
@@ -802,12 +773,11 @@ def run_mvdec_paper_baseline(
     history.extend(joint_history)
     fit_time = perf_counter() - start
 
-    final_kmeans = kmeans_on_embeddings(embeddings, inputs.n_clusters, config)
-    labels = final_kmeans.labels_.astype(int)
     acc, nmi, ari = external_metrics(y_true, labels)
-    silhouette = safe_silhouette(embeddings, labels) or float("nan")
+    silhouette = safe_silhouette(embeddings, labels) or np.nan
     n_distinct_clusters = len(np.unique(labels))
     is_degenerate = n_distinct_clusters < inputs.n_clusters
+    inertia = inertia_from_labels(embeddings, labels)
 
     result = MvDECPaperResult(
         dataset=inputs.name,
@@ -821,7 +791,7 @@ def run_mvdec_paper_baseline(
         cluster_sizes=np.bincount(labels, minlength=inputs.n_clusters)
         .astype(int)
         .tolist(),
-        inertia=float(final_kmeans.inertia_),
+        inertia=inertia,
         best_epoch=best_epoch,
         converged=converged,
         fit_time_seconds=float(fit_time),
@@ -908,104 +878,6 @@ def run_fused_kmeans_baseline(
         config.kmeans_init,
     ), history
 
-def run_legacy_notebook_baseline(
-    inputs: DatasetInputs,
-    config: MvDECPaperConfig,
-) -> tuple[MvDECPaperResult, pd.DataFrame, list[TrainingHistoryRow]]:
-    """Run the TensorFlow pipeline from legacy/representation.ipynb."""
-
-    from representation_learning.mvdec_representation import (  # noqa: PLC0415
-        MvDECRepresentationConfig,
-        train_mvdec_representation,
-    )
-
-    set_random_seed(config.random_state)
-    X = feature_matrix(inputs.X)
-    legacy_config = MvDECRepresentationConfig(
-        seed=config.random_state,
-        n_iterations=20,
-        n_clusters=inputs.n_clusters,
-        batch_size=128,
-        epochs=100,
-        validation_split=0.1,
-        early_stopping_patience=10,
-        learning_rate=1e-4,
-        view1_latent_dim=4,
-        kmeans_n_init=10,
-        init_methods=("k-means++", "random"),
-    )
-
-    start = perf_counter()
-    legacy_result, legacy_history = train_mvdec_representation(
-        X=X,
-        config=legacy_config,
-        expected_fused_dim=None,
-    )
-    fit_time = perf_counter() - start
-
-    embeddings = np.asarray(legacy_result["h_fused"], dtype=np.float32)
-    labels = np.asarray(legacy_result["labels"], dtype=int)
-    best_init = str(legacy_result["init"])
-    y_true = true_labels(inputs.y)
-    acc, nmi, ari = external_metrics(y_true, labels)
-    silhouette = safe_silhouette(embeddings, labels) or float("nan")
-    n_distinct_clusters = len(np.unique(labels))
-    is_degenerate = n_distinct_clusters < inputs.n_clusters
-
-    history = [
-        TrainingHistoryRow(
-            dataset=inputs.name,
-            method_mode=config.method_mode,
-            kmeans_init=str(row["init"]),
-            phase="legacy_notebook",
-            epoch=int(row["iteration"]),
-            reconstruction_loss=float("nan"),
-            kmeans_loss=None,
-            orthonormal_loss=None,
-            greedy_loss=None,
-            total_loss=float("nan"),
-            acc=None,
-            nmi=None,
-            ari=None,
-            silhouette=float(row["silhouette"]),
-            label_change_rate=None,
-        )
-        for row in legacy_history.to_dict("records")
-    ]
-
-    result = MvDECPaperResult(
-        dataset=inputs.name,
-        method_mode=config.method_mode,
-        kmeans_init=best_init,
-        selected=True,
-        acc=acc,
-        nmi=nmi,
-        ari=ari,
-        silhouette=silhouette,
-        cluster_sizes=np.bincount(labels, minlength=inputs.n_clusters)
-        .astype(int)
-        .tolist(),
-        inertia=float("nan"),
-        best_epoch=int(legacy_result["iteration"]),
-        converged=False,
-        fit_time_seconds=float(fit_time),
-        device="tensorflow",
-        status="failed_degenerate_clusters" if is_degenerate else "ok",
-        error_message=(
-            f"K-Means found {n_distinct_clusters} distinct clusters, "
-            f"expected {inputs.n_clusters}."
-            if is_degenerate
-            else None
-        ),
-    )
-    return result, make_label_frame(
-        inputs,
-        labels,
-        config.method_mode,
-        best_init,
-    ), history
-
-
 def device_description(device: torch.device) -> str:
     """Return a readable device description for logs and workbooks."""
 
@@ -1080,9 +952,9 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
         "within-class scatter eigenvectors, orthonormal transform, greedy loss"
     )
     rows["loss_reduction_note"] = (
-        "Losses follow the paper equations as sums of squared distances on each "
-        "mini-batch: L1 reconstruction, L2 K-Means, L3 Tr(V Sw V^T), and L4 "
-        "greedy adjustment."
+        "Pretraining uses two-view reconstruction. The joint phase keeps the "
+        "MvDEC 2025 loss L1 + L2 + L3 + L4; DEKM 2021 specifies how Sw, "
+        "ascending eigenvectors, and greedy L4 targets are computed."
     )
     rows["best_epoch_selection_note"] = (
         "Datasets with ground-truth labels select the best epoch by ACC; unlabeled "
@@ -1093,14 +965,12 @@ def config_frame(config: MvDECPaperConfig) -> pd.DataFrame:
         "trial with selected=True."
     )
     rows["method_mode_note"] = (
-        "mvdec uses the full joint objective L1+L2+L3+L4 with paper-style dims; "
-        "legacy-dims-mvdec uses full L1+L2+L3+L4 with the legacy Tiki notebook "
-        "dims; l1-l2-mvdec uses joint training with only reconstruction and "
-        "K-Means losses; fused-kmeans/fused-only-kmeans pretrain the two "
-        "autoencoders, then cluster the average fused representation directly; "
-        "legacy-fused-kmeans does the same direct K-Means comparison with legacy "
-        "dims; legacy-notebook runs the TensorFlow notebook pipeline with 20 "
-        "representation iterations."
+        "mvdec uses the 2025 two-view MvDEC architecture and joint objective, "
+        "with L3/L4 made explicit from Guo et al. (2021); mimvdec uses the "
+        "same objective with the MiMvDEC document dims; fused-kmeans/"
+        "fused-only-kmeans pretrain the two autoencoders, then cluster the "
+        "average fused representation directly; legacy-fused-kmeans does the "
+        "same direct K-Means comparison with MiMvDEC dims."
     )
     return pd.DataFrame(
         [{"parameter": parameter, "value": value} for parameter, value in rows.items()]

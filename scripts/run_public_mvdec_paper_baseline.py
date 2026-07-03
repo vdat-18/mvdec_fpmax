@@ -59,11 +59,6 @@ def parse_args() -> argparse.Namespace:
         help="Overwrite an existing workbook.",
     )
     parser.add_argument(
-        "--fail-fast",
-        action="store_true",
-        help="Stop immediately when one dataset fails.",
-    )
-    parser.add_argument(
         "--device",
         default="auto",
         help="Torch device: auto, cpu, cuda, or cuda:0.",
@@ -81,6 +76,12 @@ def parse_args() -> argparse.Namespace:
         help="Override joint clustering epochs.",
     )
     parser.add_argument(
+        "--update-interval",
+        type=int,
+        default=None,
+        help="Override DEKM K-Means refresh interval during greedy updates.",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=None,
@@ -91,18 +92,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Override first-view bottleneck dimension before reconstruction concat.",
-    )
-    parser.add_argument(
-        "--reconstruction-weight",
-        type=float,
-        default=None,
-        help="Override reconstruction loss weight.",
-    )
-    parser.add_argument(
-        "--kmeans-weight",
-        type=float,
-        default=None,
-        help="Override K-Means loss weight.",
     )
     parser.add_argument(
         "--kmeans-inits",
@@ -117,30 +106,15 @@ def parse_args() -> argparse.Namespace:
         default=("mvdec", "fused-kmeans"),
         choices=(
             "mvdec",
-            "legacy-dims-mvdec",
-            "l1-l2-mvdec",
+            "mimvdec",
             "fused-kmeans",
             "fused-only-kmeans",
             "legacy-fused-kmeans",
-            "legacy-notebook",
         ),
         help=(
-            "Method modes to run. legacy-dims-mvdec is full MvDEC with the "
-            "Tiki notebook dims; l1-l2-mvdec keeps only reconstruction and "
-            "K-Means losses; legacy-notebook runs the TensorFlow notebook logic."
+            "Method modes to run. mimvdec is full MvDEC with the "
+            "MiMvDEC document dims."
         ),
-    )
-    parser.add_argument(
-        "--orthonormal-weight",
-        type=float,
-        default=None,
-        help="Override orthonormal loss weight.",
-    )
-    parser.add_argument(
-        "--greedy-weight",
-        type=float,
-        default=None,
-        help="Override greedy adjustment loss weight.",
     )
     parser.add_argument(
         "--smoke",
@@ -167,10 +141,6 @@ def build_config(args: argparse.Namespace, config_cls):
         hidden_dims=(500, 500, 2000),
         latent_dim=10,
         kmeans_n_init=20,
-        reconstruction_weight=1.0,
-        kmeans_weight=1.0,
-        orthonormal_weight=1.0,
-        greedy_weight=1.0,
     )
     if args.pretrain_epochs is not None:
         config = replace(config, pretrain_epochs=args.pretrain_epochs)
@@ -178,16 +148,10 @@ def build_config(args: argparse.Namespace, config_cls):
         config = replace(config, joint_epochs=args.joint_epochs)
     if args.batch_size is not None:
         config = replace(config, batch_size=args.batch_size)
+    if args.update_interval is not None:
+        config = replace(config, update_interval=args.update_interval)
     if args.latent_dim is not None:
         config = replace(config, latent_dim=args.latent_dim)
-    if args.reconstruction_weight is not None:
-        config = replace(config, reconstruction_weight=args.reconstruction_weight)
-    if args.kmeans_weight is not None:
-        config = replace(config, kmeans_weight=args.kmeans_weight)
-    if args.orthonormal_weight is not None:
-        config = replace(config, orthonormal_weight=args.orthonormal_weight)
-    if args.greedy_weight is not None:
-        config = replace(config, greedy_weight=args.greedy_weight)
     if args.smoke:
         config = replace(
             config,
@@ -196,7 +160,6 @@ def build_config(args: argparse.Namespace, config_cls):
             pretrain_epochs=args.pretrain_epochs or 2,
             joint_epochs=args.joint_epochs or 2,
             kmeans_n_init=2,
-            early_stopping_patience=2,
         )
     return config
 
@@ -215,9 +178,8 @@ def mode_config(config, method_mode: str, kmeans_init: str):
 
     config = replace(config, method_mode=method_mode, kmeans_init=kmeans_init)
     if method_mode in {
-        "legacy-dims-mvdec",
+        "mimvdec",
         "legacy-fused-kmeans",
-        "legacy-notebook",
     }:
         config = replace(
             config,
@@ -225,7 +187,7 @@ def mode_config(config, method_mode: str, kmeans_init: str):
             hidden_dims=(250, 250, 1000),
             latent_dim=4,
         )
-    if method_mode in {"legacy-fused-kmeans", "legacy-notebook"}:
+    if method_mode == "legacy-fused-kmeans":
         config = replace(
             config,
             learning_rate=1e-4,
@@ -233,8 +195,6 @@ def mode_config(config, method_mode: str, kmeans_init: str):
             pretrain_epochs=100,
             kmeans_n_init=10,
         )
-    if method_mode == "l1-l2-mvdec":
-        config = replace(config, orthonormal_weight=0.0, greedy_weight=0.0)
     return config
 
 
@@ -248,14 +208,12 @@ def main() -> None:
 
     from public_baselines.mvdec_paper import (  # noqa: PLC0415
         MvDECPaperConfig,
-        MvDECPaperResult,
         load_dataset,
         load_registry,
         log_device,
         metadata_frame,
         resolve_processed_root,
         run_fused_kmeans_baseline,
-        run_legacy_notebook_baseline,
         run_mvdec_paper_baseline,
         selected_datasets,
         write_workbook,
@@ -285,10 +243,7 @@ def main() -> None:
         )
         candidate_results = []
         for method_mode in args.modes:
-            if method_mode == "legacy-notebook":
-                runner = run_legacy_notebook_baseline
-                kmeans_inits = (args.kmeans_inits[0],)
-            elif method_mode in {
+            if method_mode in {
                 "fused-kmeans",
                 "fused-only-kmeans",
                 "legacy-fused-kmeans",
@@ -306,53 +261,24 @@ def main() -> None:
                     method_mode,
                     kmeans_init,
                 )
-                try:
-                    inputs = load_dataset(dataset, processed_root)
-                    result, label_frame, history = runner(
-                        inputs,
-                        candidate_config,
-                    )
-                    label_frames.append(label_frame)
-                    history_rows.extend(history)
-                    logger.info(
-                        "{} mode={} init={} acc={} nmi={} ari={} silhouette={:.4f}",
-                        result.dataset,
-                        result.method_mode,
-                        result.kmeans_init,
-                        None if result.acc is None else round(result.acc, 4),
-                        None if result.nmi is None else round(result.nmi, 4),
-                        None if result.ari is None else round(result.ari, 4),
-                        result.silhouette,
-                    )
-                except Exception as error:  # noqa: BLE001 - keep long Colab runs alive.
-                    logger.exception(
-                        "{} mode={} init={} failed",
-                        dataset["name"],
-                        method_mode,
-                        kmeans_init,
-                    )
-                    if args.fail_fast:
-                        raise
-                    result = MvDECPaperResult(
-                        dataset=dataset["name"],
-                        method_mode=method_mode,
-                        kmeans_init=kmeans_init,
-                        selected=False,
-                        acc=None,
-                        nmi=None,
-                        ari=None,
-                        silhouette=float("nan"),
-                        cluster_sizes=[],
-                        inertia=float("nan"),
-                        best_epoch=0,
-                        converged=False,
-                        fit_time_seconds=0.0,
-                        device=candidate_config.device,
-                        status="failed",
-                        error_message=str(error),
-                    )
+                inputs = load_dataset(dataset, processed_root)
+                result, label_frame, history = runner(
+                    inputs,
+                    candidate_config,
+                )
+                label_frames.append(label_frame)
+                history_rows.extend(history)
+                logger.info(
+                    "{} mode={} init={} acc={} nmi={} ari={} silhouette={:.4f}",
+                    result.dataset,
+                    result.method_mode,
+                    result.kmeans_init,
+                    None if result.acc is None else round(result.acc, 4),
+                    None if result.nmi is None else round(result.nmi, 4),
+                    None if result.ari is None else round(result.ari, 4),
+                    result.silhouette,
+                )
                 candidate_results.append(result)
-
         best_index = max(
             range(len(candidate_results)),
             key=lambda index: selection_score(candidate_results[index]),
