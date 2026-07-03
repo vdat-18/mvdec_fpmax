@@ -44,17 +44,44 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
         y = np.load(dir_path + '10k_target.npy').astype(np.int32)
         x = x / tf.expand_dims(tf.norm(x, ord=2, axis=-1), -1).numpy()
     elif ds_name == '20NEWS':
-        from sklearn.datasets import fetch_20newsgroups
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        # Fetch the dataset
-        _20news = fetch_20newsgroups(subset="all")
-        print("Dataset 20NEWS loaded...")
-        data = _20news.data
-        y = _20news.target
-        vectorizer = TfidfVectorizer(max_features=2000)
-        data = vectorizer.fit_transform(data)  # Keep only the 2000 top words in the vocabulary
-        x = data.toarray()  # Switch from sparse matrix to full matrix
-        x = x / tf.expand_dims(tf.norm(x, ord=2, axis=-1), -1).numpy()
+        local_files = [
+            'train_data.npz', 'train_label.npz',
+            'test_data.npz', 'test_label.npz',
+        ]
+        if all(os.path.exists(dir_path + file_name) for file_name in local_files):
+            import scipy.sparse as sp
+
+            def load_label(file_name):
+                try:
+                    label = sp.load_npz(dir_path + file_name).toarray()
+                except Exception:
+                    with np.load(dir_path + file_name, allow_pickle=True) as data:
+                        label = data[data.files[0]]
+                return np.asarray(label).reshape(-1).astype(np.int32)
+
+            x = sp.vstack([
+                sp.load_npz(dir_path + 'train_data.npz'),
+                sp.load_npz(dir_path + 'test_data.npz'),
+            ]).toarray().astype(np.float32)
+            y = np.concatenate([
+                load_label('train_label.npz'),
+                load_label('test_label.npz'),
+            ])
+            print("Dataset 20NEWS loaded from local files...")
+        else:
+            from sklearn.datasets import fetch_20newsgroups
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            # Fetch the dataset
+            _20news = fetch_20newsgroups(subset="all")
+            print("Dataset 20NEWS loaded from sklearn...")
+            data = _20news.data
+            y = _20news.target
+            vectorizer = TfidfVectorizer(max_features=2000)
+            data = vectorizer.fit_transform(data)  # Keep only the 2000 top words in the vocabulary
+            x = data.toarray().astype(np.float32)  # Switch from sparse matrix to full matrix
+        norm = np.linalg.norm(x, ord=2, axis=-1, keepdims=True)
+        norm[norm == 0] = 1
+        x = x / norm
     elif ds_name == 'RCV1':
         from sklearn.datasets import fetch_rcv1
         import scipy.sparse as sp
