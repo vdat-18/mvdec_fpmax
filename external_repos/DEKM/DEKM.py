@@ -10,9 +10,15 @@ from utils import log_csv
 import time
 import argparse
 
+
+def set_random_seed(seed):
+    if seed is not None:
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+
+
 def model_conv(load_weights=True):
-    # init = VarianceScaling(scale=1. / 3., mode='fan_in', distribution='uniform')
-    init = 'uniform'
+    init = 'glorot_uniform'
     filters = [32, 64, 128, hidden_units]
     if input_shape[0] % 8 == 0:
         pad3 = 'same'
@@ -25,14 +31,27 @@ def model_conv(load_weights=True):
         x)
     x = layers.Conv2D(filters[2], kernel_size=3, strides=2, padding=pad3, activation='relu', kernel_initializer=init)(x)
     x = layers.Flatten()(x)
-    x = layers.Dense(units=filters[-1], name='embed')(x)
+    x = layers.Dense(units=filters[-1], name='embed', kernel_initializer=init)(x)
 #     x = tf.divide(x, tf.expand_dims(tf.norm(x, 2, -1), -1))
     h = x
-    x = layers.Dense(filters[2] * (input_shape[0] // 8) * (input_shape[0] // 8), activation='relu')(x)
+    x = layers.Dense(
+        filters[2] * (input_shape[0] // 8) * (input_shape[0] // 8),
+        activation='relu',
+        kernel_initializer=init,
+    )(x)
     x = layers.Reshape((input_shape[0] // 8, input_shape[0] // 8, filters[2]))(x)
-    x = layers.Conv2DTranspose(filters[1], kernel_size=3, strides=2, padding=pad3, activation='relu')(x)
-    x = layers.Conv2DTranspose(filters[0], kernel_size=5, strides=2, padding='same', activation='relu')(x)
-    x = layers.Conv2DTranspose(input_shape[2], kernel_size=5, strides=2, padding='same')(x)
+    x = layers.Conv2DTranspose(
+        filters[1], kernel_size=3, strides=2, padding=pad3,
+        activation='relu', kernel_initializer=init,
+    )(x)
+    x = layers.Conv2DTranspose(
+        filters[0], kernel_size=5, strides=2, padding='same',
+        activation='relu', kernel_initializer=init,
+    )(x)
+    x = layers.Conv2DTranspose(
+        input_shape[2], kernel_size=5, strides=2, padding='same',
+        kernel_initializer=init,
+    )(x)
     output = layers.Concatenate()([h,
                                    layers.Flatten()(x)])
     model = Model(inputs=input, outputs=output)
@@ -57,20 +76,23 @@ def train_base(ds_xx):
 
 
 def sorted_eig(X):
-    e_vals, e_vecs = np.linalg.eig(X)  # 特征向量v[:,i]对应特征值w[i]，即每一列每一个特征向量
+    X = (X + X.T) / 2
+    e_vals, e_vecs = np.linalg.eigh(X)  # 特征向量v[:,i]对应特征值w[i]，即每一列每一个特征向量
     idx = np.argsort(e_vals)
     e_vecs = e_vecs[:, idx]
     e_vals = e_vals[idx]
     return e_vals, e_vecs
 
 
-def train(x, y):
+def train(x, y, random_seed=None):
     log_str = f'iter; acc, nmi, ri ; loss; n_changed_assignment; time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     log_csv(log_str.split(';'), file_name=ds_name)
     model = model_conv()
 
     optimizer = tf.keras.optimizers.Adam()
     loss_value = 0
+    acc = np.nan
+    nmi = np.nan
     index = 0
     kmeans_n_init = 100
     assignment = np.array([-1] * len(x))
@@ -78,7 +100,11 @@ def train(x, y):
     for ite in range(int(140 * 100)):
         if ite % update_interval == 0:
             H = model(x).numpy()[:, :hidden_units]
-            ans_kmeans = KMeans(n_clusters=n_clusters, n_init=kmeans_n_init).fit(H)
+            ans_kmeans = KMeans(
+                n_clusters=n_clusters,
+                n_init=kmeans_n_init,
+                random_state=random_seed,
+            ).fit(H)
             kmeans_n_init = int(ans_kmeans.n_iter_ * 2)
 
             U = ans_kmeans.cluster_centers_
@@ -115,7 +141,7 @@ def train(x, y):
             print(log_str)
             log_csv(log_str.split(';'), file_name=ds_name)
 
-        if n_change_assignment <= len(x) * 0.005:
+        if n_change_assignment <= len(x) * 0.001:
             model.save_weights(f'weight_final_l2_{ds_name}.weights.h5')
             print('end')
             break
@@ -134,6 +160,7 @@ def train(x, y):
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
         index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
+    return acc, nmi
 
 
 if __name__ == '__main__':
@@ -141,11 +168,13 @@ if __name__ == '__main__':
     pretrain_batch_size = 256
     batch_size = 256
     update_interval = 40
-    hidden_units = 10
-
     parser = argparse.ArgumentParser(description='select dataset:MNIST,COIL20,FRGC,USPS')
     parser.add_argument('ds_name', default='MNIST')
+    parser.add_argument('--runs', type=int, default=3)
+    parser.add_argument('--seed', type=int, default=None)
     args = parser.parse_args()
+    if args.runs < 1:
+        raise ValueError('--runs must be at least 1')
     if args.ds_name is None or not args.ds_name in ['MNIST', 'FRGC', 'COIL20', 'USPS']:
         ds_name = 'MNIST'
     else:
@@ -164,10 +193,35 @@ if __name__ == '__main__':
         input_shape = (32, 32, 3)
         n_clusters = 20
 
-    time_start = time.time()
-    x, y = get_xy(ds_name=ds_name)
-    ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(8000).batch(pretrain_batch_size)
-    train_base(ds_xx)
-    train(x, y)
-    print(time.time() - time_start)
+    hidden_units = n_clusters
+
+    run_metrics = []
+    time_all_start = time.time()
+    for run_index in range(args.runs):
+        run_seed = None if args.seed is None else args.seed + run_index
+        set_random_seed(run_seed)
+        time_start = time.time()
+        x, y = get_xy(ds_name=ds_name, shuffle_seed=run_seed)
+        ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(
+            8000, seed=run_seed
+        ).batch(pretrain_batch_size)
+        train_base(ds_xx)
+        acc, nmi = train(x, y, random_seed=run_seed)
+        run_metrics.append((acc, nmi))
+        run_str = (
+            f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
+            f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
+        )
+        print(run_str)
+        log_csv(run_str.split(';'), file_name=ds_name)
+
+    metrics = np.asarray(run_metrics, dtype=float)
+    avg_acc = float(np.nanmean(metrics[:, 0]))
+    avg_nmi = float(np.nanmean(metrics[:, 1]))
+    avg_str = (
+        f'average over {args.runs} runs; acc:{avg_acc:.5f}; '
+        f'nmi:{avg_nmi:.5f}; time:{time.time() - time_all_start:.3f}'
+    )
+    print(avg_str)
+    log_csv(avg_str.split(';'), file_name=ds_name)
 

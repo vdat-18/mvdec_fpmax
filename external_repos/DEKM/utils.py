@@ -12,6 +12,10 @@ def get_ACC_NMI(_y, _y_pred):
     y_pred = np.array(_y_pred)
     s = np.unique(y_pred)
     t = np.unique(y)
+    if len(s) != len(t):
+        raise ValueError(
+            f'Predicted cluster count {len(s)} does not match true label count {len(t)}.'
+        )
 
     N = len(np.unique(y_pred))
     C = np.zeros((N, N), dtype=np.int32)
@@ -170,7 +174,7 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
             y_unique = np.unique(y)
             for i in range(len(y_unique)):
                 y[y == y_unique[i]] = i
-    if not shuffle_seed:
+    if shuffle_seed is None:
         shuffle_seed = int(np.random.randint(100))
     idx = np.arange(0, len(x))
     idx = tf.random.shuffle(idx, seed=shuffle_seed).numpy()
