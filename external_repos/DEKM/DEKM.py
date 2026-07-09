@@ -77,7 +77,7 @@ def train_base(ds_xx):
 
 def sorted_eig(X):
     X = (X + X.T) / 2
-    e_vals, e_vecs = np.linalg.eigh(X)  # 特征向量v[:,i]对应特征值w[i]，即每一列每一个特征向量
+    e_vals, e_vecs = np.linalg.eigh(X)  # Eigenvector v[:, i] corresponds to eigenvalue w[i]; each column is one eigenvector.
     idx = np.argsort(e_vals)
     e_vecs = e_vecs[:, idx]
     e_vals = e_vals[idx]

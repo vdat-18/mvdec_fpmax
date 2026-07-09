@@ -36,6 +36,11 @@ dist/
 *.log
 logs/
 
+# DEKM downloaded datasets and run artifacts
+external_repos/DEKM/datasets/
+external_repos/DEKM/log_history/
+external_repos/DEKM/*.weights.h5
+
 # Experiment outputs
 output/*_trials.csv
 output/**/*_trials.csv

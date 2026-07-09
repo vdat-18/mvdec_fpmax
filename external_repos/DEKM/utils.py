@@ -33,9 +33,6 @@ def get_ACC_NMI(_y, _y_pred):
         count += np.count_nonzero(idx)
     acc = np.round(1.0 * count / len(y), 5)
 
-    temp = np.array(y_pred)
-    for i in range(N):
-        y_pred[temp == col[i]] = i
     from sklearn.metrics import normalized_mutual_info_score
     nmi = np.round(normalized_mutual_info_score(y, y_pred), 5)
     return acc, nmi
@@ -55,22 +52,21 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
         if all(os.path.exists(dir_path + file_name) for file_name in local_files):
             import scipy.sparse as sp
 
-            def load_label(file_name):
+            def load_npz_array(file_name):
                 try:
-                    label = sp.load_npz(dir_path + file_name).toarray()
+                    return sp.load_npz(dir_path + file_name).toarray()
                 except Exception:
                     with np.load(dir_path + file_name, allow_pickle=True) as data:
-                        label = data[data.files[0]]
-                return np.asarray(label).reshape(-1).astype(np.int32)
+                        return data[data.files[0]]
 
-            x = sp.vstack([
-                sp.load_npz(dir_path + 'train_data.npz'),
-                sp.load_npz(dir_path + 'test_data.npz'),
-            ]).toarray().astype(np.float32)
+            x = np.concatenate([
+                load_npz_array('train_data.npz'),
+                load_npz_array('test_data.npz'),
+            ]).astype(np.float32)
             y = np.concatenate([
-                load_label('train_label.npz'),
-                load_label('test_label.npz'),
-            ])
+                load_npz_array('train_label.npz'),
+                load_npz_array('test_label.npz'),
+            ]).reshape(-1).astype(np.int32)
             print("Dataset 20NEWS loaded from local files...")
         else:
             from sklearn.datasets import fetch_20newsgroups
@@ -91,7 +87,7 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
         import scipy.sparse as sp
 
         # Fetch the dataset
-        dataset = fetch_rcv1(subset="all",data_home='/home/wengang/code_jupyter/DK/datasets/')
+        dataset = fetch_rcv1(subset="all")
         print("Dataset RCV1 loaded...")
         data = dataset.data
         target = dataset.target
