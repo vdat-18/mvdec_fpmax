@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import layers
+from tensorflow.keras import losses
 from tensorflow.keras.models import Model
 
 # Air pollution dataset (data/preprocessed_data/data_demvk.csv): 13 features,
@@ -12,6 +13,7 @@ from tensorflow.keras.models import Model
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
 hidden_units = 10
+pretrain_epochs = 200
 
 
 def get_x_airpollution(dir_path=r'data/preprocessed_data/', log_print=True, shuffle_seed=None):
@@ -101,3 +103,26 @@ def model_view2(load_weights=True):
         model.load_weights(f'weight_base_view2_{ds_name}.weights.h5')
         print('model_view2: weights was loaded')
     return model
+
+
+def loss_train_base(y_true, y_pred):
+    # Shared by both views: only the reconstruction half of the concatenated
+    # [h, y] output is compared to the input (Eq. 5) -- the embedding half is
+    # ignored here, exactly as DEKM_dense.py::loss_train_base does.
+    y_true = layers.Flatten()(y_true)
+    y_pred = y_pred[:, hidden_units:]
+    return losses.mse(y_true, y_pred)
+
+
+def train_base_view1(ds_xx):
+    model = model_view1(load_weights=False)
+    model.compile(optimizer='adam', loss=loss_train_base)
+    model.fit(ds_xx, epochs=pretrain_epochs, verbose=2)
+    model.save_weights(f'weight_base_view1_{ds_name}.weights.h5')
+
+
+def train_base_view2(ds_xx):
+    model = model_view2(load_weights=False)
+    model.compile(optimizer='adam', loss=loss_train_base)
+    model.fit(ds_xx, epochs=pretrain_epochs, verbose=2)
+    model.save_weights(f'weight_base_view2_{ds_name}.weights.h5')
