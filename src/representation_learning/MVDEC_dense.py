@@ -11,6 +11,7 @@ from utils import get_xy
 from utils import log_csv
 import time
 import argparse
+import os
 
 # Air pollution dataset (data/preprocessed_data/data_demvk.csv): 13 features,
 # n_clusters=4 confirmed via the paper's own Elbow analysis; hidden_units=10
@@ -44,7 +45,9 @@ def get_x_airpollution(dir_path=r'data/preprocessed_data/', log_print=True, shuf
     x = x[idx]
     if log_print:
         print(ds_name)
-    return x
+    # idx is returned so callers can map shuffled rows (and later, the fused
+    # embedding/cluster assignment) back to the original CSV row order.
+    return x, idx
 
 
 def model_view1(load_weights=True):
@@ -153,10 +156,14 @@ def sorted_eig(X):
     return e_vals, e_vecs
 
 
-def train(x, y=None, random_seed=None):
+def train(x, y=None, orig_idx=None, random_seed=None):
     # y is only available for labeled benchmark datasets (REUTERS/20NEWS/RCV1);
     # air pollution has no ground truth, so it stays None and silhouette is
-    # used instead of ACC/NMI.
+    # used instead of ACC/NMI. orig_idx maps each (shuffled) row of x back to
+    # its row number in the original, unshuffled source file -- needed so the
+    # saved fused embedding/cluster assignment can later be joined back to the
+    # original data for re-clustering or interpretation (e.g. land-use/traffic
+    # correlation, as in the paper's Section 5.5).
     log_str = f'iter; metric; loss; n_changed_assignment; time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     log_csv(log_str.split(';'), file_name=ds_name)
     model1 = model_view1()
@@ -244,6 +251,18 @@ def train(x, y=None, random_seed=None):
         optimizer.apply_gradients(zip(grads, trainable_variables))
 
         index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
+
+    if y is None and orig_idx is not None:
+        # Save the final fused embedding + cluster assignment so clustering
+        # can be redone (e.g. with a different k) or analyzed (e.g. joined
+        # back to the original CSV via orig_index) without retraining.
+        if not os.path.exists('output'):
+            os.makedirs('output')
+        result = pd.DataFrame(H, columns=[f'h_{i}' for i in range(hidden_units)])
+        result.insert(0, 'orig_index', orig_idx)
+        result['cluster'] = assignment
+        result.to_csv(f'output/{ds_name}_clusters.csv', index=False)
+
     if y is not None:
         return acc, nmi
     return silhouette
@@ -290,8 +309,9 @@ if __name__ == '__main__':
         run_seed = None if args.seed is None else args.seed + run_index
         set_random_seed(run_seed)
         time_start = time.time()
+        orig_idx = None
         if ds_name == 'AIRPOLLUTION':
-            x = get_x_airpollution(shuffle_seed=run_seed)
+            x, orig_idx = get_x_airpollution(shuffle_seed=run_seed)
             y = None
         else:
             x, y = get_xy(
@@ -304,7 +324,7 @@ if __name__ == '__main__':
         ).batch(pretrain_batch_size)
         train_base_view1(ds_xx)
         train_base_view2(ds_xx)
-        metric = train(x, y=y, random_seed=run_seed)
+        metric = train(x, y=y, orig_idx=orig_idx, random_seed=run_seed)
         run_metrics.append(metric)
         if y is None:
             run_str = (

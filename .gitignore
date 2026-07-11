@@ -39,7 +39,9 @@ logs/
 # DEKM downloaded datasets and run artifacts
 external_repos/DEKM/datasets/
 external_repos/DEKM/log_history/
-external_repos/DEKM/*.weights.h5
+
+# Model weight checkpoints (regenerable, not meant for git; keep log_history/*.csv instead)
+*.weights.h5
 
 # Experiment outputs
 output/*_trials.csv
