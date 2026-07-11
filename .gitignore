@@ -25,8 +25,8 @@ build/
 dist/
 *.egg-info/
 
-# Reference papers and large document exports
-# docs/*.pdf
+# Reference papers and large document exports (copyrighted; repo is public)
+docs/*.pdf
 
 # Local environment files
 .env
