@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras.models import Model
 
@@ -9,6 +12,21 @@ from tensorflow.keras.models import Model
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
 hidden_units = 10
+
+
+def get_x_airpollution(dir_path=r'data/preprocessed_data/', log_print=True, shuffle_seed=None):
+    # Separate from utils.py::get_xy (which already covers REUTERS/20NEWS/RCV1
+    # as-is) because that dataset registry has no AIRPOLLUTION entry, and
+    # air pollution has no labels to return alongside x.
+    x = pd.read_csv(dir_path + 'data_demvk.csv').values.astype(np.float32)
+    if shuffle_seed is None:
+        shuffle_seed = int(np.random.randint(100))
+    idx = np.arange(0, len(x))
+    idx = tf.random.shuffle(idx, seed=shuffle_seed).numpy()
+    x = x[idx]
+    if log_print:
+        print(ds_name)
+    return x
 
 
 def model_view1(load_weights=True):
