@@ -40,3 +40,25 @@ phase:refine_iter_16, space:H_fused, silhouette = 0.6704181432723999, loss:0.002
 phase:final_recomputed_artifact, space:H_fused, silhouette = 0.6704181432723999, loss:0.00267999991774559, n_changed_assignment:0," cluster_sizes:[267, 220, 456, 682, 174]", time:93.081
 run 1/1, seed:42, silhouette:0.6704181432723999, time:93.129
 average over 1 runs, silhouette:0.67042, time:93.130
+phase, space, metric, loss, n_changed_assignment, cluster_sizes, raw_silhouette_same_labels, time:2026-07-13 12:31:15
+phase:baseline_raw_input, space:x, silhouette = 0.31003278493881226, loss:0.0, n_changed_assignment:1799," cluster_sizes:[180, 359, 589, 188, 483]", raw_silhouette_same_labels:0.31003278493881226, time:40.150
+phase:baseline_pretrain_fused, space:H_fused, silhouette = 0.30093812942504883, loss:0.0, n_changed_assignment:1799," cluster_sizes:[364, 594, 184, 172, 485]", raw_silhouette_same_labels:0.31094539165496826, time:40.813
+phase:refine_iter_1, space:H_fused, silhouette = 0.34632208943367004, loss:0.014630000106990337, n_changed_assignment:242," cluster_sizes:[333, 180, 441, 247, 598]", raw_silhouette_same_labels:0.2852051258087158, time:45.103
+phase:refine_iter_2, space:H_fused, silhouette = 0.423861563205719, loss:0.004339999984949827, n_changed_assignment:137," cluster_sizes:[342, 246, 176, 602, 433]", raw_silhouette_same_labels:0.2874186635017395, time:49.448
+phase:refine_iter_3, space:H_fused, silhouette = 0.46136274933815, loss:0.011800000444054604, n_changed_assignment:66," cluster_sizes:[432, 358, 187, 598, 224]", raw_silhouette_same_labels:0.2846800684928894, time:52.708
+phase:refine_iter_4, space:H_fused, silhouette = 0.5185542106628418, loss:0.007309999782592058, n_changed_assignment:86," cluster_sizes:[363, 437, 176, 601, 222]", raw_silhouette_same_labels:0.29298150539398193, time:55.784
+phase:refine_iter_5, space:H_fused, silhouette = 0.5593938827514648, loss:0.00875999964773655, n_changed_assignment:32," cluster_sizes:[224, 610, 352, 174, 439]", raw_silhouette_same_labels:0.2964833378791809, time:59.258
+phase:refine_iter_6, space:H_fused, silhouette = 0.5912227034568787, loss:0.009580000303685665, n_changed_assignment:31," cluster_sizes:[362, 171, 441, 605, 220]", raw_silhouette_same_labels:0.2976534962654114, time:63.229
+phase:refine_iter_7, space:H_fused, silhouette = 0.6118165254592896, loss:0.005210000090301037, n_changed_assignment:9," cluster_sizes:[362, 445, 169, 605, 218]", raw_silhouette_same_labels:0.296944797039032, time:66.596
+phase:refine_iter_8, space:H_fused, silhouette = 0.6318329572677612, loss:0.002689999993890524, n_changed_assignment:23," cluster_sizes:[381, 447, 168, 586, 217]", raw_silhouette_same_labels:0.2941267490386963, time:69.679
+phase:refine_iter_9, space:H_fused, silhouette = 0.6471405029296875, loss:0.004989999812096357, n_changed_assignment:7," cluster_sizes:[385, 219, 444, 583, 168]", raw_silhouette_same_labels:0.29416510462760925, time:72.846
+phase:refine_iter_10, space:H_fused, silhouette = 0.656261682510376, loss:0.003389999968931079, n_changed_assignment:13," cluster_sizes:[384, 214, 448, 585, 168]", raw_silhouette_same_labels:0.29483935236930847, time:76.712
+phase:refine_iter_11, space:H_fused, silhouette = 0.6723986864089966, loss:0.00215000007301569, n_changed_assignment:12," cluster_sizes:[583, 167, 450, 215, 384]", raw_silhouette_same_labels:0.29403379559516907, time:80.188
+phase:refine_iter_12, space:H_fused, silhouette = 0.6893349289894104, loss:0.002099999925121665, n_changed_assignment:3," cluster_sizes:[583, 167, 447, 218, 384]", raw_silhouette_same_labels:0.2938222885131836, time:83.145
+phase:refine_iter_13, space:H_fused, silhouette = 0.7000614404678345, loss:0.002589999930933118, n_changed_assignment:5," cluster_sizes:[385, 449, 167, 216, 582]", raw_silhouette_same_labels:0.29401323199272156, time:86.752
+phase:refine_iter_14, space:H_fused, silhouette = 0.71091228723526, loss:0.0027799999807029963, n_changed_assignment:4," cluster_sizes:[383, 214, 167, 451, 584]", raw_silhouette_same_labels:0.29449403285980225, time:90.534
+phase:refine_iter_15, space:H_fused, silhouette = 0.725206196308136, loss:0.0013099999632686377, n_changed_assignment:9," cluster_sizes:[391, 450, 167, 576, 215]", raw_silhouette_same_labels:0.2941892147064209, time:94.217
+phase:refine_iter_16, space:H_fused, silhouette = 0.7366026639938354, loss:0.0006799999973736703, n_changed_assignment:0," cluster_sizes:[391, 450, 167, 576, 215]", raw_silhouette_same_labels:0.2941892147064209, time:97.333
+phase:final_recomputed_artifact, space:H_fused, silhouette = 0.7366026639938354, loss:0.0006799999973736703, n_changed_assignment:0," cluster_sizes:[391, 450, 167, 576, 215]", raw_silhouette_same_labels:0.2941892147064209, time:97.607
+run 1/1, seed:42, silhouette:0.7366026639938354, time:97.671
+average over 1 runs, silhouette:0.73660, time:97.671
