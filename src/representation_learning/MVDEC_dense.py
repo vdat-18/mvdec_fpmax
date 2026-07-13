@@ -433,9 +433,9 @@ def train(
             else:
                 silhouette = metric_value
             phase = (
-                'baseline_pretrain_fused'
+                'after_kmeans_pre_refine'
                 if ite == 0
-                else f'refine_iter_{ite // update_interval}'
+                else f'after_kmeans_refine_iter_{ite // update_interval}'
             )
             _log_training_phase(
                 phase=phase,
