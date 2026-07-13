@@ -25,7 +25,7 @@ view2_base_units = 64
 pretrain_epochs = 200
 batch_size = 256
 update_interval = 10
-assignment_change_tolerance = 0.001
+assignment_change_tolerance = 0.005
 AIRPOLLUTION_ARTIFACT_PATH = (
     'data/preprocessed_data/airpollution_demvk_fused_representation.pkl'
 )
@@ -604,7 +604,7 @@ if __name__ == '__main__':
     pretrain_batch_size = 256
     batch_size = 256
     update_interval = 10
-    assignment_change_tolerance = 0.001
+    assignment_change_tolerance = 0.005
     if (
         ds_name in UNLABELED_DATASETS
         and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH
