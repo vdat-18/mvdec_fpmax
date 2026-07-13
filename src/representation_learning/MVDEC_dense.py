@@ -324,14 +324,10 @@ def _log_training_phase(
     train_start_time,
     raw_reference=None,
 ):
-    raw_metric_str = ''
-    if raw_reference is not None:
-        raw_silhouette = silhouette_score(raw_reference, labels)
-        raw_metric_str = f' raw_silhouette_same_labels:{raw_silhouette};'
     log_str = (
         f'phase:{phase}; space:{space}; {metric_str}; loss:{loss}; '
         f'n_changed_assignment:{n_change_assignment}; '
-        f'cluster_sizes:{_cluster_sizes(labels)};{raw_metric_str} '
+        f'cluster_sizes:{_cluster_sizes(labels)}; '
         f'time:{time.time() - train_start_time:.3f}'
     )
     print(log_str)
@@ -357,7 +353,6 @@ def train(
     train_start_time = time.time() if time_start is None else time_start
     log_str = (
         'phase; space; metric; loss; n_changed_assignment; cluster_sizes; '
-        'raw_silhouette_same_labels; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     )
     log_csv(log_str.split(';'), file_name=ds_name)
@@ -435,67 +430,15 @@ def train(
                 acc, nmi = metric_value
             else:
                 silhouette = metric_value
-            phase = (
-                'after_kmeans_pre_refine'
-                if ite == 0
-                else f'after_kmeans_refine_iter_{ite // update_interval}'
-            )
-            _log_training_phase(
-                phase=phase,
-                space='H_fused',
-                metric_str=metric_str,
-                loss=loss,
-                n_change_assignment=n_change_assignment,
-                labels=assignment,
-                train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
-            )
             paper_step_suffix = (
                 'pre_refine'
                 if ite == 0
                 else f'refine_iter_{ite // update_interval}'
             )
             _log_training_phase(
-                phase=f'paper_step4_kmeans_on_H_{paper_step_suffix}',
+                phase=f'paper_step4_to_7_common_{paper_step_suffix}',
                 space='H_fused',
                 metric_str=metric_str,
-                loss=loss,
-                n_change_assignment=n_change_assignment,
-                labels=assignment,
-                train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
-            )
-            # Steps 5 and 6 compute S_w and V. They do not change the points or
-            # labels yet, so their silhouette should match step 4.
-            _log_training_phase(
-                phase=f'paper_step5_within_scatter_Sw_{paper_step_suffix}',
-                space='H_fused',
-                metric_str=metric_str,
-                loss=loss,
-                n_change_assignment=n_change_assignment,
-                labels=assignment,
-                train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
-            )
-            _log_training_phase(
-                phase=f'paper_step6_eigenvectors_V_{paper_step_suffix}',
-                space='H_fused',
-                metric_str=metric_str,
-                loss=loss,
-                n_change_assignment=n_change_assignment,
-                labels=assignment,
-                train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
-            )
-            transformed_metric_str, _ = _metric_for_labels(
-                H_vt,
-                assignment,
-                y=y,
-            )
-            _log_training_phase(
-                phase=f'paper_step7_transform_Y_HV_{paper_step_suffix}',
-                space='Y_transformed',
-                metric_str=transformed_metric_str,
                 loss=loss,
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
