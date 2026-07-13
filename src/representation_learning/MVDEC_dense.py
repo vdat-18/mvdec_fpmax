@@ -322,11 +322,16 @@ def _log_training_phase(
     n_change_assignment,
     labels,
     train_start_time,
+    raw_reference=None,
 ):
+    raw_metric_str = ''
+    if raw_reference is not None:
+        raw_silhouette = silhouette_score(raw_reference, labels)
+        raw_metric_str = f' raw_silhouette_same_labels:{raw_silhouette};'
     log_str = (
         f'phase:{phase}; space:{space}; {metric_str}; loss:{loss}; '
         f'n_changed_assignment:{n_change_assignment}; '
-        f'cluster_sizes:{_cluster_sizes(labels)}; '
+        f'cluster_sizes:{_cluster_sizes(labels)};{raw_metric_str} '
         f'time:{time.time() - train_start_time:.3f}'
     )
     print(log_str)
@@ -352,6 +357,7 @@ def train(
     train_start_time = time.time() if time_start is None else time_start
     log_str = (
         'phase; space; metric; loss; n_changed_assignment; cluster_sizes; '
+        'raw_silhouette_same_labels; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     )
     log_csv(log_str.split(';'), file_name=ds_name)
@@ -381,6 +387,7 @@ def train(
         n_change_assignment=len(x),
         labels=raw_kmeans.labels_,
         train_start_time=train_start_time,
+        raw_reference=x if y is None else None,
     )
     for ite in range(int(140 * 100)):
         if ite % update_interval == 0:
@@ -438,6 +445,7 @@ def train(
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
             )
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
@@ -488,6 +496,7 @@ def train(
             n_change_assignment=0,
             labels=assignment,
             train_start_time=train_start_time,
+            raw_reference=x,
         )
         if not os.path.exists('output'):
             os.makedirs('output')
