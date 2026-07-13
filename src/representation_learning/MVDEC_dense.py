@@ -302,6 +302,37 @@ def sorted_eig(X):
     return e_vals, e_vecs
 
 
+def _metric_for_labels(features, labels, y=None):
+    if y is not None:
+        acc, nmi = get_ACC_NMI(np.array(y), np.array(labels))
+        return f'acc, nmi = {acc, nmi}', (acc, nmi)
+    silhouette = silhouette_score(features, labels)
+    return f'silhouette = {silhouette}', silhouette
+
+
+def _cluster_sizes(labels):
+    return np.bincount(np.asarray(labels), minlength=n_clusters).tolist()
+
+
+def _log_training_phase(
+    phase,
+    space,
+    metric_str,
+    loss,
+    n_change_assignment,
+    labels,
+    train_start_time,
+):
+    log_str = (
+        f'phase:{phase}; space:{space}; {metric_str}; loss:{loss}; '
+        f'n_changed_assignment:{n_change_assignment}; '
+        f'cluster_sizes:{_cluster_sizes(labels)}; '
+        f'time:{time.time() - train_start_time:.3f}'
+    )
+    print(log_str)
+    log_csv(log_str.split(';'), file_name=ds_name)
+
+
 def train(
     x,
     y=None,
@@ -320,7 +351,7 @@ def train(
     # correlation, as in the paper's Section 5.5).
     train_start_time = time.time() if time_start is None else time_start
     log_str = (
-        'iter; metric; loss; n_changed_assignment; '
+        'phase; space; metric; loss; n_changed_assignment; cluster_sizes; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     )
     log_csv(log_str.split(';'), file_name=ds_name)
@@ -336,6 +367,21 @@ def train(
     kmeans_n_init = 100
     assignment = np.array([-1] * len(x))
     index_array = np.arange(x.shape[0])
+    raw_kmeans = KMeans(
+        n_clusters=n_clusters,
+        n_init=kmeans_n_init,
+        random_state=random_seed,
+    ).fit(x)
+    raw_metric_str, _ = _metric_for_labels(x, raw_kmeans.labels_, y=y)
+    _log_training_phase(
+        phase='baseline_raw_input',
+        space='x',
+        metric_str=raw_metric_str,
+        loss=0.0,
+        n_change_assignment=len(x),
+        labels=raw_kmeans.labels_,
+        train_start_time=train_start_time,
+    )
     for ite in range(int(140 * 100)):
         if ite % update_interval == 0:
             h1 = model1(x).numpy()
@@ -370,25 +416,29 @@ def train(
             S_i = np.array(S_i)
             S = np.sum(S_i, 0)
             Evals, V = sorted_eig(S)
-            H_vt = np.matmul(H, V)  # n,23
-            U_vt = np.matmul(U, V)  # n_clusters,23
+            H_vt = np.matmul(H, V)
+            U_vt = np.matmul(U, V)
             #
             loss = np.round(np.mean(loss_value), 5)
+            metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
             if y is not None:
-                acc, nmi = get_ACC_NMI(np.array(y), np.array(assignment))
-                metric_str = f'acc, nmi = {acc, nmi}'
+                acc, nmi = metric_value
             else:
-                silhouette = silhouette_score(H, assignment)
-                metric_str = f'silhouette = {silhouette}'
-
-            # log
-            log_str = (
-                f'iter {ite // update_interval}; {metric_str}; loss:'
-                f'{loss}; n_changed_assignment:{n_change_assignment}; '
-                f'time:{time.time() - train_start_time:.3f}'
+                silhouette = metric_value
+            phase = (
+                'baseline_pretrain_fused'
+                if ite == 0
+                else f'refine_iter_{ite // update_interval}'
             )
-            print(log_str)
-            log_csv(log_str.split(';'), file_name=ds_name)
+            _log_training_phase(
+                phase=phase,
+                space='H_fused',
+                metric_str=metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+            )
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
             model1.save_weights(f'weight_final_view1_{ds_name}.weights.h5')
@@ -429,6 +479,16 @@ def train(
             random_state=random_seed,
         ).fit(H).labels_
         silhouette = silhouette_score(H, assignment)
+        metric_str = f'silhouette = {silhouette}'
+        _log_training_phase(
+            phase='final_recomputed_artifact',
+            space='H_fused',
+            metric_str=metric_str,
+            loss=np.round(np.mean(loss_value), 5),
+            n_change_assignment=0,
+            labels=assignment,
+            train_start_time=train_start_time,
+        )
         if not os.path.exists('output'):
             os.makedirs('output')
         h_ordered = _restore_original_order(H, orig_idx)
