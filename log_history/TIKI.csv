@@ -1,0 +1,20 @@
+iter, metric, loss, n_changed_assignment, time:2026-07-13 09:50:25
+iter 0, silhouette = 0.30530330538749695, loss:0.0, n_changed_assignment:1799, time:38.113
+iter 1, silhouette = 0.3439086973667145, loss:0.013330000452697277, n_changed_assignment:211, time:43.449
+iter 2, silhouette = 0.42573341727256775, loss:0.005330000072717667, n_changed_assignment:147, time:46.496
+iter 3, silhouette = 0.4658122658729553, loss:0.012000000104308128, n_changed_assignment:60, time:49.656
+iter 4, silhouette = 0.5246720910072327, loss:0.0065899998880922794, n_changed_assignment:72, time:52.556
+iter 5, silhouette = 0.5665242075920105, loss:0.008729999884963036, n_changed_assignment:35, time:56.653
+iter 6, silhouette = 0.5965207815170288, loss:0.010529999621212482, n_changed_assignment:40, time:59.669
+iter 7, silhouette = 0.6206815838813782, loss:0.005040000192821026, n_changed_assignment:19, time:62.592
+iter 8, silhouette = 0.644725501537323, loss:0.0014400000218302011, n_changed_assignment:15, time:65.463
+iter 9, silhouette = 0.6613204479217529, loss:0.003980000037699938, n_changed_assignment:12, time:68.989
+iter 10, silhouette = 0.6785726547241211, loss:0.0035699999425560236, n_changed_assignment:15, time:72.399
+iter 11, silhouette = 0.696220874786377, loss:0.003060000017285347, n_changed_assignment:10, time:75.264
+iter 12, silhouette = 0.7134079337120056, loss:0.0023799999617040157, n_changed_assignment:16, time:78.167
+iter 13, silhouette = 0.7261471152305603, loss:0.0021899999119341373, n_changed_assignment:6, time:81.323
+iter 14, silhouette = 0.7359006404876709, loss:0.003000000026077032, n_changed_assignment:6, time:85.134
+iter 15, silhouette = 0.7443663477897644, loss:0.0013699999544769526, n_changed_assignment:7, time:88.063
+iter 16, silhouette = 0.7536463141441345, loss:0.005520000122487545, n_changed_assignment:0, time:91.020
+run 1/1, seed:42, silhouette:0.7536463141441345, time:91.285
+average over 1 runs, silhouette:0.75365, time:91.285
