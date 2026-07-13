@@ -1,0 +1,7 @@
+iter, metric, loss, n_changed_assignment, time:2026-07-13 07:50:50
+iter 0, silhouette = 0.649200975894928, loss:0.0, n_changed_assignment:3765, time:55.073
+iter 1, silhouette = 0.6485204100608826, loss:397126.5, n_changed_assignment:14, time:60.272
+iter 2, silhouette = 0.6494642496109009, loss:441110.375, n_changed_assignment:19, time:63.725
+iter 3, silhouette = 0.6494647860527039, loss:366980.875, n_changed_assignment:0, time:67.250
+run 1/1, seed:42, silhouette:0.6494647860527039, time:67.875
+average over 1 runs, silhouette:0.64946, time:67.875
