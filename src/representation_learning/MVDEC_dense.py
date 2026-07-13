@@ -20,6 +20,8 @@ ds_name = 'AIRPOLLUTION'
 input_shape = 13
 hidden_units = 10
 n_clusters = 4
+view1_filters = [500, 500, 2000]
+view2_base_units = 64
 pretrain_epochs = 200
 batch_size = 256
 update_interval = 10
@@ -27,12 +29,36 @@ assignment_change_tolerance = 0.001
 AIRPOLLUTION_ARTIFACT_PATH = (
     'data/preprocessed_data/airpollution_demvk_fused_representation.pkl'
 )
-VIEW_OUTPUT_LAYOUT = 'eq5_compatible_10_plus_13'
+TIKI_ARTIFACT_PATH = 'data/preprocessed_data/tiki_mvdec_fused_representation.pkl'
 FINAL_TRAINING_OBJECTIVE = 'dekm2021_greedy_cluster_loss_after_reconstruction_pretrain'
+UNLABELED_DATASETS = {
+    'AIRPOLLUTION': {
+        'csv_path': 'data/preprocessed_data/data_demvk.csv',
+        'input_shape': 13,
+        'hidden_units': 10,
+        'view1_filters': [500, 500, 2000],
+        'view2_base_units': 64,
+        'n_clusters': 4,
+        'artifact_path': AIRPOLLUTION_ARTIFACT_PATH,
+    },
+    'TIKI': {
+        'csv_path': 'data/preprocessed_data/tiki_preprocessed.csv',
+        'input_shape': 7,
+        'hidden_units': 5,
+        'view1_filters': [250, 250, 1000],
+        'view2_base_units': 32,
+        'n_clusters': 5,
+        'artifact_path': TIKI_ARTIFACT_PATH,
+    },
+}
 
 
 def view_output_width():
     return hidden_units + input_shape
+
+
+def view_output_layout():
+    return f'eq5_compatible_{hidden_units}_plus_{input_shape}'
 
 
 def set_random_seed(seed):
@@ -63,6 +89,19 @@ def get_x_airpollution(
     return x, idx, list(df.columns)
 
 
+def get_x_unlabeled_csv(csv_path, log_print=True, shuffle_seed=None):
+    df = pd.read_csv(csv_path)
+    x = df.values.astype(np.float32)
+    if shuffle_seed is None:
+        shuffle_seed = int(np.random.randint(100))
+    idx = np.arange(0, len(x))
+    idx = tf.random.shuffle(idx, seed=shuffle_seed).numpy()
+    x = x[idx]
+    if log_print:
+        print(ds_name)
+    return x, idx, list(df.columns)
+
+
 def _restore_original_order(values, orig_idx):
     ordered = np.empty_like(values)
     ordered[orig_idx] = values
@@ -81,8 +120,8 @@ def save_airpollution_mvdec_artifact(
     feature_columns,
     random_seed,
 ):
-    # Fig. 1/Fig. 2 contract: h_fused is the average of both 23-wide view
-    # outputs, then K-means is applied to that fused representation.
+    # Fig. 1/Fig. 2 contract: h_fused is the average of both view outputs,
+    # then K-means is applied to that fused representation.
     h_view1 = _restore_original_order(np.asarray(h_view1), orig_idx)
     h_view2 = _restore_original_order(np.asarray(h_view2), orig_idx)
     h_fused = _restore_original_order(np.asarray(h_fused), orig_idx)
@@ -91,9 +130,10 @@ def save_airpollution_mvdec_artifact(
 
     artifact = {
         'algorithm': 'MvDEC',
+        'dataset': ds_name,
         'paper': '2025_Multi-view Deep Embedded Clustering',
         'fusion_contract': 'mvdec2025_figure_output_average',
-        'view_output_layout': VIEW_OUTPUT_LAYOUT,
+        'view_output_layout': view_output_layout(),
         'final_training_objective': FINAL_TRAINING_OBJECTIVE,
         'h_view1': h_view1,
         'h_view2': h_view2,
@@ -119,10 +159,12 @@ def save_airpollution_mvdec_artifact(
             'assignment_change_tolerance': float(assignment_change_tolerance),
             'view1_latent_dim': int(hidden_units),
             'view2_latent_dim': int(hidden_units),
+            'view1_filters': list(view1_filters),
+            'view2_base_units': int(view2_base_units),
             'view1_output_dim': int(h_view1.shape[1]),
             'view2_output_dim': int(h_view2.shape[1]),
             'view_output_dim': int(h_fused.shape[1]),
-            'view_output_layout': VIEW_OUTPUT_LAYOUT,
+            'view_output_layout': view_output_layout(),
             'final_training_objective': FINAL_TRAINING_OBJECTIVE,
             'fusion': 'h_fused = (view1_output + view2_output) / 2',
         },
@@ -137,8 +179,9 @@ def save_airpollution_mvdec_artifact(
 
 
 def model_view1(load_weights=True):
-    # d-500-500-2000-hidden_units, same architecture as DEKM_dense.py::model_conv
-    filters = [500, 500, 2000]
+    # Air pollution/text datasets use the DEKM-style 500-500-2000 stack; Tiki
+    # uses the smaller 250-250-1000 stack from Clustering_English_ver02 Fig. 1.
+    filters = view1_filters
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
@@ -170,29 +213,30 @@ def model_view1(load_weights=True):
 
 
 def model_view2(load_weights=True):
-    # U-Net-inspired autoencoder (second view), see docs/2025_Multi-view Deep
-    # Embedded Clustering...pdf, Fig. 2. Layer widths and skip-connection
-    # concat sizes below (768/384/192/96, matching 512+256, 256+128, 128+64,
-    # 64+32) are read directly off Fig. 2. As with view 1, the 23-wide output
-    # is represented as [Dense(10), Dense(13)] so Eq. 5 has an explicit
-    # reconstruction target while Fig. 1/Fig. 2 still receive a 23-wide view.
-    # The decoder starts from the 10-wide h branch so reconstruction pretraining
-    # actually updates the learned representation used by the fused view.
+    # U-Net-inspired autoencoder (second view). Air pollution uses the 64-base
+    # stack from the 2025 MvDEC paper; Tiki uses the smaller 32-base stack from
+    # Clustering_English_ver02 Fig. 1. The decoder starts from h so
+    # reconstruction pretraining updates the learned representation.
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
     input = layers.Input(shape=(input_shape,))
+    b = view2_base_units
 
-    e1 = layers.Dense(64, activation=activation, kernel_initializer=init)(input)
-    e1 = layers.Dense(64, activation=activation, kernel_initializer=init)(e1)
-    e2 = layers.Dense(128, activation=activation, kernel_initializer=init)(e1)
-    e2 = layers.Dense(128, activation=activation, kernel_initializer=init)(e2)
-    e3 = layers.Dense(256, activation=activation, kernel_initializer=init)(e2)
-    e3 = layers.Dense(256, activation=activation, kernel_initializer=init)(e3)
-    e4 = layers.Dense(512, activation=activation, kernel_initializer=init)(e3)
-    e4 = layers.Dense(512, activation=activation, kernel_initializer=init)(e4)
-    bottleneck = layers.Dense(1024, activation=activation, kernel_initializer=init)(e4)
-    skip1 = layers.Dense(32, activation=activation, kernel_initializer=init)(e1)
+    e1 = layers.Dense(b, activation=activation, kernel_initializer=init)(input)
+    e1 = layers.Dense(b, activation=activation, kernel_initializer=init)(e1)
+    e2 = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(e1)
+    e2 = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(e2)
+    e3 = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(e2)
+    e3 = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(e3)
+    e4 = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(e3)
+    e4 = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(e4)
+    bottleneck = layers.Dense(
+        16 * b,
+        activation=activation,
+        kernel_initializer=init,
+    )(e4)
+    skip1 = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(e1)
 
     h = layers.Dense(
         hidden_units,
@@ -200,18 +244,18 @@ def model_view2(load_weights=True):
         kernel_initializer=init,
     )(bottleneck)
 
-    x = layers.Dense(512, activation=activation, kernel_initializer=init)(h)
+    x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(h)
     x = layers.Concatenate()([x, e3])
-    x = layers.Dense(512, activation=activation, kernel_initializer=init)(x)
-    x = layers.Dense(256, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e2])
-    x = layers.Dense(256, activation=activation, kernel_initializer=init)(x)
-    x = layers.Dense(128, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e1])
-    x = layers.Dense(128, activation=activation, kernel_initializer=init)(x)
-    x = layers.Dense(64, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, skip1])
-    x = layers.Dense(64, activation=activation, kernel_initializer=init)(x)
+    x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
     y = layers.Dense(
         input_shape,
         activation=output_activation,
@@ -416,7 +460,7 @@ def train(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='select dataset:AIRPOLLUTION,REUTERS,20NEWS,RCV1',
+        description='select dataset:AIRPOLLUTION,TIKI,REUTERS,20NEWS,RCV1',
     )
     parser.add_argument('ds_name', default='AIRPOLLUTION')
     parser.add_argument('--runs', type=int, default=3)
@@ -427,6 +471,7 @@ if __name__ == '__main__':
         raise ValueError('--runs must be at least 1')
     if args.ds_name is None or args.ds_name not in [
         'AIRPOLLUTION',
+        'TIKI',
         'REUTERS',
         '20NEWS',
         'RCV1',
@@ -435,10 +480,12 @@ if __name__ == '__main__':
     else:
         ds_name = args.ds_name
 
-    if ds_name == 'AIRPOLLUTION':
-        input_shape = 13
-        n_clusters = 4
-        hidden_units = 10
+    if ds_name in UNLABELED_DATASETS:
+        input_shape = UNLABELED_DATASETS[ds_name]['input_shape']
+        n_clusters = UNLABELED_DATASETS[ds_name]['n_clusters']
+        hidden_units = UNLABELED_DATASETS[ds_name]['hidden_units']
+        view1_filters = UNLABELED_DATASETS[ds_name]['view1_filters']
+        view2_base_units = UNLABELED_DATASETS[ds_name]['view2_base_units']
     elif ds_name == 'REUTERS':
         input_shape = 2000
         n_clusters = 4
@@ -457,6 +504,11 @@ if __name__ == '__main__':
     batch_size = 256
     update_interval = 10
     assignment_change_tolerance = 0.001
+    if (
+        ds_name in UNLABELED_DATASETS
+        and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH
+    ):
+        args.artifact_path = UNLABELED_DATASETS[ds_name]['artifact_path']
 
     run_metrics = []
     time_all_start = time.time()
@@ -466,8 +518,11 @@ if __name__ == '__main__':
         time_start = time.time()
         orig_idx = None
         feature_columns = None
-        if ds_name == 'AIRPOLLUTION':
-            x, orig_idx, feature_columns = get_x_airpollution(shuffle_seed=run_seed)
+        if ds_name in UNLABELED_DATASETS:
+            x, orig_idx, feature_columns = get_x_unlabeled_csv(
+                UNLABELED_DATASETS[ds_name]['csv_path'],
+                shuffle_seed=run_seed,
+            )
             y = None
         else:
             x, y = get_xy(
@@ -504,7 +559,7 @@ if __name__ == '__main__':
         print(run_str)
         log_csv(run_str.split(';'), file_name=ds_name)
 
-    if ds_name == 'AIRPOLLUTION':
+    if ds_name in UNLABELED_DATASETS:
         avg_silhouette = float(np.nanmean(np.asarray(run_metrics, dtype=float)))
         avg_str = (
             f'average over {args.runs} runs; silhouette:{avg_silhouette:.5f}; '

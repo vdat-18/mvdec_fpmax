@@ -1,6 +1,7 @@
 """Load preprocessed data and cached MvDEC representation output."""
 
 import pickle
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,7 +60,10 @@ def _legacy_concat_width(best_result: dict) -> int | None:
 
 def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None:
     view_output_layout = best_result.get("view_output_layout")
-    if view_output_layout not in {None, "eq5_compatible_10_plus_13"}:
+    if view_output_layout is not None and not re.fullmatch(
+        r"eq5_compatible_\d+_plus_\d+",
+        view_output_layout,
+    ):
         msg = (
             "Unexpected MvDEC 2025 view_output_layout: "
             f"{view_output_layout!r}."
