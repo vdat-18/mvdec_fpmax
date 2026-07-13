@@ -390,6 +390,7 @@ def train(
         raw_reference=x if y is None else None,
     )
     for ite in range(int(140 * 100)):
+        log_paper_step_checkpoint = ite % update_interval == 0
         if ite % update_interval == 0:
             h1 = model1(x).numpy()
             h2 = model2(x).numpy()
@@ -425,6 +426,8 @@ def train(
             Evals, V = sorted_eig(S)
             H_vt = np.matmul(H, V)
             U_vt = np.matmul(U, V)
+            H_vt_greedy_target = H_vt.copy()
+            H_vt_greedy_target[:, -1] = U_vt[assignment, -1]
             #
             loss = np.round(np.mean(loss_value), 5)
             metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
@@ -441,6 +444,73 @@ def train(
                 phase=phase,
                 space='H_fused',
                 metric_str=metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
+            paper_step_suffix = (
+                'pre_refine'
+                if ite == 0
+                else f'refine_iter_{ite // update_interval}'
+            )
+            _log_training_phase(
+                phase=f'paper_step4_kmeans_on_H_{paper_step_suffix}',
+                space='H_fused',
+                metric_str=metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
+            # Steps 5 and 6 compute S_w and V. They do not change the points or
+            # labels yet, so their silhouette should match step 4.
+            _log_training_phase(
+                phase=f'paper_step5_within_scatter_Sw_{paper_step_suffix}',
+                space='H_fused',
+                metric_str=metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
+            _log_training_phase(
+                phase=f'paper_step6_eigenvectors_V_{paper_step_suffix}',
+                space='H_fused',
+                metric_str=metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
+            transformed_metric_str, _ = _metric_for_labels(
+                H_vt,
+                assignment,
+                y=y,
+            )
+            _log_training_phase(
+                phase=f'paper_step7_transform_Y_HV_{paper_step_suffix}',
+                space='Y_transformed',
+                metric_str=transformed_metric_str,
+                loss=loss,
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
+            greedy_metric_str, _ = _metric_for_labels(
+                H_vt_greedy_target,
+                assignment,
+                y=y,
+            )
+            _log_training_phase(
+                phase=f'paper_step8_greedy_target_Yprime_{paper_step_suffix}',
+                space='Y_greedy_target',
+                metric_str=greedy_metric_str,
                 loss=loss,
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
@@ -471,6 +541,25 @@ def train(
         trainable_variables = model1.trainable_variables + model2.trainable_variables
         grads = tape.gradient(loss_value, trainable_variables)
         optimizer.apply_gradients(zip(grads, trainable_variables, strict=False))
+        if log_paper_step_checkpoint:
+            h1_after_update = model1(x).numpy()
+            h2_after_update = model2(x).numpy()
+            H_after_update = (h1_after_update + h2_after_update) / 2
+            after_update_metric_str, _ = _metric_for_labels(
+                H_after_update,
+                assignment,
+                y=y,
+            )
+            _log_training_phase(
+                phase=f'paper_step9_after_model_update_{paper_step_suffix}',
+                space='H_fused_same_labels',
+                metric_str=after_update_metric_str,
+                loss=np.round(np.mean(loss_value), 5),
+                n_change_assignment=n_change_assignment,
+                labels=assignment,
+                train_start_time=train_start_time,
+                raw_reference=x if y is None else None,
+            )
 
         index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
 
