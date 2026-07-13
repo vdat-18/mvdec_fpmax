@@ -109,47 +109,50 @@ data/preprocessed_data/tiki_preprocessed.csv
 
 ### 2. Representation Learning
 
-Run GPU stages on Google Colab with a GPU runtime. Notebooks are kept as legacy
-references; the reproducible path is the unified Colab entrypoint below:
+Run representation-learning stages on a GPU runtime. TensorFlow is intentionally
+not part of the local clustering dependencies, so install it only in the GPU
+environment that will train MvDEC.
 
 ```bash
-uv run python scripts/run_colab_gpu_pipeline.py --datasets tiki --tasks all --force
+uv pip install tensorflow
 ```
 
-On Colab, clone the `dev` branch, sync the repo, and install TensorFlow in
-the Colab environment:
+On Colab, clone the `dev` branch and sync the repo:
 
 ```bash
 git clone -b dev https://github.com/vdat-18/mvdec_fpmax.git
 cd mvdec_fpmax
 pip install -q uv
 uv sync
-uv add torch tensorflow
-uv run python scripts/run_colab_gpu_pipeline.py --datasets tiki --tasks all --force
+uv add tensorflow
 ```
 
-For the air-pollution case study, use:
+For the air-pollution case study, the current in-repo producer is:
 
 ```bash
-uv run python scripts/run_colab_gpu_pipeline.py \
-  --datasets airpollution_demvk \
-  --tasks all \
-  --force
+uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
+  --runs 3 \
+  --artifact-path data/preprocessed_data/airpollution_demvk_fused_representation.pkl
 ```
 
-The representation task reads each dataset's registered numeric matrix and
-saves dataset-specific artifacts:
+This reads `data/preprocessed_data/data_demvk.csv` and saves:
 
 ```text
-data/preprocessed_data/<dataset>_fused_representation.pkl
-data/preprocessed_data/<dataset>_mvdec_history.csv
+data/preprocessed_data/airpollution_demvk_fused_representation.pkl
+output/AIRPOLLUTION_clusters.csv
 ```
 
-The pickle keeps the legacy keys required by the local pipeline:
-`h_fused`, `labels`, `init`, `score`, and `iteration`. After downloading a fresh
-artifact from Colab, pass it to the local FP-Max/clustering modes with
-`--representation-path` and pass the matching CSV with `--data-path`. See
-`RUNBOOK_GPU_TO_LOCAL.md` for the full GPU-to-local workflow.
+The air-pollution artifact is not included by default because the previous
+checked-in file used a legacy concat representation. Regenerate it before
+running air-pollution FP-Max/clustering modes.
+
+For MvDEC 2025 air-pollution artifacts, `h_fused` follows Fig. 1/Fig. 2:
+both views produce 23-wide outputs and `h_fused = (h_view1 + h_view2) / 2`.
+View outputs use the Eq. (5)-compatible layout `10 learned + 13 reconstruction`;
+the final representation update follows DEKM 2021 greedy clustering loss after
+reconstruction pretraining. The pickle also keeps `h_view1`, `h_view2`,
+`labels`, `init`, `score`, `iteration`, `fusion_dim`, `fusion_contract`,
+`view_output_layout`, and `final_training_objective`.
 
 ### 3. FP-Max and Clustering Experiments
 
@@ -353,11 +356,13 @@ manuscript.
 ## Reproducibility Notes
 
 - Random seeds are fixed at `42` for local experiment code.
-- The cached MvDEC representation contains `h_fused`, `labels`, `init`, `score`,
-  and `iteration`.
-- Representation learning is GPU-dependent and should be rerun through
-  `scripts/run_colab_gpu_pipeline.py` if fresh dataset-specific representation
-  artifacts are required.
+- The cached MvDEC representation contains `h_fused`, `labels`, `init`,
+  `score`, and `iteration`. MvDEC 2025 artifacts additionally include
+  `h_view1`, `h_view2`, `fusion_dim`, `fusion_contract`,
+  `view_output_layout`, and `final_training_objective`.
+- Representation learning is GPU-dependent. For the air-pollution case study,
+  rerun `src/representation_learning/MVDEC_dense.py` if a fresh
+  `airpollution_demvk_fused_representation.pkl` artifact is required.
 - Raw Tiki storefront data are not fully released due to data governance
   considerations. Processed data required for reproducing the reported
   experiments are included where permitted.
