@@ -133,7 +133,7 @@ For the air-pollution case study, the current in-repo producer is:
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 \
   --max-refinement-epochs 1400 \
-  --greedy-eigen-direction smallest \
+  --greedy-eigen-direction largest \
   --greedy-target-mode selected_dimension_only \
   --artifact-path data/preprocessed_data/airpollution_demvk_fused_representation.pkl
 ```
@@ -147,18 +147,20 @@ uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --greedy-eigen-direction smallest \
   --greedy-target-mode selected_dimension_only
 
-# DEKM 2021 behavior inherited by the earlier implementation
+# Largest-eigen direction used by the original DEKM 2021 implementation
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 --seed 42 \
   --greedy-eigen-direction largest \
-  --greedy-target-mode frozen_snapshot
+  --greedy-target-mode selected_dimension_only
 ```
 
-The default is the literal MvDEC 2025 combination: `smallest` plus
-`selected_dimension_only`. It keeps the standard artifact path. When using the
-default artifact path, every other combination adds both mode names to the
-artifact filename. Final weights, cluster CSVs, and log files also include both
-modes so experiments do not overwrite each other.
+The default is `largest` plus `selected_dimension_only`, matching the
+eigen-direction selected by the original DEKM 2021 implementation while
+retaining the explicit MvDEC target semantics. It keeps the standard artifact
+path. The literal MvDEC 2025 interpretation remains available with
+`--greedy-eigen-direction smallest`; non-default combinations add both mode
+names to the artifact filename. Final weights, cluster CSVs, and log files also
+include both modes so experiments do not overwrite each other.
 
 This reads `data/preprocessed_data/data_demvk.csv`, applies column-wise Min-Max
 scaling to `[0, 1]`, and saves:

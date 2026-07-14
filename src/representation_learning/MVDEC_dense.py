@@ -43,6 +43,8 @@ GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
 GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
 PAPER2025_GREEDY_EIGEN_DIRECTION = 'smallest'
 PAPER2025_GREEDY_TARGET_MODE = 'selected_dimension_only'
+DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
+DEFAULT_GREEDY_TARGET_MODE = 'selected_dimension_only'
 KMEANS_N_INIT = 100
 KMEANS_REFRESH_POLICY = 'one_epoch'
 MAX_REFINEMENT_EPOCHS = 1400
@@ -120,8 +122,8 @@ def artifact_path_for_greedy_mode(artifact_path, direction, target_mode):
     greedy_eigen_index(direction)
     validate_greedy_target_mode(target_mode)
     if (
-        direction == PAPER2025_GREEDY_EIGEN_DIRECTION
-        and target_mode == PAPER2025_GREEDY_TARGET_MODE
+        direction == DEFAULT_GREEDY_EIGEN_DIRECTION
+        and target_mode == DEFAULT_GREEDY_TARGET_MODE
     ):
         return str(artifact_path)
     path = Path(artifact_path)
@@ -655,8 +657,8 @@ def train(
     orig_idx=None,
     feature_columns=None,
     preprocessing_metadata=None,
-    greedy_eigen_direction=PAPER2025_GREEDY_EIGEN_DIRECTION,
-    greedy_target_mode=PAPER2025_GREEDY_TARGET_MODE,
+    greedy_eigen_direction=DEFAULT_GREEDY_EIGEN_DIRECTION,
+    greedy_target_mode=DEFAULT_GREEDY_TARGET_MODE,
     max_refinement_epochs=MAX_REFINEMENT_EPOCHS,
     random_seed=None,
     time_start=None,
@@ -1103,13 +1105,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--greedy-eigen-direction',
         choices=GREEDY_EIGEN_DIRECTIONS,
-        default=PAPER2025_GREEDY_EIGEN_DIRECTION,
+        default=DEFAULT_GREEDY_EIGEN_DIRECTION,
         help='Use the largest or smallest within-cluster scatter eigenvalue for L4.',
     )
     parser.add_argument(
         '--greedy-target-mode',
         choices=GREEDY_TARGET_MODES,
-        default=PAPER2025_GREEDY_TARGET_MODE,
+        default=DEFAULT_GREEDY_TARGET_MODE,
         help='Use the paper-style selected dimension or the frozen DEKM target.',
     )
     args = parser.parse_args()

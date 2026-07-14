@@ -228,13 +228,13 @@ def test_build_greedy_target_changes_only_selected_direction(
     )
 
 
-def test_smallest_mode_gets_separate_default_artifact_path(monkeypatch):
+def test_largest_mode_uses_default_artifact_path(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
     assert (
         mvdec.artifact_path_for_greedy_mode(
             "air.pkl",
-            "smallest",
+            "largest",
             "selected_dimension_only",
         )
         == "air.pkl"
@@ -242,10 +242,10 @@ def test_smallest_mode_gets_separate_default_artifact_path(monkeypatch):
     assert (
         mvdec.artifact_path_for_greedy_mode(
             "air.pkl",
-            "largest",
-            "frozen_snapshot",
+            "smallest",
+            "selected_dimension_only",
         )
-        == "air_largest_eigen_frozen_snapshot.pkl"
+        == "air_smallest_eigen_selected_dimension_only.pkl"
     )
 
 
