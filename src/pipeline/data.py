@@ -1,5 +1,6 @@
 """Load preprocessed data and cached MvDEC representation output."""
 
+import hashlib
 import pickle
 import re
 from dataclasses import dataclass
@@ -58,6 +59,143 @@ def _legacy_concat_width(best_result: dict) -> int | None:
     return int(input_dim) + int(latent_dim)
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_airpollution_preprocessing(
+    best_result: dict,
+    data_path: Path,
+    preprocessed_df: pd.DataFrame,
+) -> None:
+    if best_result.get("dataset") != "AIRPOLLUTION":
+        return
+
+    greedy_eigen_direction = best_result.get("greedy_eigen_direction")
+    if greedy_eigen_direction not in {"largest", "smallest"}:
+        msg = (
+            "Air Pollution MvDEC artifact must declare greedy_eigen_direction "
+            "as 'largest' or 'smallest'."
+        )
+        raise ValueError(msg)
+    if best_result.get("eigenvalue_order") != "ascending":
+        msg = "Air Pollution MvDEC artifact must use ascending eigenvalue order."
+        raise ValueError(msg)
+    fusion_dim = int(best_result.get("fusion_dim", 0))
+    expected_eigen_index = fusion_dim - 1 if greedy_eigen_direction == "largest" else 0
+    if best_result.get("greedy_eigen_index") != expected_eigen_index:
+        msg = "MvDEC artifact greedy eigen index does not match its direction."
+        raise ValueError(msg)
+    greedy_target_mode = best_result.get("greedy_target_mode")
+    if greedy_target_mode not in {"selected_dimension_only", "frozen_snapshot"}:
+        msg = (
+            "Air Pollution MvDEC artifact must declare greedy_target_mode as "
+            "'selected_dimension_only' or 'frozen_snapshot'."
+        )
+        raise ValueError(msg)
+    config = best_result.get("config", {})
+    if not isinstance(config, dict) or any(
+        (
+            config.get("eigenvalue_order") != "ascending",
+            config.get("greedy_eigen_direction") != greedy_eigen_direction,
+            config.get("greedy_eigen_index") != expected_eigen_index,
+            config.get("greedy_target_mode") != greedy_target_mode,
+        )
+    ):
+        msg = "MvDEC artifact eigen direction does not match its config metadata."
+        raise ValueError(msg)
+    if config.get("kmeans_n_init") != 100:
+        msg = "Air Pollution MvDEC artifact must use fixed K-Means n_init=100."
+        raise ValueError(msg)
+    batch_size = int(config.get("batch_size", 0))
+    if batch_size < 1:
+        msg = "Air Pollution MvDEC artifact must record a positive batch_size."
+        raise ValueError(msg)
+    expected_batches_per_epoch = (
+        len(preprocessed_df) + batch_size - 1
+    ) // batch_size
+    if any(
+        (
+            best_result.get("kmeans_refresh_policy") != "one_epoch",
+            config.get("kmeans_refresh_policy") != "one_epoch",
+            best_result.get("batches_per_epoch") != expected_batches_per_epoch,
+            config.get("batches_per_epoch") != expected_batches_per_epoch,
+            config.get("update_interval") != expected_batches_per_epoch,
+        )
+    ):
+        msg = (
+            "Air Pollution MvDEC artifact must refresh K-Means once per full epoch."
+        )
+        raise ValueError(msg)
+    max_refinement_epochs = int(config.get("max_refinement_epochs", 0))
+    refinement_epochs_completed = int(
+        best_result.get("refinement_epochs_completed", -1)
+    )
+    stop_reason = best_result.get("stop_reason")
+    if any(
+        (
+            max_refinement_epochs < 1,
+            stop_reason not in {"converged_assignment", "max_epochs_reached"},
+            config.get("stop_reason") != stop_reason,
+            config.get("refinement_epochs_completed")
+            != refinement_epochs_completed,
+            not 0 <= refinement_epochs_completed <= max_refinement_epochs,
+            config.get("max_training_steps")
+            != max_refinement_epochs * expected_batches_per_epoch,
+            stop_reason == "max_epochs_reached"
+            and refinement_epochs_completed != max_refinement_epochs,
+        )
+    ):
+        msg = "Air Pollution MvDEC artifact has inconsistent training stop metadata."
+        raise ValueError(msg)
+
+    preprocessing = best_result.get("preprocessing")
+    if not isinstance(preprocessing, dict):
+        msg = (
+            "Air Pollution MvDEC artifact is missing preprocessing metadata; "
+            "regenerate it with column-wise Min-Max scaling."
+        )
+        raise ValueError(msg)
+    if preprocessing.get("method") != "minmax":
+        msg = (
+            "Air Pollution MvDEC artifact must use column-wise Min-Max scaling; "
+            f"got {preprocessing.get('method')!r}."
+        )
+        raise ValueError(msg)
+    if preprocessing.get("feature_range") != [0.0, 1.0]:
+        msg = "Air Pollution Min-Max feature_range must be [0.0, 1.0]."
+        raise ValueError(msg)
+
+    columns = list(preprocessed_df.columns)
+    if preprocessing.get("feature_columns") != columns:
+        msg = "Air Pollution scaler feature columns do not match the source CSV."
+        raise ValueError(msg)
+    source_sha256 = preprocessing.get("source_sha256")
+    if source_sha256 != _file_sha256(data_path):
+        msg = (
+            "Air Pollution source CSV hash does not match the file used to train "
+            "the MvDEC artifact."
+        )
+        raise ValueError(msg)
+
+    data_min = np.asarray(preprocessing.get("data_min", []), dtype=float)
+    data_max = np.asarray(preprocessing.get("data_max", []), dtype=float)
+    if len(data_min) != len(columns) or len(data_max) != len(columns):
+        msg = "Air Pollution scaler min/max metadata does not match the input width."
+        raise ValueError(msg)
+    source_values = preprocessed_df.to_numpy(dtype=float)
+    if not np.allclose(data_min, source_values.min(axis=0)) or not np.allclose(
+        data_max,
+        source_values.max(axis=0),
+    ):
+        msg = "Air Pollution scaler min/max metadata does not match the source CSV."
+        raise ValueError(msg)
+
+
 def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None:
     view_output_layout = best_result.get("view_output_layout")
     if view_output_layout is not None and not re.fullmatch(
@@ -74,6 +212,9 @@ def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None
     if final_training_objective not in {
         None,
         "dekm2021_greedy_cluster_loss_after_reconstruction_pretrain",
+        "mvdec2025_joint_reconstruction_kmeans_orthonormal_greedy_loss",
+        "mvdec2025_joint_reconstruction_kmeans_greedy_l3_trace_logged",
+        "mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged",
     }:
         msg = (
             "Unexpected MvDEC 2025 final_training_objective: "
@@ -98,6 +239,18 @@ def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None
             f"{h_fused.shape[1]} != {fusion_dim}."
         )
         raise ValueError(msg)
+
+    if best_result.get("fusion_contract") == "mvdec2025_encoder_average":
+        config = best_result.get("config", {})
+        if not isinstance(config, dict):
+            config = {}
+        latent_dim = best_result.get("view1_latent_dim", config.get("view1_latent_dim"))
+        if latent_dim is not None and h_fused.shape[1] != int(latent_dim):
+            msg = (
+                "h_fused width must match view1_latent_dim for MvDEC 2025 "
+                f"encoder-average artifacts: {h_fused.shape[1]} != {latent_dim}."
+            )
+            raise ValueError(msg)
 
     expected = (h_view1 + h_view2) / 2
     if not np.allclose(h_fused, expected, rtol=1e-5, atol=1e-6):
@@ -139,10 +292,15 @@ def load_mvdec_result(
         raise ValueError(msg)
 
     fusion_contract = best_result.get("fusion_contract")
-    if fusion_contract in {
-        "mvdec2025_encoder_average",
-        "mvdec2025_figure_output_average",
-    }:
+    if fusion_contract == "mvdec2025_encoder_average":
+        _validate_mvdec2025_contract(best_result, h_fused)
+    elif fusion_contract == "mvdec2025_figure_output_average":
+        if not allow_legacy_concat:
+            msg = (
+                "This artifact uses the legacy full-view-output average. Regenerate "
+                "it so h_fused contains only the averaged encoder embeddings."
+            )
+            raise ValueError(msg)
         _validate_mvdec2025_contract(best_result, h_fused)
     elif (
         not allow_legacy_concat
@@ -151,7 +309,7 @@ def load_mvdec_result(
         msg = (
             "This artifact looks like a legacy concat representation "
             "(input features + latent features), but h_fused must be the "
-            "MvDEC figure-based fused view output. Regenerate it from "
+            "MvDEC fused encoder embedding. Regenerate it from "
             "src/representation_learning/MVDEC_dense.py or load it with "
             "allow_legacy_concat=True only for legacy experiments."
         )
@@ -168,13 +326,16 @@ def load_mvdec_result(
         )
         raise ValueError(msg)
 
-    preprocessed_rows = len(pd.read_csv(data_path))
+    preprocessed_df = pd.read_csv(data_path)
+    preprocessed_rows = len(preprocessed_df)
     if preprocessed_rows != h_fused.shape[0]:
         msg = (
             "Preprocessed dataset row count does not match h_fused rows: "
             f"{preprocessed_rows} != {h_fused.shape[0]}."
         )
         raise ValueError(msg)
+
+    _validate_airpollution_preprocessing(best_result, data_path, preprocessed_df)
 
     h_fused_df = pd.DataFrame(
         h_fused,

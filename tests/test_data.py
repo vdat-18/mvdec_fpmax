@@ -1,3 +1,4 @@
+import hashlib
 import pickle
 
 import numpy as np
@@ -50,7 +51,7 @@ def test_load_mvdec_result_rejects_preprocessed_row_mismatch(tmp_path):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
-def test_load_mvdec_result_accepts_mvdec2025_figure_output_average_contract(tmp_path):
+def test_load_mvdec_result_accepts_mvdec2025_encoder_average_contract(tmp_path):
     data_path = tmp_path / "airpollution.csv"
     result_path = tmp_path / "mvdec2025.pkl"
     pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
@@ -69,16 +70,18 @@ def test_load_mvdec_result_accepts_mvdec2025_figure_output_average_contract(tmp_
     with result_path.open("wb") as file:
         pickle.dump(
             {
-                "fusion_contract": "mvdec2025_figure_output_average",
+                "fusion_contract": "mvdec2025_encoder_average",
                 "view_output_layout": "eq5_compatible_10_plus_13",
                 "final_training_objective": (
-                    "dekm2021_greedy_cluster_loss_after_reconstruction_pretrain"
+                    "mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged"
                 ),
                 "h_view1": h_view1,
                 "h_view2": h_view2,
                 "h_fused": h_fused,
                 "labels": labels,
                 "fusion_dim": 2,
+                "view1_latent_dim": 2,
+                "kmeans_n_init": 100,
                 "init": "k-means",
                 "score": 0.5,
                 "iteration": 3,
@@ -111,7 +114,7 @@ def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):
     with result_path.open("wb") as file:
         pickle.dump(
             {
-                "fusion_contract": "mvdec2025_figure_output_average",
+                "fusion_contract": "mvdec2025_encoder_average",
                 "view_output_layout": "figure_dense_23",
                 "h_view1": h_view1,
                 "h_view2": h_view2,
@@ -126,6 +129,214 @@ def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):
         )
 
     with pytest.raises(ValueError, match="view_output_layout"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+def test_load_mvdec_result_rejects_legacy_full_view_average(tmp_path):
+    data_path = tmp_path / "airpollution.csv"
+    result_path = tmp_path / "legacy_mvdec2025.pkl"
+    pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    h_view1 = np.array(
+        [[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0]],
+        dtype=np.float32,
+    )
+    h_view2 = h_view1 + 0.2
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "fusion_contract": "mvdec2025_figure_output_average",
+                "view_output_layout": "eq5_compatible_10_plus_13",
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": np.array([0, 0, 1, 1]),
+                "fusion_dim": 2,
+                "init": "k-means",
+                "score": 0.5,
+                "iteration": 3,
+            },
+            file,
+        )
+
+    with pytest.raises(ValueError, match="legacy full-view-output average"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+@pytest.mark.parametrize(
+    (
+        "greedy_eigen_direction",
+        "greedy_eigen_index",
+        "greedy_target_mode",
+    ),
+    [
+        ("largest", 1, "frozen_snapshot"),
+        ("largest", 1, "selected_dimension_only"),
+        ("smallest", 0, "frozen_snapshot"),
+        ("smallest", 0, "selected_dimension_only"),
+    ],
+)
+def test_load_mvdec_result_validates_airpollution_minmax_metadata(
+    tmp_path,
+    greedy_eigen_direction,
+    greedy_eigen_index,
+    greedy_target_mode,
+):
+    data_path = tmp_path / "airpollution.csv"
+    result_path = tmp_path / "mvdec2025.pkl"
+    source_df = pd.DataFrame(
+        {
+            "distance": [0.0, 1.0, 2.0, 3.0],
+            "pollution": [10.0, 20.0, 30.0, 40.0],
+        }
+    )
+    source_df.to_csv(data_path, index=False)
+    source_sha256 = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    h_view1 = np.array(
+        [[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0]],
+        dtype=np.float32,
+    )
+    h_view2 = h_view1 + 0.2
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "dataset": "AIRPOLLUTION",
+                "fusion_contract": "mvdec2025_encoder_average",
+                "view_output_layout": "eq5_compatible_2_plus_2",
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": np.array([0, 0, 1, 1]),
+                "fusion_dim": 2,
+                "view1_latent_dim": 2,
+                "eigenvalue_order": "ascending",
+                "greedy_eigen_direction": greedy_eigen_direction,
+                "greedy_eigen_index": greedy_eigen_index,
+                "greedy_target_mode": greedy_target_mode,
+                "kmeans_refresh_policy": "one_epoch",
+                "batches_per_epoch": 2,
+                "stop_reason": "converged_assignment",
+                "refinement_epochs_completed": 3,
+                "preprocessing": {
+                    "method": "minmax",
+                    "feature_range": [0.0, 1.0],
+                    "feature_columns": list(source_df.columns),
+                    "data_min": [0.0, 10.0],
+                    "data_max": [3.0, 40.0],
+                    "source_sha256": source_sha256,
+                },
+                "config": {
+                    "kmeans_n_init": 100,
+                    "batch_size": 2,
+                    "kmeans_refresh_policy": "one_epoch",
+                    "batches_per_epoch": 2,
+                    "update_interval": 2,
+                    "max_refinement_epochs": 5,
+                    "max_training_steps": 10,
+                    "stop_reason": "converged_assignment",
+                    "refinement_epochs_completed": 3,
+                    "eigenvalue_order": "ascending",
+                    "greedy_eigen_direction": greedy_eigen_direction,
+                    "greedy_eigen_index": greedy_eigen_index,
+                    "greedy_target_mode": greedy_target_mode,
+                },
+                "init": "k-means",
+                "score": 0.5,
+                "iteration": 3,
+            },
+            file,
+        )
+
+    result = load_mvdec_result(result_path=result_path, data_path=data_path)
+
+    assert result.raw["preprocessing"]["method"] == "minmax"
+    assert result.raw["greedy_eigen_direction"] == greedy_eigen_direction
+    assert result.raw["greedy_target_mode"] == greedy_target_mode
+    assert result.raw["batches_per_epoch"] == 2
+    assert result.raw["stop_reason"] == "converged_assignment"
+
+    source_df.loc[0, "distance"] = 99.0
+    source_df.to_csv(data_path, index=False)
+    with pytest.raises(ValueError, match="source CSV hash"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+def test_load_mvdec_result_rejects_missing_airpollution_eigen_mode(tmp_path):
+    data_path = tmp_path / "airpollution.csv"
+    result_path = tmp_path / "mvdec2025.pkl"
+    source_df = pd.DataFrame({"feature": [0.0, 1.0, 2.0, 3.0]})
+    source_df.to_csv(data_path, index=False)
+    h_view1 = np.array(
+        [[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0]],
+        dtype=np.float32,
+    )
+    h_view2 = h_view1 + 0.2
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "dataset": "AIRPOLLUTION",
+                "fusion_contract": "mvdec2025_encoder_average",
+                "view_output_layout": "eq5_compatible_2_plus_1",
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": np.array([0, 0, 1, 1]),
+                "fusion_dim": 2,
+                "view1_latent_dim": 2,
+                "preprocessing": {
+                    "method": "minmax",
+                    "feature_range": [0.0, 1.0],
+                    "feature_columns": ["feature"],
+                    "data_min": [0.0],
+                    "data_max": [3.0],
+                    "source_sha256": hashlib.sha256(
+                        data_path.read_bytes()
+                    ).hexdigest(),
+                },
+                "init": "k-means",
+                "score": 0.5,
+                "iteration": 3,
+            },
+            file,
+        )
+
+    with pytest.raises(ValueError, match="greedy_eigen_direction"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+def test_load_mvdec_result_rejects_encoder_average_latent_dim_mismatch(tmp_path):
+    data_path = tmp_path / "airpollution.csv"
+    result_path = tmp_path / "mvdec2025.pkl"
+    pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    h_view1 = np.array(
+        [
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [5.0, 5.0],
+            [5.1, 5.0],
+        ],
+        dtype=np.float32,
+    )
+    h_view2 = h_view1 + 0.2
+    labels = np.array([0, 0, 1, 1])
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "fusion_contract": "mvdec2025_encoder_average",
+                "view_output_layout": "eq5_compatible_10_plus_13",
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": labels,
+                "fusion_dim": 2,
+                "view1_latent_dim": 3,
+                "init": "k-means",
+                "score": 0.5,
+                "iteration": 3,
+            },
+            file,
+        )
+
+    with pytest.raises(ValueError, match="view1_latent_dim"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 

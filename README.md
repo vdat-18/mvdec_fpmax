@@ -132,27 +132,83 @@ For the air-pollution case study, the current in-repo producer is:
 ```bash
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 \
+  --max-refinement-epochs 1400 \
+  --greedy-eigen-direction smallest \
+  --greedy-target-mode selected_dimension_only \
   --artifact-path data/preprocessed_data/airpollution_demvk_fused_representation.pkl
 ```
 
-This reads `data/preprocessed_data/data_demvk.csv` and saves:
+The greedy step exposes the eigen-direction and target semantics independently:
+
+```bash
+# Literal MvDEC 2025 configuration
+uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
+  --runs 3 --seed 42 \
+  --greedy-eigen-direction smallest \
+  --greedy-target-mode selected_dimension_only
+
+# DEKM 2021 behavior inherited by the earlier implementation
+uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
+  --runs 3 --seed 42 \
+  --greedy-eigen-direction largest \
+  --greedy-target-mode frozen_snapshot
+```
+
+The default is the literal MvDEC 2025 combination: `smallest` plus
+`selected_dimension_only`. It keeps the standard artifact path. When using the
+default artifact path, every other combination adds both mode names to the
+artifact filename. Final weights, cluster CSVs, and log files also include both
+modes so experiments do not overwrite each other.
+
+This reads `data/preprocessed_data/data_demvk.csv`, applies column-wise Min-Max
+scaling to `[0, 1]`, and saves:
 
 ```text
 data/preprocessed_data/airpollution_demvk_fused_representation.pkl
 output/AIRPOLLUTION_clusters.csv
 ```
 
-The air-pollution artifact is not included by default because the previous
-checked-in file used a legacy concat representation. Regenerate it before
-running air-pollution FP-Max/clustering modes.
+The loader rejects the previous legacy full-view-output artifact. Regenerate it
+before running air-pollution FP-Max/clustering modes.
 
-For MvDEC 2025 air-pollution artifacts, `h_fused` follows Fig. 1/Fig. 2:
-both views produce 23-wide outputs and `h_fused = (h_view1 + h_view2) / 2`.
-View outputs use the Eq. (5)-compatible layout `10 learned + 13 reconstruction`;
-the final representation update follows DEKM 2021 greedy clustering loss after
-reconstruction pretraining. The pickle also keeps `h_view1`, `h_view2`,
-`labels`, `init`, `score`, `iteration`, `fusion_dim`, `fusion_contract`,
-`view_output_layout`, and `final_training_objective`.
+For MvDEC 2025 air-pollution artifacts, each model output uses the Eq.
+(5)-compatible layout `10 latent + 13 reconstruction`, while clustering and
+export use only the latent heads: `h_fused = (h_view1_latent +
+h_view2_latent) / 2`. Therefore, `h_fused`, `h_view1`, and `h_view2` are all
+10-dimensional. Joint training combines reconstruction, K-Means, and greedy
+losses; the trace-equivalent L3 term is logged with weight zero to avoid
+duplicating L2's gradient.
+
+The run logs both `baseline_raw_input` and `baseline_scaled_input` so scale
+dominance is visible. The pickle records the scaling method, fitted per-column
+minimum/maximum values, feature order, and SHA-256 of the source CSV. Min-Max is
+an explicit reproduction assumption based on Table 4 of the 2025 paper; the
+paper does not publish its fitted scaler.
+
+Step 9 logs split `L4_greedy` into `L4_selected_direction` and
+`L4_nonselected_snapshot_anchor`, plus their fractions of total L4. Their sum
+equals `L4_greedy`. In `selected_dimension_only`, the snapshot-anchor component
+and its gradient are exactly zero. In `frozen_snapshot`, both components can be
+non-zero.
+
+Every K-Means refresh uses a fixed `n_init=100`. The previous inherited DEKM
+behavior that replaced `n_init` with `2 * n_iter_` has been removed because the
+number of random initializations and the winning run's convergence iterations
+are different concepts.
+
+K-Means refresh follows a `one_epoch` policy. A refinement cycle trains every
+mini-batch exactly once before recomputing the full fused embedding, centroids,
+scatter matrix, eigenvectors, and greedy target. With batch size 256 this means
+15 updates per Air Pollution cycle and 8 per TIKI cycle. The maximum remains
+1400 refinement epochs, matching the former maximum number of K-Means refreshes.
+
+`--max-refinement-epochs` is a safety cap and can be overridden. Each run logs
+`stop_reason=converged_assignment` when assignment changes satisfy the tolerance,
+or `stop_reason=max_epochs_reached` when the safety cap is exhausted. The
+artifact stores the stop reason and completed refinement epoch count.
+
+Refinement stops when no more than 1% of samples change their K-Means assignment
+between consecutive epochs (`assignment_change_tolerance=0.01`).
 
 ### 3. FP-Max and Clustering Experiments
 

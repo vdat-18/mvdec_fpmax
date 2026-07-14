@@ -1,21 +1,24 @@
 import argparse
+import hashlib
 import os
 import pickle
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from scipy.optimize import linear_sum_assignment
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-from tensorflow.keras import layers, losses
+from tensorflow.keras import layers
 from tensorflow.keras.models import Model
 from utils import get_ACC_NMI, get_xy, log_csv
 
 # Air pollution dataset (data/preprocessed_data/data_demvk.csv): 13 features,
-# n_clusters=4 confirmed via the paper's own Elbow analysis. Fig. 1/Fig. 2
-# produce a 23-wide output per view: 10 learned features + 13 reconstruction
-# features for both views.
+# n_clusters=4 confirmed via the paper's own Elbow analysis. Each view returns
+# [latent embedding, reconstruction] so Eq. (5) can train reconstruction while
+# Eq. (3)-(4) cluster the fused latent embeddings.
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
 hidden_units = 10
@@ -24,13 +27,26 @@ view1_filters = [500, 500, 2000]
 view2_base_units = 64
 pretrain_epochs = 200
 batch_size = 256
-update_interval = 10
-assignment_change_tolerance = 0.005
+assignment_change_tolerance = 0.01
+lambda_reconstruction = 1.0
+lambda_kmeans = 1.0
+lambda_orthonormal = 0.0
+lambda_greedy = 1.0
 AIRPOLLUTION_ARTIFACT_PATH = (
     'data/preprocessed_data/airpollution_demvk_fused_representation.pkl'
 )
 TIKI_ARTIFACT_PATH = 'data/preprocessed_data/tiki_mvdec_fused_representation.pkl'
-FINAL_TRAINING_OBJECTIVE = 'dekm2021_greedy_cluster_loss_after_reconstruction_pretrain'
+FINAL_TRAINING_OBJECTIVE = (
+    'mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged'
+)
+GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
+GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
+PAPER2025_GREEDY_EIGEN_DIRECTION = 'smallest'
+PAPER2025_GREEDY_TARGET_MODE = 'selected_dimension_only'
+KMEANS_N_INIT = 100
+KMEANS_REFRESH_POLICY = 'one_epoch'
+MAX_REFINEMENT_EPOCHS = 1400
+TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
 UNLABELED_DATASETS = {
     'AIRPOLLUTION': {
         'csv_path': 'data/preprocessed_data/data_demvk.csv',
@@ -40,6 +56,7 @@ UNLABELED_DATASETS = {
         'view2_base_units': 64,
         'n_clusters': 4,
         'artifact_path': AIRPOLLUTION_ARTIFACT_PATH,
+        'scaling_method': 'minmax',
     },
     'TIKI': {
         'csv_path': 'data/preprocessed_data/tiki_preprocessed.csv',
@@ -49,6 +66,7 @@ UNLABELED_DATASETS = {
         'view2_base_units': 32,
         'n_clusters': 5,
         'artifact_path': TIKI_ARTIFACT_PATH,
+        'scaling_method': 'none',
     },
 }
 
@@ -61,10 +79,171 @@ def view_output_layout():
     return f'eq5_compatible_{hidden_units}_plus_{input_shape}'
 
 
+def latent_embedding(view_output):
+    return view_output[:, :hidden_units]
+
+
+def reconstruction_output(view_output):
+    return view_output[:, -input_shape:]
+
+
+def fused_latent_embedding(view1_output, view2_output):
+    return (latent_embedding(view1_output) + latent_embedding(view2_output)) / 2
+
+
+def greedy_eigen_index(direction):
+    if direction == 'largest':
+        return -1
+    if direction == 'smallest':
+        return 0
+    raise ValueError(f'Unsupported greedy eigen direction: {direction!r}.')
+
+
+def validate_greedy_target_mode(target_mode):
+    if target_mode not in GREEDY_TARGET_MODES:
+        raise ValueError(f'Unsupported greedy target mode: {target_mode!r}.')
+    return target_mode
+
+
+def build_greedy_target(
+    transformed_embeddings,
+    transformed_centroids,
+    assignments,
+    eigen_index,
+):
+    target = np.array(transformed_embeddings, copy=True)
+    target[:, eigen_index] = transformed_centroids[assignments, eigen_index]
+    return target
+
+
+def artifact_path_for_greedy_mode(artifact_path, direction, target_mode):
+    greedy_eigen_index(direction)
+    validate_greedy_target_mode(target_mode)
+    if (
+        direction == PAPER2025_GREEDY_EIGEN_DIRECTION
+        and target_mode == PAPER2025_GREEDY_TARGET_MODE
+    ):
+        return str(artifact_path)
+    path = Path(artifact_path)
+    suffix = f'{direction}_eigen_{target_mode}'
+    return str(path.with_name(f'{path.stem}_{suffix}{path.suffix}'))
+
+
 def set_random_seed(seed):
     if seed is not None:
         np.random.seed(seed)
         tf.random.set_seed(seed)
+
+
+def make_kmeans(random_seed):
+    return KMeans(
+        n_clusters=n_clusters,
+        n_init=KMEANS_N_INIT,
+        random_state=random_seed,
+    )
+
+
+def count_aligned_assignment_changes(previous_labels, current_labels):
+    previous_labels = np.asarray(previous_labels)
+    current_labels = np.asarray(current_labels)
+    if previous_labels.shape != current_labels.shape:
+        raise ValueError('Assignment arrays must have the same shape.')
+    if np.any(previous_labels < 0):
+        return int(len(current_labels))
+
+    overlap = np.zeros((n_clusters, n_clusters), dtype=np.int64)
+    for current_cluster, previous_cluster in zip(
+        current_labels,
+        previous_labels,
+        strict=False,
+    ):
+        overlap[current_cluster, previous_cluster] += 1
+    current_cluster_ids, previous_cluster_ids = linear_sum_assignment(-overlap)
+    aligned_previous = previous_labels.copy()
+    for current_cluster, previous_cluster in zip(
+        current_cluster_ids,
+        previous_cluster_ids,
+        strict=False,
+    ):
+        aligned_previous[previous_labels == previous_cluster] = current_cluster
+    return int(np.sum(current_labels != aligned_previous))
+
+
+def number_of_batches(n_samples, current_batch_size):
+    if n_samples < 1 or current_batch_size < 1:
+        raise ValueError('n_samples and batch_size must be positive.')
+    return (n_samples + current_batch_size - 1) // current_batch_size
+
+
+def validate_max_refinement_epochs(max_refinement_epochs):
+    if max_refinement_epochs < 1:
+        raise ValueError('max_refinement_epochs must be at least 1.')
+    return int(max_refinement_epochs)
+
+
+def epoch_batch_bounds(n_samples, current_batch_size):
+    number_of_batches(n_samples, current_batch_size)
+    return [
+        (start, min(start + current_batch_size, n_samples))
+        for start in range(0, n_samples, current_batch_size)
+    ]
+
+
+def is_refinement_epoch_end(training_step, batches_per_epoch):
+    return (training_step + 1) % batches_per_epoch == 0
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def preprocess_unlabeled_features(df, source_path, scaling_method='none'):
+    raw_x = df.to_numpy(dtype=np.float64)
+    if not np.isfinite(raw_x).all():
+        raise ValueError('Unlabeled input contains NaN or infinite values.')
+
+    data_min = raw_x.min(axis=0)
+    data_max = raw_x.max(axis=0)
+    data_range = data_max - data_min
+    constant_mask = data_range == 0
+
+    if scaling_method == 'minmax':
+        safe_range = np.where(constant_mask, 1.0, data_range)
+        x = np.clip((raw_x - data_min) / safe_range, 0.0, 1.0)
+        x[:, constant_mask] = 0.0
+        feature_range = [0.0, 1.0]
+        assumption = (
+            'Column-wise Min-Max scaling selected for reproducibility because '
+            'the MvDEC 2025 paper presents the 13 air-pollution features on a '
+            '[0, 1] scale but does not publish the fitted scaler.'
+        )
+    elif scaling_method == 'none':
+        x = raw_x.copy()
+        feature_range = None
+        assumption = 'No feature scaling is applied for this dataset.'
+    else:
+        raise ValueError(f'Unsupported scaling method: {scaling_method!r}.')
+
+    source_path = Path(source_path)
+    metadata = {
+        'method': scaling_method,
+        'feature_range': feature_range,
+        'feature_columns': list(df.columns),
+        'data_min': data_min.tolist(),
+        'data_max': data_max.tolist(),
+        'constant_features': [
+            str(df.columns[index])
+            for index in np.flatnonzero(constant_mask)
+        ],
+        'source_path': source_path.as_posix(),
+        'source_sha256': _file_sha256(source_path),
+        'assumption': assumption,
+    }
+    return raw_x.astype(np.float32), x.astype(np.float32), metadata
 
 
 def get_x_airpollution(
@@ -75,31 +254,43 @@ def get_x_airpollution(
     # Separate from utils.py::get_xy (which already covers REUTERS/20NEWS/RCV1
     # as-is) because that dataset registry has no AIRPOLLUTION entry, and
     # air pollution has no labels to return alongside x.
-    df = pd.read_csv(dir_path + 'data_demvk.csv')
-    x = df.values.astype(np.float32)
-    if shuffle_seed is None:
-        shuffle_seed = int(np.random.randint(100))
-    idx = np.arange(0, len(x))
-    idx = tf.random.shuffle(idx, seed=shuffle_seed).numpy()
-    x = x[idx]
-    if log_print:
-        print(ds_name)
-    # idx is returned so callers can map shuffled rows (and later, the fused
-    # embedding/cluster assignment) back to the original CSV row order.
-    return x, idx, list(df.columns)
+    return get_x_unlabeled_csv(
+        Path(dir_path) / 'data_demvk.csv',
+        log_print=log_print,
+        shuffle_seed=shuffle_seed,
+        scaling_method='minmax',
+    )
 
 
-def get_x_unlabeled_csv(csv_path, log_print=True, shuffle_seed=None):
+def get_x_unlabeled_csv(
+    csv_path,
+    log_print=True,
+    shuffle_seed=None,
+    scaling_method='none',
+    include_preprocessing=False,
+):
     df = pd.read_csv(csv_path)
-    x = df.values.astype(np.float32)
+    raw_x, x, preprocessing_metadata = preprocess_unlabeled_features(
+        df,
+        source_path=csv_path,
+        scaling_method=scaling_method,
+    )
     if shuffle_seed is None:
         shuffle_seed = int(np.random.randint(100))
     idx = np.arange(0, len(x))
     idx = tf.random.shuffle(idx, seed=shuffle_seed).numpy()
     x = x[idx]
+    raw_x = raw_x[idx]
     if log_print:
         print(ds_name)
-    return x, idx, list(df.columns)
+        print(
+            f'preprocessing:{scaling_method}; '
+            f'source_sha256:{preprocessing_metadata["source_sha256"][:12]}'
+        )
+    result = (x, idx, list(df.columns))
+    if include_preprocessing:
+        return (*result, raw_x, preprocessing_metadata)
+    return result
 
 
 def _restore_original_order(values, orig_idx):
@@ -119,9 +310,37 @@ def save_airpollution_mvdec_artifact(
     orig_idx,
     feature_columns,
     random_seed,
+    greedy_eigen_direction,
+    greedy_target_mode,
+    batches_per_epoch,
+    max_refinement_epochs,
+    stop_reason,
+    refinement_epochs_completed,
+    preprocessing_metadata,
 ):
-    # Fig. 1/Fig. 2 contract: h_fused is the average of both view outputs,
-    # then K-means is applied to that fused representation.
+    greedy_eigen_index(greedy_eigen_direction)
+    validate_greedy_target_mode(greedy_target_mode)
+    validate_max_refinement_epochs(max_refinement_epochs)
+    if stop_reason not in TRAINING_STOP_REASONS:
+        raise ValueError(f'Unsupported training stop reason: {stop_reason!r}.')
+    greedy_eigen_position = (
+        hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
+    )
+    if ds_name == 'AIRPOLLUTION':
+        if not isinstance(preprocessing_metadata, dict):
+            raise ValueError(
+                'Air Pollution artifacts require Min-Max preprocessing metadata.'
+            )
+        if preprocessing_metadata.get('method') != 'minmax':
+            raise ValueError('Air Pollution artifacts require Min-Max scaled input.')
+        if preprocessing_metadata.get('feature_columns') != feature_columns:
+            raise ValueError(
+                'Air Pollution scaler columns must match artifact feature columns.'
+            )
+
+    # Eq. (3)-(4) contract: h_fused is the average of both view latent
+    # embeddings. The reconstruction tails remain model outputs for Eq. (5)
+    # but are not clustered/exported as the primary representation.
     h_view1 = _restore_original_order(np.asarray(h_view1), orig_idx)
     h_view2 = _restore_original_order(np.asarray(h_view2), orig_idx)
     h_fused = _restore_original_order(np.asarray(h_fused), orig_idx)
@@ -132,7 +351,7 @@ def save_airpollution_mvdec_artifact(
         'algorithm': 'MvDEC',
         'dataset': ds_name,
         'paper': '2025_Multi-view Deep Embedded Clustering',
-        'fusion_contract': 'mvdec2025_figure_output_average',
+        'fusion_contract': 'mvdec2025_encoder_average',
         'view_output_layout': view_output_layout(),
         'final_training_objective': FINAL_TRAINING_OBJECTIVE,
         'h_view1': h_view1,
@@ -148,25 +367,54 @@ def save_airpollution_mvdec_artifact(
         'view2_latent_dim': int(hidden_units),
         'fusion_dim': int(h_fused.shape[1]),
         'n_clusters': int(n_clusters),
+        'kmeans_n_init': int(KMEANS_N_INIT),
+        'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+        'batches_per_epoch': int(batches_per_epoch),
+        'stop_reason': stop_reason,
+        'refinement_epochs_completed': int(refinement_epochs_completed),
         'n_samples': int(h_fused.shape[0]),
         'feature_columns': feature_columns,
+        'eigenvalue_order': 'ascending',
+        'greedy_eigen_direction': greedy_eigen_direction,
+        'greedy_eigen_index': int(greedy_eigen_position),
+        'greedy_target_mode': greedy_target_mode,
+        'preprocessing': preprocessing_metadata,
         'config': {
             'seed': random_seed,
             'n_clusters': int(n_clusters),
+            'kmeans_n_init': int(KMEANS_N_INIT),
             'batch_size': int(batch_size),
             'pretrain_epochs': int(pretrain_epochs),
-            'update_interval': int(update_interval),
+            'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+            'batches_per_epoch': int(batches_per_epoch),
+            'update_interval': int(batches_per_epoch),
+            'max_refinement_epochs': int(max_refinement_epochs),
+            'max_training_steps': int(max_refinement_epochs * batches_per_epoch),
+            'stop_reason': stop_reason,
+            'refinement_epochs_completed': int(refinement_epochs_completed),
             'assignment_change_tolerance': float(assignment_change_tolerance),
             'view1_latent_dim': int(hidden_units),
             'view2_latent_dim': int(hidden_units),
             'view1_filters': list(view1_filters),
             'view2_base_units': int(view2_base_units),
-            'view1_output_dim': int(h_view1.shape[1]),
-            'view2_output_dim': int(h_view2.shape[1]),
-            'view_output_dim': int(h_fused.shape[1]),
-            'view_output_layout': view_output_layout(),
+            'view1_embedding_dim': int(h_view1.shape[1]),
+            'view2_embedding_dim': int(h_view2.shape[1]),
+            'fusion_dim': int(h_fused.shape[1]),
+            'model_view_output_dim': int(view_output_width()),
+            'model_view_output_layout': view_output_layout(),
             'final_training_objective': FINAL_TRAINING_OBJECTIVE,
-            'fusion': 'h_fused = (view1_output + view2_output) / 2',
+            'eigenvalue_order': 'ascending',
+            'greedy_eigen_direction': greedy_eigen_direction,
+            'greedy_eigen_index': int(greedy_eigen_position),
+            'greedy_target_mode': greedy_target_mode,
+            'loss_weights': {
+                'reconstruction': float(lambda_reconstruction),
+                'kmeans': float(lambda_kmeans),
+                'orthonormal_trace_logged': float(lambda_orthonormal),
+                'greedy': float(lambda_greedy),
+            },
+            'fusion': 'h_fused = (view1_latent + view2_latent) / 2',
+            'preprocessing': preprocessing_metadata,
         },
     }
 
@@ -215,8 +463,9 @@ def model_view1(load_weights=True):
 def model_view2(load_weights=True):
     # U-Net-inspired autoencoder (second view). Air pollution uses the 64-base
     # stack from the 2025 MvDEC paper; Tiki uses the smaller 32-base stack from
-    # Clustering_English_ver02 Fig. 1. The decoder starts from h so
-    # reconstruction pretraining updates the learned representation.
+    # Clustering_English_ver02 Fig. 1. A latent head is inserted at the paper's
+    # bottleneck so both views can be averaged under Eq. (4); the decoder then
+    # follows the skip dimensions shown in Fig. 2.
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
@@ -236,7 +485,6 @@ def model_view2(load_weights=True):
         activation=activation,
         kernel_initializer=init,
     )(e4)
-    skip1 = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(e1)
 
     h = layers.Dense(
         hidden_units,
@@ -245,16 +493,20 @@ def model_view2(load_weights=True):
     )(bottleneck)
 
     x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(h)
-    x = layers.Concatenate()([x, e3])
+    x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Concatenate()([x, e4])
     x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
-    x = layers.Concatenate()([x, e2])
+    x = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Concatenate()([x, e3])
     x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(x)
-    x = layers.Concatenate()([x, e1])
+    x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
+    x = layers.Concatenate()([x, e2])
     x = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
-    x = layers.Concatenate()([x, skip1])
+    x = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(x)
+    x = layers.Concatenate()([x, e1])
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
     y = layers.Dense(
         input_shape,
@@ -270,13 +522,38 @@ def model_view2(load_weights=True):
     return model
 
 
+def squared_euclidean_per_sample(y_true, y_pred):
+    return tf.reduce_sum(tf.math.squared_difference(y_true, y_pred), axis=-1)
+
+
+def greedy_loss_components(y_true, y_pred, eigen_index):
+    squared_error = tf.math.squared_difference(y_true, y_pred)
+    selected_per_sample = squared_error[:, eigen_index]
+    total_per_sample = tf.reduce_sum(squared_error, axis=-1)
+    selected_loss = tf.reduce_mean(selected_per_sample)
+    nonselected_loss = tf.reduce_mean(total_per_sample - selected_per_sample)
+    return selected_loss, nonselected_loss
+
+
+def selected_direction_greedy_loss(
+    transformed_embeddings,
+    transformed_centroids,
+    eigen_index,
+):
+    return tf.reduce_mean(
+        tf.math.squared_difference(
+            transformed_embeddings[:, eigen_index],
+            transformed_centroids[:, eigen_index],
+        )
+    )
+
+
 def loss_train_base(y_true, y_pred):
-    # Fig. 1/Fig. 2 produce a 23-wide output per view. The trailing 13 values
-    # are trained against the input reconstruction target so Eq. 5 remains
-    # applicable while the full 23-wide output is still available for fusion.
+    # The trailing reconstruction values are trained against the input target
+    # for Eq. (5). Clustering later uses only the latent head.
     y_true = layers.Flatten()(y_true)
-    y_pred = y_pred[:, -input_shape:]
-    return losses.mse(y_true, y_pred)
+    y_pred = reconstruction_output(y_pred)
+    return squared_euclidean_per_sample(y_true, y_pred)
 
 
 def train_base_view1(ds_xx):
@@ -310,8 +587,40 @@ def _metric_for_labels(features, labels, y=None):
     return f'silhouette = {silhouette}', silhouette
 
 
+def recompute_final_clustering(model1, model2, x, random_seed):
+    view1_output = model1(x).numpy()
+    view2_output = model2(x).numpy()
+    h1 = latent_embedding(view1_output)
+    h2 = latent_embedding(view2_output)
+    h_fused = (h1 + h2) / 2
+    labels = make_kmeans(random_seed).fit(h_fused).labels_
+    return h1, h2, h_fused, labels
+
+
 def _cluster_sizes(labels):
     return np.bincount(np.asarray(labels), minlength=n_clusters).tolist()
+
+
+def _loss_scalar(value):
+    if hasattr(value, 'numpy'):
+        value = value.numpy()
+    return float(np.mean(value))
+
+
+def mean_epoch_losses(batch_losses):
+    if not batch_losses:
+        raise ValueError('At least one batch loss is required.')
+    total_samples = sum(losses['sample_count'] for losses in batch_losses)
+    return {
+        name: float(
+            sum(
+                losses[name] * losses['sample_count'] for losses in batch_losses
+            )
+            / total_samples
+        )
+        for name in batch_losses[0]
+        if name != 'sample_count'
+    }
 
 
 def _log_training_phase(
@@ -323,22 +632,32 @@ def _log_training_phase(
     labels,
     train_start_time,
     raw_reference=None,
+    extra_fields=None,
+    file_name=None,
 ):
+    extra_str = ''
+    if extra_fields:
+        extra_str = ''.join(f'; {key}:{value}' for key, value in extra_fields.items())
     log_str = (
         f'phase:{phase}; space:{space}; {metric_str}; loss:{loss}; '
         f'n_changed_assignment:{n_change_assignment}; '
-        f'cluster_sizes:{_cluster_sizes(labels)}; '
+        f'cluster_sizes:{_cluster_sizes(labels)}{extra_str}; '
         f'time:{time.time() - train_start_time:.3f}'
     )
     print(log_str)
-    log_csv(log_str.split(';'), file_name=ds_name)
+    log_csv(log_str.split(';'), file_name=ds_name if file_name is None else file_name)
 
 
 def train(
     x,
     y=None,
+    raw_x=None,
     orig_idx=None,
     feature_columns=None,
+    preprocessing_metadata=None,
+    greedy_eigen_direction=PAPER2025_GREEDY_EIGEN_DIRECTION,
+    greedy_target_mode=PAPER2025_GREEDY_TARGET_MODE,
+    max_refinement_epochs=MAX_REFINEMENT_EPOCHS,
     random_seed=None,
     time_start=None,
     artifact_path=AIRPOLLUTION_ARTIFACT_PATH,
@@ -351,64 +670,97 @@ def train(
     # original data for re-clustering or interpretation (e.g. land-use/traffic
     # correlation, as in the paper's Section 5.5).
     train_start_time = time.time() if time_start is None else time_start
+    greedy_index = greedy_eigen_index(greedy_eigen_direction)
+    validate_greedy_target_mode(greedy_target_mode)
+    max_refinement_epochs = validate_max_refinement_epochs(
+        max_refinement_epochs
+    )
+    batch_bounds = epoch_batch_bounds(len(x), batch_size)
+    batches_per_epoch = len(batch_bounds)
+    kmeans_refresh_interval = batches_per_epoch
+    max_training_steps = max_refinement_epochs * batches_per_epoch
+    experiment_tag = f'{greedy_eigen_direction}_eigen_{greedy_target_mode}'
+    train_log_name = f'{ds_name}_{experiment_tag.upper()}'
     log_str = (
         'phase; space; metric; loss; n_changed_assignment; cluster_sizes; '
+        'greedy_eigen_direction; greedy_eigen_index; greedy_eigenvalue; '
+        'greedy_target_mode; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     )
-    log_csv(log_str.split(';'), file_name=ds_name)
+    log_csv(log_str.split(';'), file_name=train_log_name)
     model1 = model_view1()
     model2 = model_view2()
 
     optimizer = tf.keras.optimizers.Adam()
     loss_value = 0
+    reconstruction_loss_value = 0
+    kmeans_loss_value = 0
+    orthonormal_loss_value = 0
+    greedy_loss_value = 0
+    greedy_selected_loss_value = 0
+    greedy_nonselected_loss_value = 0
     silhouette = np.nan
     acc = np.nan
     nmi = np.nan
     index = 0
-    kmeans_n_init = 100
+    stop_reason = 'max_epochs_reached'
+    refinement_epochs_completed = 0
+    epoch_batch_losses = []
+    last_epoch_loss_means = None
     assignment = np.array([-1] * len(x))
     index_array = np.arange(x.shape[0])
-    raw_kmeans = KMeans(
-        n_clusters=n_clusters,
-        n_init=kmeans_n_init,
-        random_state=random_seed,
-    ).fit(x)
-    raw_metric_str, _ = _metric_for_labels(x, raw_kmeans.labels_, y=y)
+    if raw_x is not None and raw_x.shape != x.shape:
+        raise ValueError('raw_x and x must have the same shape.')
+
+    if raw_x is not None:
+        raw_kmeans = make_kmeans(random_seed).fit(raw_x)
+        raw_metric_str, _ = _metric_for_labels(raw_x, raw_kmeans.labels_, y=y)
+        _log_training_phase(
+            phase='baseline_raw_input',
+            space='x_raw',
+            metric_str=raw_metric_str,
+            loss=0.0,
+            n_change_assignment=len(x),
+            labels=raw_kmeans.labels_,
+            train_start_time=train_start_time,
+            raw_reference=raw_x if y is None else None,
+            file_name=train_log_name,
+        )
+
+    input_kmeans = make_kmeans(random_seed).fit(x)
+    input_metric_str, _ = _metric_for_labels(x, input_kmeans.labels_, y=y)
+    input_phase = 'baseline_scaled_input' if raw_x is not None else 'baseline_raw_input'
+    input_space = 'x_minmax' if raw_x is not None else 'x'
     _log_training_phase(
-        phase='baseline_raw_input',
-        space='x',
-        metric_str=raw_metric_str,
+        phase=input_phase,
+        space=input_space,
+        metric_str=input_metric_str,
         loss=0.0,
         n_change_assignment=len(x),
-        labels=raw_kmeans.labels_,
+        labels=input_kmeans.labels_,
         train_start_time=train_start_time,
         raw_reference=x if y is None else None,
+        file_name=train_log_name,
     )
-    for ite in range(int(140 * 100)):
-        log_paper_step_checkpoint = ite % update_interval == 0
-        if ite % update_interval == 0:
-            h1 = model1(x).numpy()
-            h2 = model2(x).numpy()
-            H = (h1 + h2) / 2
-            ans_kmeans = KMeans(
-                n_clusters=n_clusters,
-                n_init=kmeans_n_init,
-                random_state=random_seed,
-            ).fit(H)
-            kmeans_n_init = int(ans_kmeans.n_iter_ * 2)
+    for ite in range(max_training_steps):
+        log_paper_step_checkpoint = ite % kmeans_refresh_interval == 0
+        log_step9_end_of_epoch = is_refinement_epoch_end(
+            ite,
+            kmeans_refresh_interval,
+        )
+        if log_paper_step_checkpoint:
+            epoch_batch_losses = []
+            view1_output = model1(x).numpy()
+            view2_output = model2(x).numpy()
+            H = fused_latent_embedding(view1_output, view2_output)
+            ans_kmeans = make_kmeans(random_seed).fit(H)
 
             U = ans_kmeans.cluster_centers_
             assignment_new = ans_kmeans.labels_
-
-            w = np.zeros((n_clusters, n_clusters), dtype=np.int64)
-            for i in range(len(assignment_new)):
-                w[assignment_new[i], assignment[i]] += 1
-            from scipy.optimize import linear_sum_assignment as linear_assignment
-            ind = linear_assignment(-w)
-            temp = np.array(assignment)
-            for i in range(n_clusters):
-                assignment[temp == ind[1][i]] = i
-            n_change_assignment = np.sum(assignment_new != assignment)
+            n_change_assignment = count_aligned_assignment_changes(
+                assignment,
+                assignment_new,
+            )
             assignment = assignment_new
 
             S_i = []
@@ -421,10 +773,25 @@ def train(
             Evals, V = sorted_eig(S)
             H_vt = np.matmul(H, V)
             U_vt = np.matmul(U, V)
-            H_vt_greedy_target = H_vt.copy()
-            H_vt_greedy_target[:, -1] = U_vt[assignment, -1]
+            selected_eigenvalue = float(Evals[greedy_index])
+            selected_eigen_position = greedy_index % len(Evals)
+            H_vt_greedy_target = build_greedy_target(
+                H_vt,
+                U_vt,
+                assignment,
+                greedy_index,
+            )
+            eigen_log_fields = {
+                'greedy_eigen_direction': greedy_eigen_direction,
+                'greedy_eigen_index': selected_eigen_position,
+                'greedy_eigenvalue': selected_eigenvalue,
+                'greedy_target_mode': greedy_target_mode,
+                'kmeans_n_init': KMEANS_N_INIT,
+                'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+                'batches_per_epoch': batches_per_epoch,
+            }
             #
-            loss = np.round(np.mean(loss_value), 5)
+            loss = np.round(_loss_scalar(loss_value), 5)
             metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
             if y is not None:
                 acc, nmi = metric_value
@@ -433,17 +800,19 @@ def train(
             paper_step_suffix = (
                 'pre_refine'
                 if ite == 0
-                else f'refine_iter_{ite // update_interval}'
+                else f'refine_epoch_{ite // kmeans_refresh_interval}'
             )
             _log_training_phase(
                 phase=f'paper_step4_to_7_common_{paper_step_suffix}',
-                space='H_fused',
+                space='H_fused_latent',
                 metric_str=metric_str,
                 loss=loss,
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
                 raw_reference=x if y is None else None,
+                extra_fields=eigen_log_fields,
+                file_name=train_log_name,
             )
             greedy_metric_str, _ = _metric_for_labels(
                 H_vt_greedy_target,
@@ -459,88 +828,239 @@ def train(
                 labels=assignment,
                 train_start_time=train_start_time,
                 raw_reference=x if y is None else None,
+                extra_fields=eigen_log_fields,
+                file_name=train_log_name,
             )
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
-            model1.save_weights(f'weight_final_view1_{ds_name}.weights.h5')
-            model2.save_weights(f'weight_final_view2_{ds_name}.weights.h5')
-            print('end')
+            stop_reason = 'converged_assignment'
+            refinement_epochs_completed = ite // kmeans_refresh_interval
             break
-        idx = index_array[index * batch_size: min((index + 1) * batch_size, x.shape[0])]
-        y_true = H_vt[idx]
+        batch_start, batch_end = batch_bounds[index]
+        idx = index_array[batch_start:batch_end]
         temp = assignment[idx]
-        for i in range(len(idx)):
-            y_true[i, -1] = U_vt[temp[i], -1]
+        x_batch = tf.convert_to_tensor(x[idx], dtype=tf.float32)
+        y_true_tensor = None
+        if greedy_target_mode == 'frozen_snapshot':
+            y_true = build_greedy_target(H_vt[idx], U_vt, temp, greedy_index)
+            y_true_tensor = tf.convert_to_tensor(y_true, dtype=tf.float32)
+        V_tensor = tf.convert_to_tensor(V, dtype=tf.float32)
+        U_batch_tensor = tf.convert_to_tensor(U[temp], dtype=tf.float32)
+        U_vt_batch_tensor = tf.convert_to_tensor(U_vt[temp], dtype=tf.float32)
 
         with tf.GradientTape() as tape:
-            y_pred1 = model1(x[idx])
-            y_pred2 = model2(x[idx])
-            h_pred = (y_pred1 + y_pred2) / 2
-            y_pred_cluster = tf.matmul(h_pred, V)
-            # After reconstruction pretraining, follow DEKM 2021: optimize only
-            # the greedy clustering objective instead of carrying reconstruction
-            # loss into the final representation update.
-            loss_value = losses.mse(y_true, y_pred_cluster)
+            y_pred1 = model1(x_batch)
+            y_pred2 = model2(x_batch)
+            h_pred = fused_latent_embedding(y_pred1, y_pred2)
+            y_pred_cluster = tf.matmul(h_pred, V_tensor)
+            orthonormal_residual = tf.matmul(h_pred - U_batch_tensor, V_tensor)
+            reconstruction_loss_value = tf.reduce_mean(
+                squared_euclidean_per_sample(
+                    x_batch,
+                    reconstruction_output(y_pred1),
+                )
+                + squared_euclidean_per_sample(
+                    x_batch,
+                    reconstruction_output(y_pred2),
+                )
+            )
+            kmeans_loss_value = tf.reduce_mean(
+                squared_euclidean_per_sample(U_batch_tensor, h_pred)
+            )
+            # Eq. (9) is the transformed within-cluster scatter. Because V is
+            # a full orthonormal basis, its gradient is trace-equivalent to L2;
+            # keep it logged for paper traceability without double-pulling H.
+            orthonormal_loss_value = tf.reduce_mean(
+                squared_euclidean_per_sample(
+                    tf.zeros_like(orthonormal_residual),
+                    orthonormal_residual,
+                )
+            )
+            if greedy_target_mode == 'selected_dimension_only':
+                greedy_selected_loss_value = selected_direction_greedy_loss(
+                    y_pred_cluster,
+                    U_vt_batch_tensor,
+                    greedy_index,
+                )
+                greedy_nonselected_loss_value = tf.zeros_like(
+                    greedy_selected_loss_value
+                )
+            else:
+                (
+                    greedy_selected_loss_value,
+                    greedy_nonselected_loss_value,
+                ) = greedy_loss_components(
+                    y_true_tensor,
+                    y_pred_cluster,
+                    greedy_index,
+                )
+            greedy_loss_value = (
+                greedy_selected_loss_value + greedy_nonselected_loss_value
+            )
+            loss_value = (
+                lambda_reconstruction * reconstruction_loss_value
+                + lambda_kmeans * kmeans_loss_value
+                + lambda_orthonormal * orthonormal_loss_value
+                + lambda_greedy * greedy_loss_value
+            )
         trainable_variables = model1.trainable_variables + model2.trainable_variables
         grads = tape.gradient(loss_value, trainable_variables)
         optimizer.apply_gradients(zip(grads, trainable_variables, strict=False))
-        if log_paper_step_checkpoint:
-            h1_after_update = model1(x).numpy()
-            h2_after_update = model2(x).numpy()
-            H_after_update = (h1_after_update + h2_after_update) / 2
+        epoch_batch_losses.append(
+            {
+                'sample_count': len(idx),
+                'total': _loss_scalar(loss_value),
+                'reconstruction': _loss_scalar(reconstruction_loss_value),
+                'kmeans': _loss_scalar(kmeans_loss_value),
+                'orthonormal': _loss_scalar(orthonormal_loss_value),
+                'greedy': _loss_scalar(greedy_loss_value),
+                'greedy_selected': _loss_scalar(greedy_selected_loss_value),
+                'greedy_nonselected': _loss_scalar(
+                    greedy_nonselected_loss_value
+                ),
+            }
+        )
+        if log_step9_end_of_epoch:
+            refinement_epoch = (ite + 1) // kmeans_refresh_interval
+            last_epoch_loss_means = mean_epoch_losses(epoch_batch_losses)
+            greedy_total_scalar = last_epoch_loss_means['greedy']
+            greedy_selected_scalar = last_epoch_loss_means['greedy_selected']
+            greedy_nonselected_scalar = last_epoch_loss_means[
+                'greedy_nonselected'
+            ]
+            greedy_denominator = max(greedy_total_scalar, 1e-12)
+            view1_output_after_update = model1(x).numpy()
+            view2_output_after_update = model2(x).numpy()
+            H_after_update = fused_latent_embedding(
+                view1_output_after_update,
+                view2_output_after_update,
+            )
             after_update_metric_str, _ = _metric_for_labels(
                 H_after_update,
                 assignment,
                 y=y,
             )
             _log_training_phase(
-                phase=f'paper_step9_after_model_update_{paper_step_suffix}',
-                space='H_fused_same_labels',
+                phase=f'paper_step9_after_full_epoch_{refinement_epoch}',
+                space='H_fused_latent_same_labels',
                 metric_str=after_update_metric_str,
-                loss=np.round(np.mean(loss_value), 5),
+                loss=(
+                    f'total:{last_epoch_loss_means["total"]:.5f}, '
+                    f'L1_reconstruction:'
+                    f'{last_epoch_loss_means["reconstruction"]:.5f}, '
+                    f'L2_kmeans:{last_epoch_loss_means["kmeans"]:.5f}, '
+                    f'L3_trace_logged:'
+                    f'{last_epoch_loss_means["orthonormal"]:.5f}, '
+                    f'L4_greedy:{greedy_total_scalar:.5f}, '
+                    f'L4_selected_direction:'
+                    f'{greedy_selected_scalar:.5f}, '
+                    f'L4_nonselected_snapshot_anchor:'
+                    f'{greedy_nonselected_scalar:.5f}, '
+                    f'L4_selected_fraction:'
+                    f'{greedy_selected_scalar / greedy_denominator:.5f}, '
+                    f'L4_anchor_fraction:'
+                    f'{greedy_nonselected_scalar / greedy_denominator:.5f}'
+                ),
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
                 raw_reference=x if y is None else None,
+                extra_fields={
+                    **eigen_log_fields,
+                    'refinement_epoch': refinement_epoch,
+                    'step9_metric_scope': 'full_dataset_after_epoch',
+                    'step9_loss_scope': 'epoch_mean',
+                    'step9_loss_batches': len(epoch_batch_losses),
+                    'step9_loss_samples': sum(
+                        losses['sample_count'] for losses in epoch_batch_losses
+                    ),
+                },
+                file_name=train_log_name,
             )
 
-        index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
+        index = (index + 1) % batches_per_epoch
+
+    if stop_reason == 'max_epochs_reached':
+        refinement_epochs_completed = max_refinement_epochs
+    model1.save_weights(
+        f'weight_final_view1_{ds_name}_{experiment_tag}.weights.h5'
+    )
+    model2.save_weights(
+        f'weight_final_view2_{ds_name}_{experiment_tag}.weights.h5'
+    )
+    stop_log_str = (
+        f'phase:training_stop; stop_reason:{stop_reason}; '
+        f'refinement_epochs_completed:{refinement_epochs_completed}; '
+        f'max_refinement_epochs:{max_refinement_epochs}; '
+        f'time:{time.time() - train_start_time:.3f}'
+    )
+    print(stop_log_str)
+    log_csv(stop_log_str.split(';'), file_name=train_log_name)
+
+    h1, h2, H, final_assignment = recompute_final_clustering(
+        model1,
+        model2,
+        x,
+        random_seed,
+    )
+    final_n_change_assignment = count_aligned_assignment_changes(
+        assignment,
+        final_assignment,
+    )
+    assignment = final_assignment
+    metric_str, final_metric = _metric_for_labels(H, assignment, y=y)
+    if y is None:
+        silhouette = final_metric
+    else:
+        acc, nmi = final_metric
+    final_phase = (
+        'final_recomputed_artifact'
+        if y is None and orig_idx is not None
+        else 'final_recomputed_state'
+    )
+    _log_training_phase(
+        phase=final_phase,
+        space='H_fused_latent',
+        metric_str=metric_str,
+        loss=np.round(last_epoch_loss_means['total'], 5),
+        n_change_assignment=final_n_change_assignment,
+        labels=assignment,
+        train_start_time=train_start_time,
+        raw_reference=x if y is None else None,
+        extra_fields={
+            'greedy_eigen_direction': greedy_eigen_direction,
+            'greedy_eigen_index': (
+                hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
+            ),
+            'greedy_target_mode': greedy_target_mode,
+            'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+            'batches_per_epoch': batches_per_epoch,
+            'stop_reason': stop_reason,
+            'refinement_epochs_completed': refinement_epochs_completed,
+            'max_refinement_epochs': max_refinement_epochs,
+            'loss_scope': 'last_completed_epoch_mean',
+        },
+        file_name=train_log_name,
+    )
 
     if y is None and orig_idx is not None:
         # Save the final fused embedding + cluster assignment so clustering
         # can be redone (e.g. with a different k) or analyzed (e.g. joined
         # back to the original CSV via orig_index) without retraining.
-        h1 = model1(x).numpy()
-        h2 = model2(x).numpy()
-        H = (h1 + h2) / 2
-        assignment = KMeans(
-            n_clusters=n_clusters,
-            n_init=kmeans_n_init,
-            random_state=random_seed,
-        ).fit(H).labels_
-        silhouette = silhouette_score(H, assignment)
-        metric_str = f'silhouette = {silhouette}'
-        _log_training_phase(
-            phase='final_recomputed_artifact',
-            space='H_fused',
-            metric_str=metric_str,
-            loss=np.round(np.mean(loss_value), 5),
-            n_change_assignment=0,
-            labels=assignment,
-            train_start_time=train_start_time,
-            raw_reference=x,
-        )
         if not os.path.exists('output'):
             os.makedirs('output')
         h_ordered = _restore_original_order(H, orig_idx)
         labels_ordered = _restore_original_order(assignment, orig_idx)
         result = pd.DataFrame(
             h_ordered,
-            columns=[f'h_{i}' for i in range(view_output_width())],
+            columns=[f'h_{i}' for i in range(H.shape[1])],
         )
         result.insert(0, 'orig_index', np.arange(len(orig_idx)))
         result['cluster'] = labels_ordered
-        result.to_csv(f'output/{ds_name}_clusters.csv', index=False)
+        result.to_csv(
+            f'output/{ds_name}_{experiment_tag}_clusters.csv',
+            index=False,
+        )
         save_airpollution_mvdec_artifact(
             artifact_path=artifact_path,
             h_view1=h1,
@@ -548,10 +1068,17 @@ def train(
             h_fused=H,
             labels=assignment,
             score=silhouette,
-            iteration=ite // update_interval,
+            iteration=refinement_epochs_completed,
             orig_idx=orig_idx,
             feature_columns=feature_columns,
             random_seed=random_seed,
+            greedy_eigen_direction=greedy_eigen_direction,
+            greedy_target_mode=greedy_target_mode,
+            batches_per_epoch=batches_per_epoch,
+            max_refinement_epochs=max_refinement_epochs,
+            stop_reason=stop_reason,
+            refinement_epochs_completed=refinement_epochs_completed,
+            preprocessing_metadata=preprocessing_metadata,
         )
 
     if y is not None:
@@ -567,9 +1094,28 @@ if __name__ == '__main__':
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--artifact-path', default=AIRPOLLUTION_ARTIFACT_PATH)
+    parser.add_argument(
+        '--max-refinement-epochs',
+        type=int,
+        default=MAX_REFINEMENT_EPOCHS,
+        help='Safety cap for full-epoch refinement cycles.',
+    )
+    parser.add_argument(
+        '--greedy-eigen-direction',
+        choices=GREEDY_EIGEN_DIRECTIONS,
+        default=PAPER2025_GREEDY_EIGEN_DIRECTION,
+        help='Use the largest or smallest within-cluster scatter eigenvalue for L4.',
+    )
+    parser.add_argument(
+        '--greedy-target-mode',
+        choices=GREEDY_TARGET_MODES,
+        default=PAPER2025_GREEDY_TARGET_MODE,
+        help='Use the paper-style selected dimension or the frozen DEKM target.',
+    )
     args = parser.parse_args()
     if args.runs < 1:
         raise ValueError('--runs must be at least 1')
+    validate_max_refinement_epochs(args.max_refinement_epochs)
     if args.ds_name is None or args.ds_name not in [
         'AIRPOLLUTION',
         'TIKI',
@@ -603,15 +1149,22 @@ if __name__ == '__main__':
     pretrain_epochs = 200
     pretrain_batch_size = 256
     batch_size = 256
-    update_interval = 10
-    assignment_change_tolerance = 0.005
+    assignment_change_tolerance = 0.01
     if (
         ds_name in UNLABELED_DATASETS
         and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH
     ):
-        args.artifact_path = UNLABELED_DATASETS[ds_name]['artifact_path']
+        args.artifact_path = artifact_path_for_greedy_mode(
+            UNLABELED_DATASETS[ds_name]['artifact_path'],
+            args.greedy_eigen_direction,
+            args.greedy_target_mode,
+        )
 
     run_metrics = []
+    run_experiment_tag = (
+        f'{args.greedy_eigen_direction}_eigen_{args.greedy_target_mode}'
+    )
+    run_log_name = f'{ds_name}_{run_experiment_tag.upper()}'
     time_all_start = time.time()
     for run_index in range(args.runs):
         run_seed = None if args.seed is None else args.seed + run_index
@@ -619,11 +1172,20 @@ if __name__ == '__main__':
         time_start = time.time()
         orig_idx = None
         feature_columns = None
+        raw_x = None
+        preprocessing_metadata = None
         if ds_name in UNLABELED_DATASETS:
-            x, orig_idx, feature_columns = get_x_unlabeled_csv(
-                UNLABELED_DATASETS[ds_name]['csv_path'],
-                shuffle_seed=run_seed,
+            dataset_config = UNLABELED_DATASETS[ds_name]
+            x, orig_idx, feature_columns, source_x, preprocessing_metadata = (
+                get_x_unlabeled_csv(
+                    dataset_config['csv_path'],
+                    shuffle_seed=run_seed,
+                    scaling_method=dataset_config['scaling_method'],
+                    include_preprocessing=True,
+                )
             )
+            if preprocessing_metadata['method'] != 'none':
+                raw_x = source_x
             y = None
         else:
             x, y = get_xy(
@@ -639,8 +1201,13 @@ if __name__ == '__main__':
         metric = train(
             x,
             y=y,
+            raw_x=raw_x,
             orig_idx=orig_idx,
             feature_columns=feature_columns,
+            preprocessing_metadata=preprocessing_metadata,
+            greedy_eigen_direction=args.greedy_eigen_direction,
+            greedy_target_mode=args.greedy_target_mode,
+            max_refinement_epochs=args.max_refinement_epochs,
             random_seed=run_seed,
             time_start=time_start,
             artifact_path=args.artifact_path,
@@ -649,21 +1216,30 @@ if __name__ == '__main__':
         if y is None:
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
+                f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
+                f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'silhouette:{metric}; time:{time.time() - time_start:.3f}'
             )
         else:
             acc, nmi = metric
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
+                f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
+                f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
             )
         print(run_str)
-        log_csv(run_str.split(';'), file_name=ds_name)
+        log_csv(
+            run_str.split(';'),
+            file_name=run_log_name,
+        )
 
     if ds_name in UNLABELED_DATASETS:
         avg_silhouette = float(np.nanmean(np.asarray(run_metrics, dtype=float)))
         avg_str = (
             f'average over {args.runs} runs; silhouette:{avg_silhouette:.5f}; '
+            f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
+            f'greedy_target_mode:{args.greedy_target_mode}; '
             f'time:{time.time() - time_all_start:.3f}'
         )
     else:
@@ -672,7 +1248,12 @@ if __name__ == '__main__':
         avg_nmi = float(np.nanmean(metrics[:, 1]))
         avg_str = (
             f'average over {args.runs} runs; acc:{avg_acc:.5f}; nmi:{avg_nmi:.5f}; '
+            f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
+            f'greedy_target_mode:{args.greedy_target_mode}; '
             f'time:{time.time() - time_all_start:.3f}'
         )
     print(avg_str)
-    log_csv(avg_str.split(';'), file_name=ds_name)
+    log_csv(
+        avg_str.split(';'),
+        file_name=run_log_name,
+    )
