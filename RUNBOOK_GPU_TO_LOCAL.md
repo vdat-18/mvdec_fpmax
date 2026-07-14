@@ -78,7 +78,7 @@ Tiki:
 ```powershell
 uv run mvdec-fpmax smoke `
   --data-path data/preprocessed_data/tiki_preprocessed.csv `
-  --representation-path data/preprocessed_data/tiki_fused_representation.pkl
+  --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl
 ```
 
 ## 5. Run 6 Local Modes
@@ -105,5 +105,5 @@ Tiki: use the same commands, but set:
 
 ```powershell
 $DATA = "data/preprocessed_data/tiki_preprocessed.csv"
-$REP = "data/preprocessed_data/tiki_fused_representation.pkl"
+$REP = "data/preprocessed_data/tiki_mvdec_fused_representation.pkl"
 ```

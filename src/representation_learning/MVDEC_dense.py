@@ -15,10 +15,6 @@ from tensorflow.keras import layers
 from tensorflow.keras.models import Model
 from utils import get_ACC_NMI, get_xy, log_csv
 
-# Air pollution dataset (data/preprocessed_data/data_demvk.csv): 13 features,
-# n_clusters=4 confirmed via the paper's own Elbow analysis. Each view returns
-# [latent embedding, reconstruction] so Eq. (5) can train reconstruction while
-# Eq. (3)-(4) cluster the fused latent embeddings.
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
 hidden_units = 10
@@ -41,8 +37,6 @@ FINAL_TRAINING_OBJECTIVE = (
 )
 GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
 GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
-PAPER2025_GREEDY_EIGEN_DIRECTION = 'smallest'
-PAPER2025_GREEDY_TARGET_MODE = 'selected_dimension_only'
 DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
 DEFAULT_GREEDY_TARGET_MODE = 'selected_dimension_only'
 KMEANS_N_INIT = 100
@@ -253,9 +247,6 @@ def get_x_airpollution(
     log_print=True,
     shuffle_seed=None,
 ):
-    # Separate from utils.py::get_xy (which already covers REUTERS/20NEWS/RCV1
-    # as-is) because that dataset registry has no AIRPOLLUTION entry, and
-    # air pollution has no labels to return alongside x.
     return get_x_unlabeled_csv(
         Path(dir_path) / 'data_demvk.csv',
         log_print=log_print,
@@ -340,9 +331,6 @@ def save_airpollution_mvdec_artifact(
                 'Air Pollution scaler columns must match artifact feature columns.'
             )
 
-    # Eq. (3)-(4) contract: h_fused is the average of both view latent
-    # embeddings. The reconstruction tails remain model outputs for Eq. (5)
-    # but are not clustered/exported as the primary representation.
     h_view1 = _restore_original_order(np.asarray(h_view1), orig_idx)
     h_view2 = _restore_original_order(np.asarray(h_view2), orig_idx)
     h_fused = _restore_original_order(np.asarray(h_fused), orig_idx)
@@ -429,8 +417,6 @@ def save_airpollution_mvdec_artifact(
 
 
 def model_view1(load_weights=True):
-    # Air pollution/text datasets use the DEKM-style 500-500-2000 stack; Tiki
-    # uses the smaller 250-250-1000 stack from Clustering_English_ver02 Fig. 1.
     filters = view1_filters
     init = 'glorot_uniform'
     activation = 'relu'
@@ -463,11 +449,6 @@ def model_view1(load_weights=True):
 
 
 def model_view2(load_weights=True):
-    # U-Net-inspired autoencoder (second view). Air pollution uses the 64-base
-    # stack from the 2025 MvDEC paper; Tiki uses the smaller 32-base stack from
-    # Clustering_English_ver02 Fig. 1. A latent head is inserted at the paper's
-    # bottleneck so both views can be averaged under Eq. (4); the decoder then
-    # follows the skip dimensions shown in Fig. 2.
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
@@ -551,8 +532,6 @@ def selected_direction_greedy_loss(
 
 
 def loss_train_base(y_true, y_pred):
-    # The trailing reconstruction values are trained against the input target
-    # for Eq. (5). Clustering later uses only the latent head.
     y_true = layers.Flatten()(y_true)
     y_pred = reconstruction_output(y_pred)
     return squared_euclidean_per_sample(y_true, y_pred)
@@ -664,13 +643,6 @@ def train(
     time_start=None,
     artifact_path=AIRPOLLUTION_ARTIFACT_PATH,
 ):
-    # y is only available for labeled benchmark datasets (REUTERS/20NEWS/RCV1);
-    # air pollution has no ground truth, so it stays None and silhouette is
-    # used instead of ACC/NMI. orig_idx maps each (shuffled) row of x back to
-    # its row number in the original, unshuffled source file -- needed so the
-    # saved fused embedding/cluster assignment can later be joined back to the
-    # original data for re-clustering or interpretation (e.g. land-use/traffic
-    # correlation, as in the paper's Section 5.5).
     train_start_time = time.time() if time_start is None else time_start
     greedy_index = greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
@@ -792,7 +764,6 @@ def train(
                 'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
                 'batches_per_epoch': batches_per_epoch,
             }
-            #
             loss = np.round(_loss_scalar(loss_value), 5)
             metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
             if y is not None:
@@ -869,9 +840,6 @@ def train(
             kmeans_loss_value = tf.reduce_mean(
                 squared_euclidean_per_sample(U_batch_tensor, h_pred)
             )
-            # Eq. (9) is the transformed within-cluster scatter. Because V is
-            # a full orthonormal basis, its gradient is trace-equivalent to L2;
-            # keep it logged for paper traceability without double-pulling H.
             orthonormal_loss_value = tf.reduce_mean(
                 squared_euclidean_per_sample(
                     tf.zeros_like(orthonormal_residual),
@@ -1046,9 +1014,6 @@ def train(
     )
 
     if y is None and orig_idx is not None:
-        # Save the final fused embedding + cluster assignment so clustering
-        # can be redone (e.g. with a different k) or analyzed (e.g. joined
-        # back to the original CSV via orig_index) without retraining.
         if not os.path.exists('output'):
             os.makedirs('output')
         h_ordered = _restore_original_order(H, orig_idx)
