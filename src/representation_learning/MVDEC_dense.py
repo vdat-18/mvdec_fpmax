@@ -540,14 +540,22 @@ def loss_train_base(y_true, y_pred):
 def train_base_view1(ds_xx):
     model = model_view1(load_weights=False)
     model.compile(optimizer='adam', loss=loss_train_base)
-    model.fit(ds_xx, epochs=pretrain_epochs, verbose=2)
+    history = model.fit(ds_xx, epochs=pretrain_epochs, verbose=0)
+    print(
+        f'pretrain view1 {ds_name}: epochs={pretrain_epochs}; '
+        f'final_loss={history.history["loss"][-1]:.5f}'
+    )
     model.save_weights(f'weight_base_view1_{ds_name}.weights.h5')
 
 
 def train_base_view2(ds_xx):
     model = model_view2(load_weights=False)
     model.compile(optimizer='adam', loss=loss_train_base)
-    model.fit(ds_xx, epochs=pretrain_epochs, verbose=2)
+    history = model.fit(ds_xx, epochs=pretrain_epochs, verbose=0)
+    print(
+        f'pretrain view2 {ds_name}: epochs={pretrain_epochs}; '
+        f'final_loss={history.history["loss"][-1]:.5f}'
+    )
     model.save_weights(f'weight_base_view2_{ds_name}.weights.h5')
 
 
@@ -615,6 +623,7 @@ def _log_training_phase(
     raw_reference=None,
     extra_fields=None,
     file_name=None,
+    print_console=True,
 ):
     extra_str = ''
     if extra_fields:
@@ -625,7 +634,8 @@ def _log_training_phase(
         f'cluster_sizes:{_cluster_sizes(labels)}{extra_str}; '
         f'time:{time.time() - train_start_time:.3f}'
     )
-    print(log_str)
+    if print_console:
+        print(log_str)
     log_csv(log_str.split(';'), file_name=ds_name if file_name is None else file_name)
 
 
@@ -803,6 +813,7 @@ def train(
                 raw_reference=x if y is None else None,
                 extra_fields=eigen_log_fields,
                 file_name=train_log_name,
+                print_console=False,
             )
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
@@ -946,6 +957,7 @@ def train(
                     ),
                 },
                 file_name=train_log_name,
+                print_console=False,
             )
 
         index = (index + 1) % batches_per_epoch
