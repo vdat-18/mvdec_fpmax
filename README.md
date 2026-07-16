@@ -201,8 +201,11 @@ are different concepts.
 K-Means refresh follows a `one_epoch` policy. A refinement cycle trains every
 mini-batch exactly once before recomputing the full fused embedding, centroids,
 scatter matrix, eigenvectors, and greedy target. With batch size 256 this means
-15 updates per Air Pollution cycle and 8 per TIKI cycle. The maximum remains
-1400 refinement epochs, matching the former maximum number of K-Means refreshes.
+15 balanced updates of 251 samples per Air Pollution cycle and 7 balanced
+updates of 257 samples per TIKI cycle. Samples are deterministically reshuffled
+each epoch, so every sample appears exactly once without an overweighted short
+batch. The maximum remains 1400 refinement epochs, matching the former maximum
+number of K-Means refreshes.
 
 `--max-refinement-epochs` is a safety cap and can be overridden. Each run logs
 `stop_reason=converged_assignment` when assignment changes satisfy the tolerance,

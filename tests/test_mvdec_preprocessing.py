@@ -91,24 +91,62 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
     assert kmeans.n_init == 100
     assert kmeans.random_state == 42
     assert mvdec.KMEANS_REFRESH_POLICY == "one_epoch"
+    assert mvdec.REFINEMENT_BATCHING_POLICY == "balanced_shuffled_each_epoch"
     assert mvdec.validate_max_refinement_epochs(1400) == 1400
     with pytest.raises(ValueError, match="max_refinement_epochs"):
         mvdec.validate_max_refinement_epochs(0)
     assert mvdec.number_of_batches(3765, 256) == 15
-    assert mvdec.number_of_batches(1799, 256) == 8
+    assert mvdec.number_of_batches(1799, 256) == 7
     assert mvdec.number_of_batches(512, 256) == 2
 
     air_bounds = mvdec.epoch_batch_bounds(3765, 256)
     assert len(air_bounds) == 15
-    assert air_bounds[0] == (0, 256)
-    assert air_bounds[-1] == (3584, 3765)
+    assert air_bounds[0] == (0, 251)
+    assert air_bounds[-1] == (3514, 3765)
     assert sum(end - start for start, end in air_bounds) == 3765
+
+    tiki_bounds = mvdec.epoch_batch_bounds(1799, 256)
+    assert tiki_bounds == [
+        (0, 257),
+        (257, 514),
+        (514, 771),
+        (771, 1028),
+        (1028, 1285),
+        (1285, 1542),
+        (1542, 1799),
+    ]
 
     exact_bounds = mvdec.epoch_batch_bounds(512, 256)
     assert exact_bounds == [(0, 256), (256, 512)]
     assert [
-        step for step in range(16) if mvdec.is_refinement_epoch_end(step, 8)
-    ] == [7, 15]
+        step for step in range(14) if mvdec.is_refinement_epoch_end(step, 7)
+    ] == [6, 13]
+
+
+def test_epoch_batches_are_balanced_complete_and_reproducible(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    first_rng = np.random.default_rng(42)
+    first_epoch = mvdec.epoch_batch_indices(1799, 256, first_rng)
+    second_epoch = mvdec.epoch_batch_indices(1799, 256, first_rng)
+    repeated_first_epoch = mvdec.epoch_batch_indices(
+        1799,
+        256,
+        np.random.default_rng(42),
+    )
+
+    assert [len(batch) for batch in first_epoch] == [257] * 7
+    np.testing.assert_array_equal(
+        np.sort(np.concatenate(first_epoch)),
+        np.arange(1799),
+    )
+    np.testing.assert_array_equal(
+        np.concatenate(first_epoch),
+        np.concatenate(repeated_first_epoch),
+    )
+    assert not np.array_equal(
+        np.concatenate(first_epoch),
+        np.concatenate(second_epoch),
+    )
 
 
 def test_assignment_change_count_ignores_cluster_id_permutations(monkeypatch):

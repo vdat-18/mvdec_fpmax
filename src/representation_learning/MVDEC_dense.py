@@ -44,6 +44,7 @@ DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
 DEFAULT_GREEDY_TARGET_MODE = 'selected_dimension_only'
 KMEANS_N_INIT = 100
 KMEANS_REFRESH_POLICY = 'one_epoch'
+REFINEMENT_BATCHING_POLICY = 'balanced_shuffled_each_epoch'
 MAX_REFINEMENT_EPOCHS = 1400
 TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
 UNLABELED_DATASETS = {
@@ -194,10 +195,12 @@ def count_aligned_assignment_changes(previous_labels, current_labels):
     return int(np.sum(current_labels != aligned_previous))
 
 
-def number_of_batches(n_samples, current_batch_size):
+def number_of_batches(n_samples: int, current_batch_size: int) -> int:
+    """Return the closest positive batch count to the target batch size."""
+
     if n_samples < 1 or current_batch_size < 1:
         raise ValueError('n_samples and batch_size must be positive.')
-    return (n_samples + current_batch_size - 1) // current_batch_size
+    return max(1, (n_samples + current_batch_size // 2) // current_batch_size)
 
 
 def validate_max_refinement_epochs(max_refinement_epochs):
@@ -206,11 +209,35 @@ def validate_max_refinement_epochs(max_refinement_epochs):
     return int(max_refinement_epochs)
 
 
-def epoch_batch_bounds(n_samples, current_batch_size):
-    number_of_batches(n_samples, current_batch_size)
+def epoch_batch_bounds(
+    n_samples: int,
+    current_batch_size: int,
+) -> list[tuple[int, int]]:
+    """Split an epoch into balanced contiguous bounds without dropping rows."""
+
+    n_batches = number_of_batches(n_samples, current_batch_size)
+    base_size, larger_batches = divmod(n_samples, n_batches)
+    bounds = []
+    start = 0
+    for batch_index in range(n_batches):
+        size = base_size + int(batch_index < larger_batches)
+        end = start + size
+        bounds.append((start, end))
+        start = end
+    return bounds
+
+
+def epoch_batch_indices(
+    n_samples: int,
+    current_batch_size: int,
+    rng: np.random.Generator,
+) -> list[np.ndarray]:
+    """Return one deterministic shuffled epoch of balanced mini-batches."""
+
+    shuffled = rng.permutation(n_samples)
     return [
-        (start, min(start + current_batch_size, n_samples))
-        for start in range(0, n_samples, current_batch_size)
+        shuffled[start:end]
+        for start, end in epoch_batch_bounds(n_samples, current_batch_size)
     ]
 
 
@@ -389,6 +416,7 @@ def save_airpollution_mvdec_artifact(
         'n_clusters': int(n_clusters),
         'kmeans_n_init': int(KMEANS_N_INIT),
         'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+        'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
         'batches_per_epoch': int(batches_per_epoch),
         'stop_reason': stop_reason,
         'refinement_epochs_completed': int(refinement_epochs_completed),
@@ -406,6 +434,7 @@ def save_airpollution_mvdec_artifact(
             'batch_size': int(batch_size),
             'pretrain_epochs': int(pretrain_epochs),
             'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+            'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
             'batches_per_epoch': int(batches_per_epoch),
             'update_interval': int(batches_per_epoch),
             'max_refinement_epochs': int(max_refinement_epochs),
@@ -703,10 +732,10 @@ def train(
     max_refinement_epochs = validate_max_refinement_epochs(
         max_refinement_epochs
     )
-    batch_bounds = epoch_batch_bounds(len(x), batch_size)
-    batches_per_epoch = len(batch_bounds)
+    batches_per_epoch = number_of_batches(len(x), batch_size)
     kmeans_refresh_interval = batches_per_epoch
     max_training_steps = max_refinement_epochs * batches_per_epoch
+    batch_rng = np.random.default_rng(random_seed)
     experiment_tag = (
         f'{greedy_eigen_direction}_eigen_{greedy_target_mode}'
         f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
@@ -740,7 +769,7 @@ def train(
     epoch_batch_losses = []
     last_epoch_loss_means = None
     assignment = np.array([-1] * len(x))
-    index_array = np.arange(x.shape[0])
+    epoch_batches = None
     if raw_x is not None and raw_x.shape != x.shape:
         raise ValueError('raw_x and x must have the same shape.')
 
@@ -782,6 +811,7 @@ def train(
         )
         if log_paper_step_checkpoint:
             epoch_batch_losses = []
+            epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
             view1_output = model1(x).numpy()
             view2_output = model2(x).numpy()
             H = fused_latent_embedding(view1_output, view2_output)
@@ -820,6 +850,7 @@ def train(
                 'greedy_target_mode': greedy_target_mode,
                 'kmeans_n_init': KMEANS_N_INIT,
                 'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+                'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
                 'batches_per_epoch': batches_per_epoch,
                 'lambda_kmeans': lambda_kmeans,
                 'lambda_greedy': lambda_greedy,
@@ -869,8 +900,7 @@ def train(
             stop_reason = 'converged_assignment'
             refinement_epochs_completed = ite // kmeans_refresh_interval
             break
-        batch_start, batch_end = batch_bounds[index]
-        idx = index_array[batch_start:batch_end]
+        idx = epoch_batches[index]
         temp = assignment[idx]
         x_batch = tf.convert_to_tensor(x[idx], dtype=tf.float32)
         y_true_tensor = None
