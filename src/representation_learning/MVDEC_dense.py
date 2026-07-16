@@ -24,17 +24,20 @@ view2_base_units = 64
 pretrain_epochs = 200
 batch_size = 256
 assignment_change_tolerance = 0.01
+# DEKM 2021 (Fig. 4) shows pulling every embedding dimension toward the
+# centroids underperforms the greedy single-direction pull, so the L2 K-means
+# term defaults to 0; the literal MvDEC 2025 Eq. 11 stays available via
+# --lambda-kmeans 1.
+DEFAULT_LAMBDA_KMEANS = 0.0
+DEFAULT_LAMBDA_GREEDY = 1.0
 lambda_reconstruction = 1.0
-lambda_kmeans = 1.0
+lambda_kmeans = DEFAULT_LAMBDA_KMEANS
 lambda_orthonormal = 0.0
-lambda_greedy = 1.0
+lambda_greedy = DEFAULT_LAMBDA_GREEDY
 AIRPOLLUTION_ARTIFACT_PATH = (
     'data/preprocessed_data/airpollution_demvk_fused_representation.pkl'
 )
 TIKI_ARTIFACT_PATH = 'data/preprocessed_data/tiki_mvdec_fused_representation.pkl'
-FINAL_TRAINING_OBJECTIVE = (
-    'mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged'
-)
 GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
 GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
 DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
@@ -75,6 +78,15 @@ def view_output_layout():
     return f'eq5_compatible_{hidden_units}_plus_{input_shape}'
 
 
+def final_training_objective(kmeans_weight, greedy_weight):
+    parts = ['reconstruction']
+    if kmeans_weight > 0:
+        parts.append('kmeans')
+    if greedy_weight > 0:
+        parts.append('greedy')
+    return f'mvdec2025_latent_joint_{"_".join(parts)}_l3_trace_logged'
+
+
 def latent_embedding(view_output):
     return view_output[:, :hidden_units]
 
@@ -112,6 +124,22 @@ def build_greedy_target(
     return target
 
 
+def append_artifact_suffix(artifact_path, suffix):
+    if not suffix:
+        return str(artifact_path)
+    path = Path(artifact_path)
+    return str(path.with_name(f'{path.stem}{suffix}{path.suffix}'))
+
+
+def loss_ablation_tag(kmeans_weight, greedy_weight):
+    if (
+        kmeans_weight == DEFAULT_LAMBDA_KMEANS
+        and greedy_weight == DEFAULT_LAMBDA_GREEDY
+    ):
+        return ''
+    return f'_l2w{kmeans_weight:g}_l4w{greedy_weight:g}'
+
+
 def artifact_path_for_greedy_mode(artifact_path, direction, target_mode):
     greedy_eigen_index(direction)
     validate_greedy_target_mode(target_mode)
@@ -120,9 +148,10 @@ def artifact_path_for_greedy_mode(artifact_path, direction, target_mode):
         and target_mode == DEFAULT_GREEDY_TARGET_MODE
     ):
         return str(artifact_path)
-    path = Path(artifact_path)
-    suffix = f'{direction}_eigen_{target_mode}'
-    return str(path.with_name(f'{path.stem}_{suffix}{path.suffix}'))
+    return append_artifact_suffix(
+        artifact_path,
+        f'_{direction}_eigen_{target_mode}',
+    )
 
 
 def set_random_seed(seed):
@@ -319,6 +348,7 @@ def save_airpollution_mvdec_artifact(
     greedy_eigen_position = (
         hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
     )
+    training_objective = final_training_objective(lambda_kmeans, lambda_greedy)
     if ds_name == 'AIRPOLLUTION':
         if not isinstance(preprocessing_metadata, dict):
             raise ValueError(
@@ -343,7 +373,7 @@ def save_airpollution_mvdec_artifact(
         'paper': '2025_Multi-view Deep Embedded Clustering',
         'fusion_contract': 'mvdec2025_encoder_average',
         'view_output_layout': view_output_layout(),
-        'final_training_objective': FINAL_TRAINING_OBJECTIVE,
+        'final_training_objective': training_objective,
         'h_view1': h_view1,
         'h_view2': h_view2,
         'h_fused': h_fused,
@@ -392,7 +422,7 @@ def save_airpollution_mvdec_artifact(
             'fusion_dim': int(h_fused.shape[1]),
             'model_view_output_dim': int(view_output_width()),
             'model_view_output_layout': view_output_layout(),
-            'final_training_objective': FINAL_TRAINING_OBJECTIVE,
+            'final_training_objective': training_objective,
             'eigenvalue_order': 'ascending',
             'greedy_eigen_direction': greedy_eigen_direction,
             'greedy_eigen_index': int(greedy_eigen_position),
@@ -612,6 +642,15 @@ def mean_epoch_losses(batch_losses):
     }
 
 
+def _input_space_silhouette(input_space_reference, labels):
+    if input_space_reference is None:
+        return None
+    labels = np.asarray(labels)
+    if len(np.unique(labels)) < 2:
+        return float('nan')
+    return float(silhouette_score(input_space_reference, labels))
+
+
 def _log_training_phase(
     phase,
     space,
@@ -620,7 +659,7 @@ def _log_training_phase(
     n_change_assignment,
     labels,
     train_start_time,
-    raw_reference=None,
+    input_space_reference=None,
     extra_fields=None,
     file_name=None,
     print_console=True,
@@ -628,8 +667,13 @@ def _log_training_phase(
     extra_str = ''
     if extra_fields:
         extra_str = ''.join(f'; {key}:{value}' for key, value in extra_fields.items())
+    input_space_str = ''
+    input_space_silhouette = _input_space_silhouette(input_space_reference, labels)
+    if input_space_silhouette is not None:
+        input_space_str = f'; silhouette_input_space = {input_space_silhouette}'
     log_str = (
-        f'phase:{phase}; space:{space}; {metric_str}; loss:{loss}; '
+        f'phase:{phase}; space:{space}; {metric_str}{input_space_str}; '
+        f'loss:{loss}; '
         f'n_changed_assignment:{n_change_assignment}; '
         f'cluster_sizes:{_cluster_sizes(labels)}{extra_str}; '
         f'time:{time.time() - train_start_time:.3f}'
@@ -663,10 +707,14 @@ def train(
     batches_per_epoch = len(batch_bounds)
     kmeans_refresh_interval = batches_per_epoch
     max_training_steps = max_refinement_epochs * batches_per_epoch
-    experiment_tag = f'{greedy_eigen_direction}_eigen_{greedy_target_mode}'
+    experiment_tag = (
+        f'{greedy_eigen_direction}_eigen_{greedy_target_mode}'
+        f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
+    )
     train_log_name = f'{ds_name}_{experiment_tag.upper()}'
     log_str = (
-        'phase; space; metric; loss; n_changed_assignment; cluster_sizes; '
+        'phase; space; metric; silhouette_input_space; loss; '
+        'n_changed_assignment; cluster_sizes; '
         'greedy_eigen_direction; greedy_eigen_index; greedy_eigenvalue; '
         'greedy_target_mode; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
@@ -707,7 +755,7 @@ def train(
             n_change_assignment=len(x),
             labels=raw_kmeans.labels_,
             train_start_time=train_start_time,
-            raw_reference=raw_x if y is None else None,
+            input_space_reference=x if y is None else None,
             file_name=train_log_name,
         )
 
@@ -723,7 +771,7 @@ def train(
         n_change_assignment=len(x),
         labels=input_kmeans.labels_,
         train_start_time=train_start_time,
-        raw_reference=x if y is None else None,
+        input_space_reference=x if y is None else None,
         file_name=train_log_name,
     )
     for ite in range(max_training_steps):
@@ -773,6 +821,8 @@ def train(
                 'kmeans_n_init': KMEANS_N_INIT,
                 'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
                 'batches_per_epoch': batches_per_epoch,
+                'lambda_kmeans': lambda_kmeans,
+                'lambda_greedy': lambda_greedy,
             }
             loss = np.round(_loss_scalar(loss_value), 5)
             metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
@@ -793,7 +843,7 @@ def train(
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
+                input_space_reference=x if y is None else None,
                 extra_fields=eigen_log_fields,
                 file_name=train_log_name,
             )
@@ -810,7 +860,6 @@ def train(
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
                 extra_fields=eigen_log_fields,
                 file_name=train_log_name,
                 print_console=False,
@@ -945,7 +994,6 @@ def train(
                 n_change_assignment=n_change_assignment,
                 labels=assignment,
                 train_start_time=train_start_time,
-                raw_reference=x if y is None else None,
                 extra_fields={
                     **eigen_log_fields,
                     'refinement_epoch': refinement_epoch,
@@ -1008,13 +1056,15 @@ def train(
         n_change_assignment=final_n_change_assignment,
         labels=assignment,
         train_start_time=train_start_time,
-        raw_reference=x if y is None else None,
+        input_space_reference=x if y is None else None,
         extra_fields={
             'greedy_eigen_direction': greedy_eigen_direction,
             'greedy_eigen_index': (
                 hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
             ),
             'greedy_target_mode': greedy_target_mode,
+            'lambda_kmeans': lambda_kmeans,
+            'lambda_greedy': lambda_greedy,
             'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
             'batches_per_epoch': batches_per_epoch,
             'stop_reason': stop_reason,
@@ -1091,9 +1141,28 @@ if __name__ == '__main__':
         default=DEFAULT_GREEDY_TARGET_MODE,
         help='Use the paper-style selected dimension or the frozen DEKM target.',
     )
+    parser.add_argument(
+        '--lambda-kmeans',
+        type=float,
+        default=DEFAULT_LAMBDA_KMEANS,
+        help=(
+            'Weight of the L2 K-means loss; defaults to 0 per DEKM 2021 '
+            'Fig. 4, set 1 for the literal MvDEC 2025 Eq. 11.'
+        ),
+    )
+    parser.add_argument(
+        '--lambda-greedy',
+        type=float,
+        default=DEFAULT_LAMBDA_GREEDY,
+        help='Weight of the L4 greedy loss; set 0 to ablate it.',
+    )
     args = parser.parse_args()
     if args.runs < 1:
         raise ValueError('--runs must be at least 1')
+    if args.lambda_kmeans < 0 or args.lambda_greedy < 0:
+        raise ValueError('--lambda-kmeans and --lambda-greedy must be non-negative.')
+    lambda_kmeans = args.lambda_kmeans
+    lambda_greedy = args.lambda_greedy
     validate_max_refinement_epochs(args.max_refinement_epochs)
     if args.ds_name is None or args.ds_name not in [
         'AIRPOLLUTION',
@@ -1133,15 +1202,19 @@ if __name__ == '__main__':
         ds_name in UNLABELED_DATASETS
         and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH
     ):
-        args.artifact_path = artifact_path_for_greedy_mode(
-            UNLABELED_DATASETS[ds_name]['artifact_path'],
-            args.greedy_eigen_direction,
-            args.greedy_target_mode,
+        args.artifact_path = append_artifact_suffix(
+            artifact_path_for_greedy_mode(
+                UNLABELED_DATASETS[ds_name]['artifact_path'],
+                args.greedy_eigen_direction,
+                args.greedy_target_mode,
+            ),
+            loss_ablation_tag(lambda_kmeans, lambda_greedy),
         )
 
     run_metrics = []
     run_experiment_tag = (
         f'{args.greedy_eigen_direction}_eigen_{args.greedy_target_mode}'
+        f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
     )
     run_log_name = f'{ds_name}_{run_experiment_tag.upper()}'
     time_all_start = time.time()

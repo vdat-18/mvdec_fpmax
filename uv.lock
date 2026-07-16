@@ -428,6 +428,7 @@ dependencies = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "seaborn" },
 ]
 
@@ -448,6 +449,7 @@ requires-dist = [
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "seaborn" },
 ]
 

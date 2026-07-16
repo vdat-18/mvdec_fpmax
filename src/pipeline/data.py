@@ -215,6 +215,9 @@ def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None
         "mvdec2025_joint_reconstruction_kmeans_orthonormal_greedy_loss",
         "mvdec2025_joint_reconstruction_kmeans_greedy_l3_trace_logged",
         "mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged",
+        "mvdec2025_latent_joint_reconstruction_greedy_l3_trace_logged",
+        "mvdec2025_latent_joint_reconstruction_kmeans_l3_trace_logged",
+        "mvdec2025_latent_joint_reconstruction_l3_trace_logged",
     }:
         msg = (
             "Unexpected MvDEC 2025 final_training_objective: "
