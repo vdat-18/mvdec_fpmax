@@ -11,7 +11,7 @@ from loguru import logger
 from config import RANDOM_STATE
 from pipeline.clustering import (
     DEFAULT_INIT_METHODS,
-    compute_gower_distance,
+    compute_mixed_gower_distance,
     compute_silhouette_diagnostics,
     make_mixed_features,
 )
@@ -102,7 +102,10 @@ def run_forward_selection_candidate(
         continuous_df=context.continuous_df,
         binary_df=candidate_binary_df,
     )
-    distance_matrix = compute_gower_distance(combined_df)
+    distance_matrix = compute_mixed_gower_distance(
+        context.continuous_df,
+        candidate_binary_df,
+    )
 
     if not np.isfinite(distance_matrix).all():
         msg = f"Gower matrix contains non-finite values for {candidate.feature_name}."

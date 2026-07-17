@@ -3,12 +3,19 @@
 import inspect
 
 import numpy as np
+import pandas as pd
+import pytest
 from sklearn.metrics import silhouette_samples
 
 import pipeline.clustering as clustering
 import pipeline.experiments as experiments
 import pipeline.forward_selection as forward_selection
-from pipeline.clustering import compute_silhouette_diagnostics
+from pipeline.clustering import (
+    compute_mixed_gower_distance,
+    compute_silhouette_diagnostics,
+    compute_symmetric_mixed_gower_distance,
+    compute_view_weighted_gower_distance,
+)
 from pipeline.experiments import serialize_cluster_assignments
 
 
@@ -28,6 +35,59 @@ def test_silhouette_diagnostics_match_per_sample_silhouettes() -> None:
     assert score == np.mean(samples)
     assert sample_std == np.std(samples)
     assert negative_fraction == np.mean(samples < 0.0)
+
+
+def test_asymmetric_binary_gower_ignores_shared_absences() -> None:
+    """Rows must not become similar merely because they share binary zeros."""
+
+    binary_df = pd.DataFrame(
+        {
+            "pattern_1": [1, 1, 0],
+            "pattern_2": [0, 0, 0],
+            "pattern_3": [0, 0, 0],
+        },
+        dtype=object,
+    )
+
+    distance = compute_mixed_gower_distance(
+        continuous_df=pd.DataFrame(index=binary_df.index),
+        binary_df=binary_df,
+    )
+
+    assert distance[0, 1] == 0.0
+    assert distance[0, 2] == 1.0
+    assert distance[1, 2] == 1.0
+
+
+def test_symmetric_ablation_counts_shared_absences_as_similarity() -> None:
+    """The ablation must reproduce the old symmetric binary behavior."""
+
+    binary_df = pd.DataFrame(
+        {
+            "pattern_1": [1, 0],
+            "pattern_2": [0, 0],
+            "pattern_3": [0, 0],
+        }
+    )
+
+    distance = compute_symmetric_mixed_gower_distance(
+        continuous_df=pd.DataFrame(index=binary_df.index),
+        binary_df=binary_df,
+    )
+
+    assert distance[0, 1] == pytest.approx(1.0 / 3.0)
+
+
+def test_view_weighted_distance_falls_back_to_numeric_for_two_all_zero_rows() -> None:
+    """An unavailable binary comparison must not create false similarity."""
+
+    distance = compute_view_weighted_gower_distance(
+        continuous_df=pd.DataFrame({"x": [0.0, 1.0]}),
+        binary_df=pd.DataFrame({"pattern": [0, 0]}),
+        view_weight_alpha=0.2,
+    )
+
+    assert distance[0, 1] == 1.0
 
 
 def test_cluster_assignments_preserve_preprocessed_row_order() -> None:

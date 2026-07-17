@@ -430,9 +430,10 @@ output/<dataset>/post_ffs_intuitive_view_weighted_exhaustive_best_results.csv
 output/<dataset>/mvdec_experiment_manifest.json
 ```
 
-The manifest records the dataset, data hash, artifact hash, cluster count, and
-random seed. Resume is rejected if any of these differ. To run another artifact,
-use its default dataset directory or provide a new `--output-dir`.
+The manifest records the dataset, data hash, artifact hash, cluster count,
+random seed, and evaluation-distance contract. Resume is rejected if any of
+these differ. To run another artifact or distance contract, use its default
+dataset directory or provide a new `--output-dir`.
 
 Every summary result row produced by a clustering run also includes:
 
@@ -448,6 +449,49 @@ These diagnostics deliberately remain Silhouette-only; the pipeline does not
 use Davies-Bouldin or Calinski-Harabasz scores. Baseline-only rows that do not
 run a new clustering keep empty assignments because their labels remain in the
 selected MvDEC artifact.
+
+The shared Silhouette contract is
+`gower_numeric_asymmetric_binary_v1`: continuous `h_fused` columns use
+range-normalized Gower contributions, while FP-Max binary columns use
+asymmetric/Jaccard contributions. A shared `0-0` absence is ignored rather than
+counted as evidence that two rows are similar. The MvDEC baseline is recomputed
+with numeric Gower on `h_fused`; the artifact's Euclidean Silhouette remains an
+audit value and is not used as the FFS improvement threshold.
+
+### Multi-seed validation and distance ablation
+
+After the grid finishes, validate one fixed best configuration across explicit
+seeds. The command selects the successful row with the largest requested score,
+rebuilds its exact FP-Max feature set, and evaluates every seed with both the
+primary asymmetric contract and the symmetric-Gower ablation:
+
+```bash
+uv run mvdec-evaluate-best \
+  --results-path output/tiki_v3/ffs_results.csv \
+  --backend kprototypes \
+  --score-column final_score \
+  --seeds 40 41 42 43 44 \
+  --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl \
+  --data-path data/preprocessed_data/tiki_preprocessed.csv \
+  --runs-output output/tiki_v3/ffs_best_seed_runs.csv \
+  --summary-output output/tiki_v3/ffs_best_seed_summary.csv \
+  --mapping-path data/preprocessed_data/tiki_row_mapping.csv \
+  --interpretation-seed 42 \
+  --interpretation-output output/tiki_v3/ffs_best_interpretation.csv \
+  --profile-output output/tiki_v3/ffs_best_cluster_profiles.csv
+```
+
+Use `--score-column silhouette_score` for without-FFS summary files and
+`--score-column intuitive_score` for post-Intuitive files. Intuitive validation
+also requires `--backend intuitive`; paper-initialized modes additionally use
+`--init-strategy paper --strict-init`. Pass `--job-index` to validate a specific
+successful row instead of selecting the maximum score.
+
+The per-seed CSV stores assignments and Silhouette diagnostics. The summary CSV
+stores `silhouette_mean`, `silhouette_std_across_seeds`, minimum/maximum scores,
+successful/failed run counts, and one row per distance contract. Feature
+selection is intentionally fixed before this validation step, so the reported
+variance measures final-model stability rather than repeating model selection.
 
 Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
 coarse/refine parameter trials. Summary CSV files keep only the best valid trial

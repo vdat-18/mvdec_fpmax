@@ -11,6 +11,7 @@ import pandas as pd
 from sklearn.metrics import silhouette_score
 
 from config import FUSED_REPRESENTATION_PATH, H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
+from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 
 
 def fused_embedding_columns(n_columns: int) -> list[str]:
@@ -46,6 +47,9 @@ class MvdecResult:
     score: float
     iteration: int
     score_check: float
+    evaluation_score: float
+    evaluation_sample_std: float
+    evaluation_negative_fraction: float
 
 
 def _legacy_concat_width(best_result: dict) -> int | None:
@@ -360,6 +364,12 @@ def load_mvdec_result(
         columns=fused_embedding_columns(h_fused.shape[1]),
     )
     score_check = silhouette_score(h_fused, labels)
+    evaluation_distance = compute_gower_distance(h_fused_df)
+    (
+        evaluation_score,
+        evaluation_sample_std,
+        evaluation_negative_fraction,
+    ) = compute_silhouette_diagnostics(evaluation_distance, labels)
 
     return MvdecResult(
         raw=best_result,
@@ -386,4 +396,7 @@ def load_mvdec_result(
         score=float(best_result["score"]),
         iteration=int(best_result["iteration"]),
         score_check=float(score_check),
+        evaluation_score=evaluation_score,
+        evaluation_sample_std=evaluation_sample_std,
+        evaluation_negative_fraction=evaluation_negative_fraction,
     )

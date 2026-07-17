@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from config import H_FUSED_COLUMNS
+from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.data import load_mvdec_result
 
 
@@ -48,6 +49,15 @@ def test_load_mvdec_result_uses_fused_embedding_columns(tmp_path):
     assert list(result.h_fused_df.columns) == [
         f"fused_{index}" for index in range(1, 12)
     ]
+    expected_score, expected_std, expected_negative_fraction = (
+        compute_silhouette_diagnostics(
+            compute_gower_distance(result.h_fused_df),
+            result.labels,
+        )
+    )
+    assert result.evaluation_score == expected_score
+    assert result.evaluation_sample_std == expected_std
+    assert result.evaluation_negative_fraction == expected_negative_fraction
 
 
 def test_load_mvdec_result_rejects_preprocessed_row_mismatch(tmp_path):

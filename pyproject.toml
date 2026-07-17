@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 mvdec-fpmax = "cli:main"
+mvdec-evaluate-best = "pipeline.best_evaluation:main"
 
 [dependency-groups]
 dev = [

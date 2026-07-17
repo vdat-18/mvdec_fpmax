@@ -72,7 +72,11 @@ def run_smoke_test(data_path, representation_path) -> None:
     logger.info("Iteration: {}", mvdec_result.iteration)
     logger.info("Init method: {}", mvdec_result.init)
     logger.info("Silhouette (saved): {:.4f}", mvdec_result.score)
-    logger.info("Silhouette (recomputed): {:.4f}", mvdec_result.score_check)
+    logger.info("Silhouette (recomputed Euclidean): {:.4f}", mvdec_result.score_check)
+    logger.info(
+        "Silhouette (common Gower baseline): {:.4f}",
+        mvdec_result.evaluation_score,
+    )
 
 
 def run_without_ffs_smoke_test(
@@ -133,7 +137,7 @@ def run_ffs_smoke_test(data_path, representation_path) -> None:
         continuous_df=mvdec_result.h_fused_df,
         binary_df=fpmax_features.features,
         n_clusters=n_clusters,
-        baseline_score=mvdec_result.score,
+        baseline_score=mvdec_result.evaluation_score,
     )
 
     logger.info("Itemsets found: {}", len(fpmax_features.itemsets))
@@ -299,7 +303,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             limit=args.limit,
             resume=not args.no_resume,
@@ -396,7 +400,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -410,7 +414,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_PAPER_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -424,7 +428,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -438,7 +442,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -452,7 +456,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -466,7 +470,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -480,7 +484,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -494,7 +498,7 @@ def main() -> None:
                 project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             limit=args.limit,
@@ -506,7 +510,7 @@ def main() -> None:
             h_fused_df=mvdec_result.h_fused_df,
             save_path=experiment.result_path(project_config.FFS_RESULTS_PATH),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             candidate_workers=args.candidate_workers,
             limit=args.limit,
@@ -592,7 +596,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -607,7 +611,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_PAPER_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -622,7 +626,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -637,7 +641,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -652,7 +656,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -667,7 +671,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -682,7 +686,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_VIEW_WEIGHTED_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,
@@ -697,7 +701,7 @@ def main() -> None:
                 project_config.FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH
             ),
             n_clusters=experiment.n_clusters,
-            baseline_score=mvdec_result.score,
+            baseline_score=mvdec_result.evaluation_score,
             workers=args.workers,
             param_workers=args.param_workers,
             candidate_workers=args.candidate_workers,

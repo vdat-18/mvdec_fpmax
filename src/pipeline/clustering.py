@@ -16,6 +16,8 @@ from config import RANDOM_STATE
 from intuitive_kprototypes import IntuitiveKPrototypes
 
 DEFAULT_INIT_METHODS = ("huang", "cao")
+MIXED_DISTANCE_CONTRACT = "gower_numeric_asymmetric_binary_v1"
+SYMMETRIC_DISTANCE_CONTRACT = "gower_numeric_symmetric_binary_v1"
 ClusteringBackend = Literal["kprototypes", "intuitive"]
 
 
@@ -82,9 +84,84 @@ def cluster_sizes(labels: np.ndarray, n_clusters: int) -> list[int]:
 
 
 def compute_gower_distance(df: pd.DataFrame) -> np.ndarray:
-    """Compute a Gower distance matrix for mixed numeric and categorical data."""
+    """Compute range-normalized Gower distance for numeric features."""
 
-    return gower.gower_matrix(df)
+    if df.shape[1] == 0:
+        msg = "At least one feature is required to compute Gower distance."
+        raise ValueError(msg)
+    if len(df.select_dtypes(include=[np.number]).columns) != df.shape[1]:
+        msg = "Numeric Gower distance requires numeric feature columns."
+        raise ValueError(msg)
+    return np.asarray(gower.gower_matrix(df.reset_index(drop=True)), dtype=float)
+
+
+def compute_mixed_gower_distance(
+    continuous_df: pd.DataFrame,
+    binary_df: pd.DataFrame,
+) -> np.ndarray:
+    """Combine numeric Gower and asymmetric binary contributions by feature."""
+
+    if len(continuous_df) != len(binary_df):
+        msg = "Continuous and binary views must contain the same rows."
+        raise ValueError(msg)
+
+    numeric_count = continuous_df.shape[1]
+    binary_count = binary_df.shape[1]
+    if numeric_count == 0 and binary_count == 0:
+        msg = "At least one view is required to compute mixed Gower distance."
+        raise ValueError(msg)
+
+    numeric_distance = (
+        compute_gower_distance(continuous_df)
+        if numeric_count
+        else np.zeros((len(binary_df), len(binary_df)), dtype=float)
+    )
+    if binary_count == 0:
+        return numeric_distance
+
+    binary_distance, binary_union_count = _asymmetric_binary_distance(binary_df)
+    numerator = numeric_distance * numeric_count + binary_distance * binary_union_count
+    denominator = numeric_count + binary_union_count
+    return np.divide(
+        numerator,
+        denominator,
+        out=np.zeros_like(numerator),
+        where=denominator > 0,
+    )
+
+
+def compute_symmetric_mixed_gower_distance(
+    continuous_df: pd.DataFrame,
+    binary_df: pd.DataFrame,
+) -> np.ndarray:
+    """Compute the symmetric-Gower ablation for one mixed feature set."""
+
+    combined_df, _, _ = make_mixed_features(continuous_df, binary_df)
+    return np.asarray(gower.gower_matrix(combined_df), dtype=float)
+
+
+def _asymmetric_binary_distance(
+    binary_df: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return Jaccard distance and pairwise nonzero-union feature counts."""
+
+    binary = binary_df.to_numpy(dtype=float)
+    if not np.isfinite(binary).all() or not np.isin(binary, (0.0, 1.0)).all():
+        msg = "Asymmetric binary features must contain only finite 0/1 values."
+        raise ValueError(msg)
+
+    binary = binary.astype(np.int64, copy=False)
+    row_sums = binary.sum(axis=1, dtype=np.int64)
+    intersection = binary @ binary.T
+    union_count = row_sums[:, None] + row_sums[None, :] - intersection
+    mismatch_count = row_sums[:, None] + row_sums[None, :] - 2 * intersection
+    distance = np.divide(
+        mismatch_count,
+        union_count,
+        out=np.zeros_like(union_count, dtype=float),
+        where=union_count > 0,
+    )
+    return distance, union_count
 
 
 def compute_view_weighted_gower_distance(
@@ -102,17 +179,27 @@ def compute_view_weighted_gower_distance(
     has_binary = binary_df.shape[1] > 0
     if has_numeric and has_binary:
         numeric_distance = compute_gower_distance(continuous_df.reset_index(drop=True))
-        binary_distance = compute_gower_distance(
-            binary_df.astype(object).reset_index(drop=True),
+        binary_distance, binary_union_count = _asymmetric_binary_distance(
+            binary_df.reset_index(drop=True),
         )
-        return (
-            view_weight_alpha * numeric_distance
-            + (1.0 - view_weight_alpha) * binary_distance
+        binary_available = binary_union_count > 0
+        numerator = view_weight_alpha * numeric_distance + (
+            (1.0 - view_weight_alpha) * binary_distance * binary_available
+        )
+        denominator = view_weight_alpha + ((1.0 - view_weight_alpha) * binary_available)
+        return np.divide(
+            numerator,
+            denominator,
+            out=np.zeros_like(numerator),
+            where=denominator > 0,
         )
     if has_numeric:
         return compute_gower_distance(continuous_df.reset_index(drop=True))
     if has_binary:
-        return compute_gower_distance(binary_df.astype(object).reset_index(drop=True))
+        binary_distance, _ = _asymmetric_binary_distance(
+            binary_df.reset_index(drop=True),
+        )
+        return binary_distance
 
     msg = "At least one view is required to compute a distance matrix."
     raise ValueError(msg)
@@ -172,7 +259,7 @@ def run_kprototypes(
         continuous_df=continuous_df,
         binary_df=binary_df,
     )
-    distance_matrix = compute_gower_distance(combined_df)
+    distance_matrix = compute_mixed_gower_distance(continuous_df, binary_df)
 
     best_result: KPrototypesResult | None = None
     for init in init_methods:
@@ -247,7 +334,7 @@ def run_intuitive_kprototypes(
         binary_df=binary_df,
     )
     if distance_matrix is None:
-        distance_matrix = compute_gower_distance(combined_df)
+        distance_matrix = compute_mixed_gower_distance(continuous_df, binary_df)
 
     X_num = continuous_df.to_numpy(dtype=float)
     X_cat = binary_df.astype(str).to_numpy(dtype=object)

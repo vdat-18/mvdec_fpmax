@@ -49,9 +49,10 @@ def test_experiment_context_writes_and_reuses_matching_manifest(tmp_path) -> Non
     manifest = json.loads((output_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert first == second
     assert first.n_clusters == 5
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["dataset"] == "TIKI"
     assert manifest["n_clusters"] == 5
+    assert manifest["distance_contract"] == "gower_numeric_asymmetric_binary_v1"
 
 
 def test_default_output_directories_are_dataset_scoped(
@@ -182,6 +183,7 @@ def test_cli_passes_artifact_cluster_count_and_scoped_output(
     mvdec_result = SimpleNamespace(
         h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
         score=0.5,
+        evaluation_score=0.4,
     )
     experiment = ExperimentContext(
         dataset="AIRPOLLUTION",
@@ -204,4 +206,5 @@ def test_cli_passes_artifact_cluster_count_and_scoped_output(
     cli.main()
 
     assert captured["n_clusters"] == 4
+    assert captured["baseline_score"] == 0.4
     assert captured["save_path"] == args.output_dir / "without_ffs_results.csv"

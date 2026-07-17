@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config import OUTPUT_DIR, RANDOM_STATE
+from pipeline.clustering import MIXED_DISTANCE_CONTRACT
 from pipeline.data import file_sha256
 
 MANIFEST_FILENAME = "mvdec_experiment_manifest.json"
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ def _manifest_payload(
         "representation_sha256": file_sha256(representation_path),
         "n_clusters": n_clusters,
         "random_state": RANDOM_STATE,
+        "distance_contract": MIXED_DISTANCE_CONTRACT,
     }
 
 

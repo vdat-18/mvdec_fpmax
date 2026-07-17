@@ -51,9 +51,8 @@ from config import (
 from pipeline.clustering import (
     MixedClusteringResult,
     cluster_sizes,
-    compute_gower_distance,
+    compute_mixed_gower_distance,
     compute_view_weighted_gower_distance,
-    make_mixed_features,
     run_intuitive_kprototypes,
     run_kprototypes,
 )
@@ -1837,11 +1836,10 @@ def run_post_ffs_intuitive(
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
             selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
-            combined_df, _, _ = make_mixed_features(
-                continuous_df=h_fused_df,
-                binary_df=selected_binary_df,
+            distance_matrix = compute_mixed_gower_distance(
+                h_fused_df,
+                selected_binary_df,
             )
-            distance_matrix = compute_gower_distance(combined_df)
             view_weighted_distance_matrices = build_view_weighted_distance_matrices(
                 h_fused_df,
                 selected_binary_df,
@@ -1992,11 +1990,10 @@ def run_post_without_ffs_intuitive(
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
             selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
-            combined_df, _, _ = make_mixed_features(
-                continuous_df=h_fused_df,
-                binary_df=selected_binary_df,
+            distance_matrix = compute_mixed_gower_distance(
+                h_fused_df,
+                selected_binary_df,
             )
-            distance_matrix = compute_gower_distance(combined_df)
             view_weighted_distance_matrices = build_view_weighted_distance_matrices(
                 h_fused_df,
                 selected_binary_df,
@@ -3814,11 +3811,7 @@ def select_native_intuitive_trials(
 
     intuitive_param_grid = intuitive_param_grid or default_intuitive_param_grid()
     intuitive_param_grid = dedupe_intuitive_param_grid(intuitive_param_grid)
-    combined_df, _, _ = make_mixed_features(
-        continuous_df=h_fused_df,
-        binary_df=binary_df,
-    )
-    distance_matrix = compute_gower_distance(combined_df)
+    distance_matrix = compute_mixed_gower_distance(h_fused_df, binary_df)
     view_alphas = sorted(
         {
             params.view_weight_alpha
