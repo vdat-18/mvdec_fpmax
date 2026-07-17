@@ -59,7 +59,9 @@ def _legacy_concat_width(best_result: dict) -> int | None:
     return int(input_dim) + int(latent_dim)
 
 
-def _file_sha256(path: Path) -> str:
+def file_sha256(path: Path) -> str:
+    """Return a cross-platform hash, normalizing text line endings."""
+
     digest = hashlib.sha256()
     with path.open("rb") as file:
         if path.suffix.lower() in {".csv", ".tsv", ".txt"}:
@@ -83,7 +85,7 @@ def _validate_source_dataset(
         return
 
     source_sha256 = preprocessing.get("source_sha256")
-    if source_sha256 is not None and source_sha256 != _file_sha256(data_path):
+    if source_sha256 is not None and source_sha256 != file_sha256(data_path):
         msg = (
             "MvDEC source CSV hash does not match the ordered dataset used to "
             "train the artifact."
@@ -144,9 +146,7 @@ def _validate_airpollution_preprocessing(
     if batch_size < 1:
         msg = "Air Pollution MvDEC artifact must record a positive batch_size."
         raise ValueError(msg)
-    expected_batches_per_epoch = (
-        len(preprocessed_df) + batch_size - 1
-    ) // batch_size
+    expected_batches_per_epoch = (len(preprocessed_df) + batch_size - 1) // batch_size
     if any(
         (
             best_result.get("kmeans_refresh_policy") != "one_epoch",
@@ -156,9 +156,7 @@ def _validate_airpollution_preprocessing(
             config.get("update_interval") != expected_batches_per_epoch,
         )
     ):
-        msg = (
-            "Air Pollution MvDEC artifact must refresh K-Means once per full epoch."
-        )
+        msg = "Air Pollution MvDEC artifact must refresh K-Means once per full epoch."
         raise ValueError(msg)
     max_refinement_epochs = int(config.get("max_refinement_epochs", 0))
     refinement_epochs_completed = int(
@@ -170,8 +168,7 @@ def _validate_airpollution_preprocessing(
             max_refinement_epochs < 1,
             stop_reason not in {"converged_assignment", "max_epochs_reached"},
             config.get("stop_reason") != stop_reason,
-            config.get("refinement_epochs_completed")
-            != refinement_epochs_completed,
+            config.get("refinement_epochs_completed") != refinement_epochs_completed,
             not 0 <= refinement_epochs_completed <= max_refinement_epochs,
             config.get("max_training_steps")
             != max_refinement_epochs * expected_batches_per_epoch,
@@ -223,10 +220,7 @@ def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None
         r"eq5_compatible_\d+_plus_\d+",
         view_output_layout,
     ):
-        msg = (
-            "Unexpected MvDEC 2025 view_output_layout: "
-            f"{view_output_layout!r}."
-        )
+        msg = f"Unexpected MvDEC 2025 view_output_layout: {view_output_layout!r}."
         raise ValueError(msg)
 
     final_training_objective = best_result.get("final_training_objective")
@@ -326,9 +320,8 @@ def load_mvdec_result(
             )
             raise ValueError(msg)
         _validate_mvdec2025_contract(best_result, h_fused)
-    elif (
-        not allow_legacy_concat
-        and h_fused.shape[1] == _legacy_concat_width(best_result)
+    elif not allow_legacy_concat and h_fused.shape[1] == _legacy_concat_width(
+        best_result
     ):
         msg = (
             "This artifact looks like a legacy concat representation "

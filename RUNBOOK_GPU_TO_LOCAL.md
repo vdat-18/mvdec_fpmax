@@ -92,17 +92,18 @@ Air pollution:
 ```powershell
 $DATA = "data/preprocessed_data/data_demvk.csv"
 $REP = "data/preprocessed_data/airpollution_demvk_fused_representation.pkl"
+$OUTPUT = "output/airpollution"
 
 if (!(Test-Path $REP)) {
   throw "Missing air-pollution MvDEC artifact. Generate it on GPU first."
 }
 
-uv run mvdec-fpmax without-ffs-kprototypes --data-path $DATA --representation-path $REP --workers 20 --no-resume
-uv run mvdec-fpmax without-ffs-intuitive-native --data-path $DATA --representation-path $REP --workers 20 --param-workers 10 --no-resume
-uv run mvdec-fpmax without-ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --workers 20 --param-workers 10 --no-resume
-uv run mvdec-fpmax ffs-kprototypes --data-path $DATA --representation-path $REP --workers 20 --candidate-workers 10 --no-resume
-uv run mvdec-fpmax ffs-intuitive-native --data-path $DATA --representation-path $REP --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
-uv run mvdec-fpmax ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
+uv run mvdec-fpmax without-ffs-kprototypes --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --no-resume
+uv run mvdec-fpmax without-ffs-intuitive-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --param-workers 10 --no-resume
+uv run mvdec-fpmax without-ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --param-workers 10 --no-resume
+uv run mvdec-fpmax ffs-kprototypes --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --candidate-workers 10 --no-resume
+uv run mvdec-fpmax ffs-intuitive-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
+uv run mvdec-fpmax ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
 ```
 
 Tiki: use the same commands, but set:
@@ -110,4 +111,5 @@ Tiki: use the same commands, but set:
 ```powershell
 $DATA = "data/preprocessed_data/tiki_preprocessed.csv"
 $REP = "data/preprocessed_data/tiki_mvdec_fused_representation.pkl"
+$OUTPUT = "output/tiki"
 ```

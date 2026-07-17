@@ -392,40 +392,46 @@ full alpha   = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
 
 ## Outputs
 
-Default experiment outputs are written to:
+Default experiment outputs are isolated under `output/<dataset>/`, where the
+dataset directory comes from the selected MvDEC artifact:
 
 ```text
-output/without_ffs_results.csv
-output/ffs_results.csv
-output/without_ffs_intuitive_native_results.csv
-output/without_ffs_intuitive_paper_native_results.csv
-output/without_ffs_intuitive_exhaustive_native_results.csv
-output/without_ffs_intuitive_paper_exhaustive_native_results.csv
-output/without_ffs_intuitive_view_weighted_native_results.csv
-output/without_ffs_intuitive_view_weighted_paper_native_results.csv
-output/without_ffs_intuitive_view_weighted_exhaustive_native_results.csv
-output/without_ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
-output/ffs_intuitive_native_results.csv
-output/ffs_intuitive_paper_native_results.csv
-output/ffs_intuitive_exhaustive_native_results.csv
-output/ffs_intuitive_paper_exhaustive_native_results.csv
-output/ffs_intuitive_view_weighted_native_results.csv
-output/ffs_intuitive_view_weighted_paper_native_results.csv
-output/ffs_intuitive_view_weighted_exhaustive_native_results.csv
-output/ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
-output/post_without_ffs_intuitive_results.csv
-output/post_without_ffs_intuitive_best_results.csv
-output/post_without_ffs_intuitive_exhaustive_best_results.csv
-output/post_without_ffs_intuitive_view_weighted_results.csv
-output/post_without_ffs_intuitive_view_weighted_best_results.csv
-output/post_without_ffs_intuitive_view_weighted_exhaustive_best_results.csv
-output/post_ffs_intuitive_results.csv
-output/post_ffs_intuitive_best_results.csv
-output/post_ffs_intuitive_exhaustive_best_results.csv
-output/post_ffs_intuitive_view_weighted_results.csv
-output/post_ffs_intuitive_view_weighted_best_results.csv
-output/post_ffs_intuitive_view_weighted_exhaustive_best_results.csv
+output/<dataset>/without_ffs_results.csv
+output/<dataset>/ffs_results.csv
+output/<dataset>/without_ffs_intuitive_native_results.csv
+output/<dataset>/without_ffs_intuitive_paper_native_results.csv
+output/<dataset>/without_ffs_intuitive_exhaustive_native_results.csv
+output/<dataset>/without_ffs_intuitive_paper_exhaustive_native_results.csv
+output/<dataset>/without_ffs_intuitive_view_weighted_native_results.csv
+output/<dataset>/without_ffs_intuitive_view_weighted_paper_native_results.csv
+output/<dataset>/without_ffs_intuitive_view_weighted_exhaustive_native_results.csv
+output/<dataset>/without_ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
+output/<dataset>/ffs_intuitive_native_results.csv
+output/<dataset>/ffs_intuitive_paper_native_results.csv
+output/<dataset>/ffs_intuitive_exhaustive_native_results.csv
+output/<dataset>/ffs_intuitive_paper_exhaustive_native_results.csv
+output/<dataset>/ffs_intuitive_view_weighted_native_results.csv
+output/<dataset>/ffs_intuitive_view_weighted_paper_native_results.csv
+output/<dataset>/ffs_intuitive_view_weighted_exhaustive_native_results.csv
+output/<dataset>/ffs_intuitive_view_weighted_paper_exhaustive_native_results.csv
+output/<dataset>/post_without_ffs_intuitive_results.csv
+output/<dataset>/post_without_ffs_intuitive_best_results.csv
+output/<dataset>/post_without_ffs_intuitive_exhaustive_best_results.csv
+output/<dataset>/post_without_ffs_intuitive_view_weighted_results.csv
+output/<dataset>/post_without_ffs_intuitive_view_weighted_best_results.csv
+output/<dataset>/post_without_ffs_intuitive_view_weighted_exhaustive_best_results.csv
+output/<dataset>/post_ffs_intuitive_results.csv
+output/<dataset>/post_ffs_intuitive_best_results.csv
+output/<dataset>/post_ffs_intuitive_exhaustive_best_results.csv
+output/<dataset>/post_ffs_intuitive_view_weighted_results.csv
+output/<dataset>/post_ffs_intuitive_view_weighted_best_results.csv
+output/<dataset>/post_ffs_intuitive_view_weighted_exhaustive_best_results.csv
+output/<dataset>/mvdec_experiment_manifest.json
 ```
+
+The manifest records the dataset, data hash, artifact hash, cluster count, and
+random seed. Resume is rejected if any of these differ. To run another artifact,
+use its default dataset directory or provide a new `--output-dir`.
 
 Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
 coarse/refine parameter trials. Summary CSV files keep only the best valid trial
