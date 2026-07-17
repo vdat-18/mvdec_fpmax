@@ -337,10 +337,11 @@ FFS-native rows that have candidate features but no improving feature are marked
 as `baseline_no_improvement`. FFS-native rows that have FP-Max candidates but no
 valid Intuitive candidate are marked as `baseline_no_valid_candidate`.
 
-Outputs keep only the fields needed to compare configurations: grid settings,
-final score columns, selected features, cluster sizes, Intuitive parameters
-when applicable, and status/error details. K-Prototypes FFS and native
-Intuitive FFS outputs use `final_score` as the selected-feature score.
+Outputs keep the fields needed to compare and interpret configurations: grid
+settings, final score columns, selected features, cluster sizes, row-ordered
+cluster assignments, Intuitive parameters when applicable, and status/error
+details. K-Prototypes FFS and native Intuitive FFS outputs use `final_score` as
+the selected-feature score.
 Post-FFS Intuitive follow-up uses `final_score` when that column is
 available. On Windows, prefer one inner parallelism axis at a time. For native
 FFS Intuitive modes, either use `--candidate-workers > 1 --param-workers 1` or
@@ -432,6 +433,21 @@ output/<dataset>/mvdec_experiment_manifest.json
 The manifest records the dataset, data hash, artifact hash, cluster count, and
 random seed. Resume is rejected if any of these differ. To run another artifact,
 use its default dataset directory or provide a new `--output-dir`.
+
+Every summary result row produced by a clustering run also includes:
+
+- `cluster_assignments`: compact JSON labels in the exact row order of the
+  selected preprocessed CSV. Element `i` is the cluster for preprocessed row
+  `i`, so Tiki labels can be joined to `tiki_row_mapping.csv` by row position.
+- `silhouette_sample_std`: dispersion of per-sample Silhouette values. Smaller
+  values mean cluster quality is more consistent across rows.
+- `silhouette_negative_fraction`: fraction of rows with negative Silhouette.
+  Values near zero indicate few rows are closer to another cluster.
+
+These diagnostics deliberately remain Silhouette-only; the pipeline does not
+use Davies-Bouldin or Calinski-Harabasz scores. Baseline-only rows that do not
+run a new clustering keep empty assignments because their labels remain in the
+selected MvDEC artifact.
 
 Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
 coarse/refine parameter trials. Summary CSV files keep only the best valid trial

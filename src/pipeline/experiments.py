@@ -1,5 +1,6 @@
 """Experiment runners for MiMvDEC with and without forward feature selection."""
 
+import json
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass, replace
@@ -86,6 +87,11 @@ INTUITIVE_BROAD_GAMMAS = INTUITIVE_COARSE_GAMMAS
 INTUITIVE_BROAD_BETAS = INTUITIVE_BETAS
 INTUITIVE_BROAD_VIEW_WEIGHT_ALPHAS = (0.2, 0.5, 0.8)
 INTUITIVE_TWO_STAGE_TOP_K = 1
+SILHOUETTE_AUDIT_COLUMNS = [
+    "silhouette_sample_std",
+    "silhouette_negative_fraction",
+    "cluster_assignments",
+]
 
 WITHOUT_FFS_COLUMNS = [
     "job_index",
@@ -97,6 +103,7 @@ WITHOUT_FFS_COLUMNS = [
     "selected_features",
     "init",
     "cluster_sizes",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -111,6 +118,7 @@ FFS_COLUMNS = [
     "selected_features",
     "init",
     "cluster_sizes",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -127,6 +135,7 @@ WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -170,6 +179,7 @@ WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -187,6 +197,7 @@ FFS_INTUITIVE_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -205,6 +216,7 @@ FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -224,6 +236,7 @@ POST_FFS_INTUITIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -244,6 +257,7 @@ POST_FFS_INTUITIVE_VIEW_WEIGHTED_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -263,6 +277,7 @@ POST_WITHOUT_FFS_INTUITIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -283,6 +298,7 @@ POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -303,6 +319,7 @@ POST_FFS_INTUITIVE_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -323,6 +340,7 @@ POST_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -342,6 +360,7 @@ POST_WITHOUT_FFS_INTUITIVE_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
@@ -362,9 +381,12 @@ POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
 ]
+
+
 @dataclass(frozen=True)
 class IntuitiveParams:
     """One Intuitive-K-prototypes parameter combination."""
@@ -409,7 +431,9 @@ class WithoutFfsRecord:
     cluster_sizes: list[int]
     status: str
     error_message: str | None
-
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
 
 
 @dataclass(frozen=True)
@@ -427,6 +451,9 @@ class FfsRecord:
     cluster_sizes: list[int]
     status: str
     error_message: str | None
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
 
 
 @dataclass(frozen=True)
@@ -455,6 +482,7 @@ class NativeIntuitiveTrialRecord:
     error_message: str | None
     is_best: bool
 
+
 @dataclass(frozen=True)
 class WithoutFfsIntuitiveNativeRecord:
     """One without-FFS FP-Max support configuration clustered by Intuitive."""
@@ -473,6 +501,10 @@ class WithoutFfsIntuitiveNativeRecord:
     status: str
     error_message: str | None
     trial_records: tuple[NativeIntuitiveTrialRecord, ...] = ()
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
+
 
 @dataclass(frozen=True)
 class WithoutFfsIntuitiveViewWeightedNativeRecord:
@@ -495,6 +527,10 @@ class WithoutFfsIntuitiveViewWeightedNativeRecord:
     status: str
     error_message: str | None
     trial_records: tuple[NativeIntuitiveTrialRecord, ...] = ()
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
+
 
 @dataclass(frozen=True)
 class FfsIntuitiveNativeRecord:
@@ -515,6 +551,10 @@ class FfsIntuitiveNativeRecord:
     status: str
     error_message: str | None
     trial_records: tuple[NativeIntuitiveTrialRecord, ...] = ()
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
+
 
 @dataclass(frozen=True)
 class FfsIntuitiveViewWeightedNativeRecord:
@@ -537,6 +577,9 @@ class FfsIntuitiveViewWeightedNativeRecord:
     status: str
     error_message: str | None
     trial_records: tuple[NativeIntuitiveTrialRecord, ...] = ()
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
 
 
 @dataclass(frozen=True)
@@ -561,6 +604,9 @@ class PostFfsIntuitiveRecord:
     error_message: str | None
     alpha: float | None = None
     view_weighted_score: float | None = None
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
 
 
 @dataclass(frozen=True)
@@ -580,6 +626,7 @@ class PostFfsIntuitiveContext:
     n_selected_features: int
     n_clusters: int
     random_state: int
+
 
 @dataclass(frozen=True)
 class PostWithoutFfsIntuitiveRecord:
@@ -603,6 +650,9 @@ class PostWithoutFfsIntuitiveRecord:
     error_message: str | None
     alpha: float | None = None
     view_weighted_score: float | None = None
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
 
 
 @dataclass(frozen=True)
@@ -646,6 +696,10 @@ class PostFfsIntuitiveBestRecord:
     error_message: str | None
     alpha: float | None = None
     view_weighted_score: float | None = None
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
+
 
 @dataclass(frozen=True)
 class PostWithoutFfsIntuitiveBestRecord:
@@ -669,6 +723,11 @@ class PostWithoutFfsIntuitiveBestRecord:
     error_message: str | None
     alpha: float | None = None
     view_weighted_score: float | None = None
+    silhouette_sample_std: float = np.nan
+    silhouette_negative_fraction: float = np.nan
+    cluster_assignments: str = ""
+
+
 @dataclass(frozen=True)
 class NativeIntuitiveContext:
     """Shared inputs for one native Intuitive parameter sweep."""
@@ -697,12 +756,14 @@ class NativeIntuitiveTrial:
     view_weighted_score: float | None = None
     stage: str = ""
 
+
 @dataclass(frozen=True)
 class NativeIntuitiveSelectionResult:
     """Best native Intuitive trial plus all parameter trials evaluated."""
 
     best_trial: NativeIntuitiveTrial
     trials: tuple[NativeIntuitiveTrial, ...]
+
 
 @dataclass(frozen=True)
 class NativeIntuitiveCandidateTrace:
@@ -714,6 +775,7 @@ class NativeIntuitiveCandidateTrace:
     trials: tuple[NativeIntuitiveTrial, ...]
     best_trial: NativeIntuitiveTrial
 
+
 @dataclass(frozen=True)
 class NativeIntuitiveCandidateJob:
     """One FFS candidate feature set to evaluate."""
@@ -721,6 +783,7 @@ class NativeIntuitiveCandidateJob:
     selection_step: int
     candidate_feature: str
     candidate_feature_names: tuple[str, ...]
+
 
 @dataclass(frozen=True)
 class NativeIntuitiveCandidateResult:
@@ -730,6 +793,7 @@ class NativeIntuitiveCandidateResult:
     score: float
     trial: NativeIntuitiveTrial
     trace: NativeIntuitiveCandidateTrace
+
 
 @dataclass(frozen=True)
 class NativeIntuitiveCandidateContext:
@@ -745,6 +809,7 @@ class NativeIntuitiveCandidateContext:
     init_strategy: str
     strict_init: bool
 
+
 @dataclass(frozen=True)
 class NativeIntuitiveForwardSelectionResult:
     """Greedy feature selection result using Intuitive as the evaluator."""
@@ -756,12 +821,25 @@ class NativeIntuitiveForwardSelectionResult:
     error_message: str | None
     candidate_traces: tuple[NativeIntuitiveCandidateTrace, ...] = ()
 
+
 def trial_selection_score(trial: NativeIntuitiveTrial) -> float:
     """Return the common mixed-Gower score optimized across Intuitive trials."""
 
     if trial.clustering is None:
         return -np.inf
     return float(trial.clustering.score)
+
+
+def serialize_cluster_assignments(labels: np.ndarray | None) -> str:
+    """Serialize row-ordered cluster labels compactly for CSV persistence."""
+
+    if labels is None:
+        return ""
+    labels_array = np.asarray(labels, dtype=int)
+    if labels_array.ndim != 1:
+        msg = "Cluster assignments must be a one-dimensional array."
+        raise ValueError(msg)
+    return json.dumps(labels_array.tolist(), separators=(",", ":"))
 
 
 ExperimentRecord = (
@@ -799,6 +877,7 @@ def default_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
         )
     )
 
+
 def default_view_weighted_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
     """Return the Intuitive grid extended with MVDEC/FP-Max view weights."""
 
@@ -817,12 +896,14 @@ def default_view_weighted_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
         )
     )
 
+
 def dedupe_intuitive_param_grid(
     params: tuple[IntuitiveParams, ...],
 ) -> tuple[IntuitiveParams, ...]:
     """Return params in first-seen order without duplicate combinations."""
 
     return tuple(dict.fromkeys(params))
+
 
 def default_broad_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
     """Return the coarse first-stage Intuitive grid."""
@@ -839,6 +920,7 @@ def default_broad_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
             INTUITIVE_BROAD_BETAS,
         )
     )
+
 
 def default_broad_view_weighted_intuitive_param_grid() -> tuple[IntuitiveParams, ...]:
     """Return the coarse first-stage view-weighted Intuitive grid."""
@@ -858,6 +940,7 @@ def default_broad_view_weighted_intuitive_param_grid() -> tuple[IntuitiveParams,
         )
     )
 
+
 def neighbor_values(values: tuple[float, ...], center: float) -> tuple[float, ...]:
     """Return center and immediate grid neighbors from a sorted value list."""
 
@@ -866,6 +949,7 @@ def neighbor_values(values: tuple[float, ...], center: float) -> tuple[float, ..
     start = max(0, center_index - 1)
     stop = min(len(sorted_values), center_index + 2)
     return sorted_values[start:stop]
+
 
 def build_refined_intuitive_param_grid(
     center: IntuitiveParams,
@@ -906,6 +990,7 @@ def build_refined_intuitive_param_grid(
         )
     )
 
+
 def build_two_stage_intuitive_param_grids(
     full_grid: tuple[IntuitiveParams, ...],
     top_trials: list[NativeIntuitiveTrial],
@@ -943,10 +1028,12 @@ def build_two_stage_intuitive_param_grids(
         )
 
     refined_grid = tuple(
-        params for params in dedupe_intuitive_param_grid(tuple(refine_params))
+        params
+        for params in dedupe_intuitive_param_grid(tuple(refine_params))
         if params in full_set and params not in set(broad_grid)
     )
     return broad_grid, refined_grid
+
 
 def build_view_weighted_distance_matrices(
     h_fused_df: pd.DataFrame,
@@ -970,6 +1057,7 @@ def build_view_weighted_distance_matrices(
         for alpha in alphas
     }
 
+
 def parse_selected_features(value: Any) -> list[str]:
     """Parse the persisted comma-separated selected feature names."""
 
@@ -977,10 +1065,12 @@ def parse_selected_features(value: Any) -> list[str]:
         return []
     return [feature.strip() for feature in value.split(",") if feature.strip()]
 
+
 def canonical_feature_name(feature_name: str) -> str:
     """Return an order-stable key for one FP-Max itemset feature name."""
 
     return "+".join(sorted(item.strip() for item in feature_name.split("+")))
+
 
 def resolve_rebuilt_feature_names(
     selected_feature_names: list[str],
@@ -1008,6 +1098,7 @@ def resolve_rebuilt_feature_names(
         rebuilt_by_key[canonical_feature_name(feature_name)]
         for feature_name in selected_feature_names
     ]
+
 
 def load_usable_ffs_rows(ffs_path: Path = FFS_RESULTS_PATH) -> pd.DataFrame:
     """Load FFS rows that can be followed by Intuitive evaluation."""
@@ -1055,6 +1146,7 @@ def load_usable_ffs_rows(ffs_path: Path = FFS_RESULTS_PATH) -> pd.DataFrame:
         raise ValueError(msg)
 
     return usable.sort_values("job_index").reset_index(drop=True)
+
 
 def load_usable_without_ffs_rows(
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
@@ -1115,6 +1207,7 @@ def load_usable_without_ffs_rows(
 
     return usable.sort_values("job_index").reset_index(drop=True)
 
+
 def validate_post_ffs_resume_source(
     existing_df: pd.DataFrame,
     base_rows: pd.DataFrame,
@@ -1156,6 +1249,7 @@ def validate_post_ffs_resume_source(
                 "job mapping. Rerun with --no-resume."
             )
             raise ValueError(msg)
+
 
 def validate_post_without_ffs_resume_source(
     existing_df: pd.DataFrame,
@@ -1202,6 +1296,7 @@ def validate_post_without_ffs_resume_source(
             )
             raise ValueError(msg)
 
+
 def make_post_ffs_intuitive_best_record(
     *,
     job_index: int,
@@ -1240,7 +1335,17 @@ def make_post_ffs_intuitive_best_record(
         beta=best_trial.beta,
         status=best_trial.status,
         error_message=best_trial.error_message,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def make_post_without_ffs_intuitive_best_record(
     *,
@@ -1279,7 +1384,17 @@ def make_post_without_ffs_intuitive_best_record(
         beta=best_trial.beta,
         status=best_trial.status,
         error_message=best_trial.error_message,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def validate_post_ffs_best_resume_source(
     existing_df: pd.DataFrame,
@@ -1307,6 +1422,7 @@ def validate_post_ffs_best_resume_source(
             msg = "Existing best post-FFS output has a different job mapping."
             raise ValueError(f"{msg} Rerun with --no-resume.")
 
+
 def validate_post_without_ffs_best_resume_source(
     existing_df: pd.DataFrame,
     base_rows: pd.DataFrame,
@@ -1330,17 +1446,16 @@ def validate_post_without_ffs_best_resume_source(
             and np.isclose(float(row.min_support), float(base_row["min_support"]))
         )
         if not same_source:
-            msg = (
-                "Existing best post-without-FFS output has a different "
-                "job mapping."
-            )
+            msg = "Existing best post-without-FFS output has a different job mapping."
             raise ValueError(f"{msg} Rerun with --no-resume.")
+
 
 def run_post_ffs_intuitive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_BEST_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1390,9 +1505,7 @@ def run_post_ffs_intuitive_best(
                 selected_feature_names=selected_feature_names,
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
-            selected_binary_df = fpmax_features.features[
-                rebuilt_selected_feature_names
-            ]
+            selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
             best_trial = select_best_native_intuitive_trial(
                 h_fused_df=h_fused_df,
                 binary_df=selected_binary_df,
@@ -1422,11 +1535,13 @@ def run_post_ffs_intuitive_best(
 
     return save_results(existing_df, records, save_path, label, columns)
 
+
 def run_post_without_ffs_intuitive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_WITHOUT_FFS_INTUITIVE_BEST_RESULTS_PATH,
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1473,9 +1588,7 @@ def run_post_without_ffs_intuitive_best(
                 selected_feature_names=selected_feature_names,
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
-            selected_binary_df = fpmax_features.features[
-                rebuilt_selected_feature_names
-            ]
+            selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
             best_trial = select_best_native_intuitive_trial(
                 h_fused_df=h_fused_df,
                 binary_df=selected_binary_df,
@@ -1504,11 +1617,13 @@ def run_post_without_ffs_intuitive_best(
 
     return save_results(existing_df, records, save_path, label, columns)
 
+
 def run_post_ffs_intuitive_view_weighted_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1528,11 +1643,13 @@ def run_post_ffs_intuitive_view_weighted_best(
         label="post-FFS/intuitive-view-weighted-best",
     )
 
+
 def run_post_without_ffs_intuitive_view_weighted_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_RESULTS_PATH,
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1551,11 +1668,14 @@ def run_post_without_ffs_intuitive_view_weighted_best(
         intuitive_param_grid=default_view_weighted_intuitive_param_grid(),
         label="post-without-FFS/intuitive-view-weighted-best",
     )
+
+
 def run_post_ffs_intuitive_exhaustive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_EXHAUSTIVE_BEST_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1574,11 +1694,13 @@ def run_post_ffs_intuitive_exhaustive_best(
         two_stage=False,
     )
 
+
 def run_post_without_ffs_intuitive_exhaustive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_WITHOUT_FFS_INTUITIVE_EXHAUSTIVE_BEST_RESULTS_PATH,
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1597,11 +1719,13 @@ def run_post_without_ffs_intuitive_exhaustive_best(
         two_stage=False,
     )
 
+
 def run_post_ffs_intuitive_view_weighted_exhaustive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_VIEW_WEIGHTED_EXHAUSTIVE_BEST_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1622,13 +1746,15 @@ def run_post_ffs_intuitive_view_weighted_exhaustive_best(
         two_stage=False,
     )
 
+
 def run_post_without_ffs_intuitive_view_weighted_exhaustive_best(
     h_fused_df: pd.DataFrame,
     save_path: Path = (
         POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_EXHAUSTIVE_BEST_RESULTS_PATH
     ),
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1648,11 +1774,14 @@ def run_post_without_ffs_intuitive_view_weighted_exhaustive_best(
         label="post-without-FFS/intuitive-view-weighted-exhaustive-best",
         two_stage=False,
     )
+
+
 def run_post_ffs_intuitive(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1667,9 +1796,7 @@ def run_post_ffs_intuitive(
         raise ValueError(msg)
 
     columns = columns or POST_FFS_INTUITIVE_COLUMNS
-    existing_df = (
-        load_results(save_path, columns) if resume else empty_results(columns)
-    )
+    existing_df = load_results(save_path, columns) if resume else empty_results(columns)
     intuitive_param_grid = intuitive_param_grid or default_intuitive_param_grid()
     base_rows = load_usable_ffs_rows(ffs_path)
     validate_post_ffs_resume_source(existing_df, base_rows, intuitive_param_grid)
@@ -1709,9 +1836,7 @@ def run_post_ffs_intuitive(
                 selected_feature_names=selected_feature_names,
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
-            selected_binary_df = fpmax_features.features[
-                rebuilt_selected_feature_names
-            ]
+            selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
             combined_df, _, _ = make_mixed_features(
                 continuous_df=h_fused_df,
                 binary_df=selected_binary_df,
@@ -1804,11 +1929,13 @@ def run_post_ffs_intuitive(
 
     return save_results(existing_df, records, save_path, label, columns)
 
+
 def run_post_without_ffs_intuitive(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_WITHOUT_FFS_INTUITIVE_RESULTS_PATH,
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -1823,9 +1950,7 @@ def run_post_without_ffs_intuitive(
         raise ValueError(msg)
 
     columns = columns or POST_WITHOUT_FFS_INTUITIVE_COLUMNS
-    existing_df = (
-        load_results(save_path, columns) if resume else empty_results(columns)
-    )
+    existing_df = load_results(save_path, columns) if resume else empty_results(columns)
     intuitive_param_grid = intuitive_param_grid or default_intuitive_param_grid()
     base_rows = load_usable_without_ffs_rows(without_ffs_path)
     validate_post_without_ffs_resume_source(
@@ -1834,8 +1959,7 @@ def run_post_without_ffs_intuitive(
         intuitive_param_grid,
     )
     logger.info(
-        "Running {} on {} K-Prototypes rows with {} "
-        "params each",
+        "Running {} on {} K-Prototypes rows with {} params each",
         label,
         len(base_rows),
         len(intuitive_param_grid),
@@ -1867,9 +1991,7 @@ def run_post_without_ffs_intuitive(
                 selected_feature_names=selected_feature_names,
                 rebuilt_feature_names=fpmax_features.features.columns.tolist(),
             )
-            selected_binary_df = fpmax_features.features[
-                rebuilt_selected_feature_names
-            ]
+            selected_binary_df = fpmax_features.features[rebuilt_selected_feature_names]
             combined_df, _, _ = make_mixed_features(
                 continuous_df=h_fused_df,
                 binary_df=selected_binary_df,
@@ -1983,7 +2105,8 @@ def run_post_ffs_intuitive_view_weighted(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_FFS_INTUITIVE_VIEW_WEIGHTED_RESULTS_PATH,
     ffs_path: Path = FFS_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -2003,11 +2126,13 @@ def run_post_ffs_intuitive_view_weighted(
         label="post-FFS/intuitive-view-weighted",
     )
 
+
 def run_post_without_ffs_intuitive_view_weighted(
     h_fused_df: pd.DataFrame,
     save_path: Path = POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_RESULTS_PATH,
     without_ffs_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
@@ -2027,15 +2152,17 @@ def run_post_without_ffs_intuitive_view_weighted(
         label="post-without-FFS/intuitive-view-weighted",
     )
 
+
 def run_without_ffs(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     limit: int | None = None,
@@ -2067,9 +2194,10 @@ def run_without_ffs_intuitive_native(
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2096,16 +2224,16 @@ def run_without_ffs_intuitive_native(
     )
 
 
-
 def run_without_ffs_intuitive_view_weighted_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2131,15 +2259,17 @@ def run_without_ffs_intuitive_view_weighted_native(
         label="without-FFS/intuitive-view-weighted-native",
     )
 
+
 def run_without_ffs_intuitive_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_INTUITIVE_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2165,6 +2295,7 @@ def run_without_ffs_intuitive_exhaustive_native(
         label="without-FFS/intuitive-exhaustive-native",
     )
 
+
 def run_without_ffs_intuitive_view_weighted_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = (
@@ -2173,9 +2304,10 @@ def run_without_ffs_intuitive_view_weighted_exhaustive_native(
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2200,15 +2332,18 @@ def run_without_ffs_intuitive_view_weighted_exhaustive_native(
         limit=limit,
         label="without-FFS/intuitive-view-weighted-exhaustive-native",
     )
+
+
 def run_ffs(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     candidate_workers: int = 1,
@@ -2244,9 +2379,10 @@ def run_ffs_intuitive_native(
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2276,15 +2412,17 @@ def run_ffs_intuitive_native(
         label="FFS/intuitive-native",
     )
 
+
 def run_ffs_intuitive_view_weighted_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2314,15 +2452,17 @@ def run_ffs_intuitive_view_weighted_native(
         label="FFS/intuitive-view-weighted-native",
     )
 
+
 def run_ffs_intuitive_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2352,15 +2492,17 @@ def run_ffs_intuitive_exhaustive_native(
         label="FFS/intuitive-exhaustive-native",
     )
 
+
 def run_ffs_intuitive_view_weighted_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_VIEW_WEIGHTED_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2390,15 +2532,17 @@ def run_ffs_intuitive_view_weighted_exhaustive_native(
         label="FFS/intuitive-view-weighted-exhaustive-native",
     )
 
+
 def run_without_ffs_intuitive_paper_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_INTUITIVE_PAPER_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2424,15 +2568,17 @@ def run_without_ffs_intuitive_paper_native(
         label="without-FFS/intuitive-paper-native",
     )
 
+
 def run_without_ffs_intuitive_paper_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_INTUITIVE_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2458,15 +2604,17 @@ def run_without_ffs_intuitive_paper_exhaustive_native(
         label="without-FFS/intuitive-paper-exhaustive-native",
     )
 
+
 def run_without_ffs_intuitive_view_weighted_paper_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2492,6 +2640,7 @@ def run_without_ffs_intuitive_view_weighted_paper_native(
         label="without-FFS/intuitive-view-weighted-paper-native",
     )
 
+
 def run_without_ffs_intuitive_view_weighted_paper_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = (
@@ -2500,9 +2649,10 @@ def run_without_ffs_intuitive_view_weighted_paper_exhaustive_native(
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2528,15 +2678,17 @@ def run_without_ffs_intuitive_view_weighted_paper_exhaustive_native(
         label="without-FFS/intuitive-view-weighted-paper-exhaustive-native",
     )
 
+
 def run_ffs_intuitive_paper_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_PAPER_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2566,15 +2718,17 @@ def run_ffs_intuitive_paper_native(
         label="FFS/intuitive-paper-native",
     )
 
+
 def run_ffs_intuitive_paper_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2604,15 +2758,17 @@ def run_ffs_intuitive_paper_exhaustive_native(
         label="FFS/intuitive-paper-exhaustive-native",
     )
 
+
 def run_ffs_intuitive_view_weighted_paper_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2642,15 +2798,17 @@ def run_ffs_intuitive_view_weighted_paper_native(
         label="FFS/intuitive-view-weighted-paper-native",
     )
 
+
 def run_ffs_intuitive_view_weighted_paper_exhaustive_native(
     h_fused_df: pd.DataFrame,
     save_path: Path = FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_EXHAUSTIVE_NATIVE_RESULTS_PATH,
     strategies: tuple[DiscretizeStrategy, ...] = DEFAULT_STRATEGIES,
     n_bins_options: tuple[int, ...] = (3, 5, 7),
     supports: np.ndarray = DEFAULT_SUPPORTS,
-    n_clusters: int = 5,
+    *,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
+    baseline_score: float,
     resume: bool = True,
     workers: int = 3,
     param_workers: int = 1,
@@ -2679,6 +2837,8 @@ def run_ffs_intuitive_view_weighted_paper_exhaustive_native(
         limit=limit,
         label="FFS/intuitive-view-weighted-paper-exhaustive-native",
     )
+
+
 def make_without_ffs_intuitive_native_trial_records(
     *,
     group: ExperimentGroup,
@@ -2723,6 +2883,7 @@ def make_without_ffs_intuitive_native_trial_records(
             )
         )
     return tuple(rows)
+
 
 def make_ffs_intuitive_native_trial_records(
     *,
@@ -2769,6 +2930,7 @@ def make_ffs_intuitive_native_trial_records(
             )
     return tuple(rows)
 
+
 def native_trial_sidecar_for(
     save_path: Path,
     columns: list[str],
@@ -2792,10 +2954,13 @@ def native_trial_sidecar_for(
         return trial_path, NATIVE_INTUITIVE_TRIAL_COLUMNS
     return None, None
 
+
 def save_trial_records_if_any(
     record: ExperimentRecord,
     existing_trial_df: pd.DataFrame,
-    trial_records: dict[tuple[int, int | None, str | None, int], NativeIntuitiveTrialRecord],
+    trial_records: dict[
+        tuple[int, int | None, str | None, int], NativeIntuitiveTrialRecord
+    ],
     trial_save_path: Path | None,
     trial_columns: list[str] | None,
     label: str,
@@ -2832,6 +2997,7 @@ def save_trial_records_if_any(
             "trial_index",
         ],
     )
+
 
 def run_experiment_grid(
     h_fused_df: pd.DataFrame,
@@ -3190,6 +3356,7 @@ def make_empty_without_ffs_record(
         error_message=None,
     )
 
+
 def make_empty_without_ffs_intuitive_native_record(
     *,
     group: ExperimentGroup,
@@ -3213,6 +3380,7 @@ def make_empty_without_ffs_intuitive_native_record(
         status="baseline_no_features",
         error_message=None,
     )
+
 
 def make_empty_without_ffs_intuitive_view_weighted_native_record(
     *,
@@ -3240,6 +3408,7 @@ def make_empty_without_ffs_intuitive_view_weighted_native_record(
         status="baseline_no_features",
         error_message=None,
     )
+
 
 def make_empty_ffs_intuitive_native_record(
     *,
@@ -3298,6 +3467,7 @@ def make_empty_ffs_intuitive_view_weighted_native_record(
         error_message=error_message,
     )
 
+
 _NATIVE_INTUITIVE_CANDIDATE_CONTEXT: NativeIntuitiveCandidateContext | None = None
 
 
@@ -3345,6 +3515,7 @@ def run_native_intuitive_candidate(
         trial=selection.best_trial,
         trace=trace,
     )
+
 
 def run_native_intuitive_forward_selection(
     *,
@@ -3416,7 +3587,8 @@ def run_native_intuitive_forward_selection(
         else:
             init_native_intuitive_candidate_worker(candidate_context)
             candidate_results = [
-                run_native_intuitive_candidate(candidate) for candidate in candidate_jobs
+                run_native_intuitive_candidate(candidate)
+                for candidate in candidate_jobs
             ]
 
         for result in candidate_results:
@@ -3460,6 +3632,7 @@ def run_native_intuitive_forward_selection(
         candidate_traces=tuple(candidate_traces),
     )
 
+
 def make_without_ffs_record(
     *,
     group: ExperimentGroup,
@@ -3489,6 +3662,9 @@ def make_without_ffs_record(
         cluster_sizes=clustering.cluster_sizes,
         status=status,
         error_message=error_message,
+        silhouette_sample_std=clustering.silhouette_sample_std,
+        silhouette_negative_fraction=clustering.silhouette_negative_fraction,
+        cluster_assignments=serialize_cluster_assignments(clustering.labels),
     )
 
 
@@ -3621,6 +3797,7 @@ def run_native_intuitive_trials(
     init_native_intuitive_worker(context)
     return [replace(run_native_intuitive_trial(job), stage=stage) for job in jobs]
 
+
 def select_native_intuitive_trials(
     *,
     h_fused_df: pd.DataFrame,
@@ -3750,6 +3927,7 @@ def select_native_intuitive_trials(
         trials=tuple(trials),
     )
 
+
 def select_best_native_intuitive_trial(
     *,
     h_fused_df: pd.DataFrame,
@@ -3776,13 +3954,16 @@ def select_best_native_intuitive_trial(
         strict_init=strict_init,
     ).best_trial
 
+
 _POST_FFS_INTUITIVE_CONTEXT: PostFfsIntuitiveContext | None = None
+
 
 def init_post_ffs_intuitive_worker(context: PostFfsIntuitiveContext) -> None:
     """Initialize per-process inputs for post-FFS Intuitive parameter jobs."""
 
     global _POST_FFS_INTUITIVE_CONTEXT
     _POST_FFS_INTUITIVE_CONTEXT = context
+
 
 def make_post_ffs_intuitive_record(
     *,
@@ -3824,7 +4005,17 @@ def make_post_ffs_intuitive_record(
         error_message=error_message,
         alpha=job.intuitive_params.view_weight_alpha,
         view_weighted_score=view_weighted_score,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def run_post_ffs_intuitive_job(job: ExperimentJob) -> PostFfsIntuitiveRecord:
     """Run one Intuitive parameter config on the selected FFS feature set."""
@@ -3887,6 +4078,7 @@ def run_post_ffs_intuitive_job(job: ExperimentJob) -> PostFfsIntuitiveRecord:
         error_message=None,
     )
 
+
 def run_post_ffs_intuitive_job_safely(
     job: ExperimentJob,
 ) -> PostFfsIntuitiveRecord | None:
@@ -3902,7 +4094,9 @@ def run_post_ffs_intuitive_job_safely(
         )
         return None
 
+
 _POST_WITHOUT_FFS_INTUITIVE_CONTEXT: PostWithoutFfsIntuitiveContext | None = None
+
 
 def init_post_without_ffs_intuitive_worker(
     context: PostWithoutFfsIntuitiveContext,
@@ -3911,6 +4105,7 @@ def init_post_without_ffs_intuitive_worker(
 
     global _POST_WITHOUT_FFS_INTUITIVE_CONTEXT
     _POST_WITHOUT_FFS_INTUITIVE_CONTEXT = context
+
 
 def make_post_without_ffs_intuitive_record(
     *,
@@ -3952,7 +4147,17 @@ def make_post_without_ffs_intuitive_record(
         error_message=error_message,
         alpha=job.intuitive_params.view_weight_alpha,
         view_weighted_score=view_weighted_score,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def run_post_without_ffs_intuitive_job(
     job: ExperimentJob,
@@ -4016,6 +4221,7 @@ def run_post_without_ffs_intuitive_job(
         status="ok",
         error_message=None,
     )
+
 
 def run_post_without_ffs_intuitive_job_safely(
     job: ExperimentJob,
@@ -4164,7 +4370,17 @@ def run_without_ffs_intuitive_native_job(
         status=best_trial.status,
         error_message=best_trial.error_message,
         trial_records=trial_records,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def run_without_ffs_intuitive_view_weighted_native_job(
     h_fused_df: pd.DataFrame,
@@ -4245,7 +4461,17 @@ def run_without_ffs_intuitive_view_weighted_native_job(
         status=best_trial.status,
         error_message=best_trial.error_message,
         trial_records=trial_records,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def run_ffs_job(
     h_fused_df: pd.DataFrame,
@@ -4321,6 +4547,9 @@ def run_ffs_job(
         cluster_sizes=sizes,
         status=status,
         error_message=error_message,
+        silhouette_sample_std=selected.silhouette_sample_std,
+        silhouette_negative_fraction=selected.silhouette_negative_fraction,
+        cluster_assignments=serialize_cluster_assignments(selected.labels),
     )
 
 
@@ -4367,9 +4596,7 @@ def run_ffs_intuitive_native_job(
     )
     if not selected.selected_feature_names:
         status = (
-            "baseline_no_features"
-            if fpmax_features.features.empty
-            else selected.status
+            "baseline_no_features" if fpmax_features.features.empty else selected.status
         )
         error_message = (
             None if fpmax_features.features.empty else selected.error_message
@@ -4420,6 +4647,15 @@ def run_ffs_intuitive_native_job(
             else "No Intuitive parameter combination produced a valid result."
         ),
         trial_records=trial_records,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
 
 
@@ -4468,9 +4704,7 @@ def run_ffs_intuitive_view_weighted_native_job(
     )
     if not selected.selected_feature_names:
         status = (
-            "baseline_no_features"
-            if fpmax_features.features.empty
-            else selected.status
+            "baseline_no_features" if fpmax_features.features.empty else selected.status
         )
         error_message = (
             None if fpmax_features.features.empty else selected.error_message
@@ -4527,7 +4761,17 @@ def run_ffs_intuitive_view_weighted_native_job(
             else "No Intuitive parameter combination produced a valid result."
         ),
         trial_records=trial_records,
+        silhouette_sample_std=(
+            clustering.silhouette_sample_std if clustering else np.nan
+        ),
+        silhouette_negative_fraction=(
+            clustering.silhouette_negative_fraction if clustering else np.nan
+        ),
+        cluster_assignments=serialize_cluster_assignments(
+            clustering.labels if clustering else None
+        ),
     )
+
 
 def run_without_ffs_intuitive_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4551,6 +4795,7 @@ def run_without_ffs_intuitive_exhaustive_native_job(
         two_stage=False,
     )
 
+
 def run_without_ffs_intuitive_view_weighted_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4572,6 +4817,7 @@ def run_without_ffs_intuitive_view_weighted_exhaustive_native_job(
         param_workers,
         two_stage=False,
     )
+
 
 def run_ffs_intuitive_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4597,6 +4843,7 @@ def run_ffs_intuitive_exhaustive_native_job(
         candidate_workers=candidate_workers,
     )
 
+
 def run_ffs_intuitive_view_weighted_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4621,6 +4868,7 @@ def run_ffs_intuitive_view_weighted_exhaustive_native_job(
         candidate_workers=candidate_workers,
     )
 
+
 def run_without_ffs_intuitive_paper_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4643,6 +4891,7 @@ def run_without_ffs_intuitive_paper_native_job(
         init_strategy="paper",
         strict_init=True,
     )
+
 
 def run_without_ffs_intuitive_paper_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4668,6 +4917,7 @@ def run_without_ffs_intuitive_paper_exhaustive_native_job(
         strict_init=True,
     )
 
+
 def run_without_ffs_intuitive_view_weighted_paper_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4690,6 +4940,7 @@ def run_without_ffs_intuitive_view_weighted_paper_native_job(
         init_strategy="paper",
         strict_init=True,
     )
+
 
 def run_without_ffs_intuitive_view_weighted_paper_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4715,6 +4966,7 @@ def run_without_ffs_intuitive_view_weighted_paper_exhaustive_native_job(
         strict_init=True,
     )
 
+
 def run_ffs_intuitive_paper_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4739,6 +4991,7 @@ def run_ffs_intuitive_paper_native_job(
         strict_init=True,
         candidate_workers=candidate_workers,
     )
+
 
 def run_ffs_intuitive_paper_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4766,6 +5019,7 @@ def run_ffs_intuitive_paper_exhaustive_native_job(
         candidate_workers=candidate_workers,
     )
 
+
 def run_ffs_intuitive_view_weighted_paper_native_job(
     h_fused_df: pd.DataFrame,
     group: ExperimentGroup,
@@ -4790,6 +5044,7 @@ def run_ffs_intuitive_view_weighted_paper_native_job(
         strict_init=True,
         candidate_workers=candidate_workers,
     )
+
 
 def run_ffs_intuitive_view_weighted_paper_exhaustive_native_job(
     h_fused_df: pd.DataFrame,
@@ -4816,6 +5071,8 @@ def run_ffs_intuitive_view_weighted_paper_exhaustive_native_job(
         strict_init=True,
         candidate_workers=candidate_workers,
     )
+
+
 def drain_queue(
     queue: Any,
     existing_df: pd.DataFrame,

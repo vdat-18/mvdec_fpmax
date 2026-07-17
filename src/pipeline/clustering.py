@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from kmodes.kprototypes import KPrototypes
 from loguru import logger
-from sklearn.metrics import silhouette_score
+from sklearn.metrics import silhouette_samples, silhouette_score
 
 from config import RANDOM_STATE
 from intuitive_kprototypes import IntuitiveKPrototypes
@@ -31,6 +31,8 @@ class KPrototypesResult:
     fit_time_seconds: float
     cluster_sizes: list[int]
     labels_hash: str
+    silhouette_sample_std: float
+    silhouette_negative_fraction: float
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,8 @@ class IntuitiveClusteringResult:
     min_cluster_size: int
     initial_prototype_indices: list[int]
     final_cost: float
+    silhouette_sample_std: float
+    silhouette_negative_fraction: float
     view_weight_alpha: float | None = None
     view_weighted_score: float | None = None
 
@@ -81,6 +85,7 @@ def compute_gower_distance(df: pd.DataFrame) -> np.ndarray:
     """Compute a Gower distance matrix for mixed numeric and categorical data."""
 
     return gower.gower_matrix(df)
+
 
 def compute_view_weighted_gower_distance(
     continuous_df: pd.DataFrame,
@@ -119,6 +124,20 @@ def compute_silhouette(distance_matrix: np.ndarray, labels: np.ndarray) -> float
     return float(silhouette_score(distance_matrix, labels, metric="precomputed"))
 
 
+def compute_silhouette_diagnostics(
+    distance_matrix: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[float, float, float]:
+    """Return mean, sample dispersion, and negative-sample share for Silhouette."""
+
+    samples = silhouette_samples(distance_matrix, labels, metric="precomputed")
+    return (
+        float(np.mean(samples)),
+        float(np.std(samples)),
+        float(np.mean(samples < 0.0)),
+    )
+
+
 def make_mixed_features(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
@@ -142,7 +161,7 @@ def make_mixed_features(
 def run_kprototypes(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
-    n_clusters: int = 5,
+    n_clusters: int,
     init_methods: tuple[str, ...] = DEFAULT_INIT_METHODS,
     random_state: int = RANDOM_STATE,
     verbose: bool = True,
@@ -166,7 +185,10 @@ def run_kprototypes(
         )
         labels = model.fit_predict(combined_df.to_numpy(), categorical=categorical_idx)
         fit_time = perf_counter() - fit_start
-        score = compute_silhouette(distance_matrix, labels)
+        score, sample_std, negative_fraction = compute_silhouette_diagnostics(
+            distance_matrix,
+            labels,
+        )
 
         if verbose:
             logger.info(
@@ -188,6 +210,8 @@ def run_kprototypes(
                 fit_time_seconds=fit_time,
                 cluster_sizes=cluster_sizes(labels, n_clusters),
                 labels_hash=labels_hash(labels),
+                silhouette_sample_std=sample_std,
+                silhouette_negative_fraction=negative_fraction,
             )
 
     if best_result is None:
@@ -200,7 +224,7 @@ def run_kprototypes(
 def run_intuitive_kprototypes(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
-    n_clusters: int = 5,
+    n_clusters: int,
     random_state: int = RANDOM_STATE,
     lambda_init: float | None = None,
     mu_param: float = 0.5,
@@ -244,7 +268,10 @@ def run_intuitive_kprototypes(
     )
     result = model.fit(X_num=X_num, X_cat=X_cat).result_
     labels = result.labels
-    score = compute_silhouette(distance_matrix, labels)
+    score, sample_std, negative_fraction = compute_silhouette_diagnostics(
+        distance_matrix,
+        labels,
+    )
     view_weighted_score = None
     if view_weight_alpha is not None:
         if view_weighted_distance_matrix is None:
@@ -291,6 +318,8 @@ def run_intuitive_kprototypes(
         min_cluster_size=min_cluster_size,
         initial_prototype_indices=result.initial_prototype_indices.astype(int).tolist(),
         final_cost=final_cost,
+        silhouette_sample_std=sample_std,
+        silhouette_negative_fraction=negative_fraction,
         view_weight_alpha=view_weight_alpha,
         view_weighted_score=view_weighted_score,
     )

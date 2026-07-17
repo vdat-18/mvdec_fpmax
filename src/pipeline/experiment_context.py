@@ -8,7 +8,7 @@ from config import OUTPUT_DIR, RANDOM_STATE
 from pipeline.data import file_sha256
 
 MANIFEST_FILENAME = "mvdec_experiment_manifest.json"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)

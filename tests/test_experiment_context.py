@@ -49,6 +49,7 @@ def test_experiment_context_writes_and_reuses_matching_manifest(tmp_path) -> Non
     manifest = json.loads((output_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert first == second
     assert first.n_clusters == 5
+    assert manifest["schema_version"] == 2
     assert manifest["dataset"] == "TIKI"
     assert manifest["n_clusters"] == 5
 

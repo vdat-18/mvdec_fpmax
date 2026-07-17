@@ -44,6 +44,7 @@ def test_trial_selection_score_falls_back_to_standard_score():
 
     assert trial_selection_score(trial) == 0.9
 
+
 def test_trial_selection_score_failed_trial_is_negative_infinity():
     trial = NativeIntuitiveTrial(
         clustering=None,
@@ -55,6 +56,7 @@ def test_trial_selection_score_failed_trial_is_negative_infinity():
     )
 
     assert trial_selection_score(trial) == float("-inf")
+
 
 def test_native_intuitive_trial_converts_value_error_to_failed_trial(monkeypatch):
     def raise_value_error(**kwargs):
@@ -86,6 +88,7 @@ def test_native_intuitive_trial_converts_value_error_to_failed_trial(monkeypatch
     assert trial.status == "failed_value_error"
     assert "could not find enough prototypes" in trial.error_message
 
+
 def test_native_intuitive_ffs_rejects_nested_inner_parallelism():
     with pytest.raises(ValueError, match="candidate_workers or param_workers"):
         run_native_intuitive_forward_selection(
@@ -98,12 +101,13 @@ def test_native_intuitive_ffs_rejects_nested_inner_parallelism():
             candidate_workers=2,
         )
 
+
 def test_kprototypes_ffs_rejects_invalid_candidate_workers():
     with pytest.raises(ValueError, match="candidate_workers"):
         run_forward_selection(
             continuous_df=pd.DataFrame({"x": [0.0, 1.0]}),
             binary_df=pd.DataFrame({"b": [0, 1]}),
             n_clusters=2,
+            baseline_score=0.0,
             candidate_workers=0,
         )
-

@@ -12,7 +12,7 @@ from config import RANDOM_STATE
 from pipeline.clustering import (
     DEFAULT_INIT_METHODS,
     compute_gower_distance,
-    compute_silhouette,
+    compute_silhouette_diagnostics,
     make_mixed_features,
 )
 
@@ -27,6 +27,9 @@ class ForwardSelectionResult:
     score: float
     best_observed_score: float
     init: str | None
+    silhouette_sample_std: float
+    silhouette_negative_fraction: float
+
 
 @dataclass(frozen=True)
 class ForwardSelectionCandidateJob:
@@ -35,6 +38,7 @@ class ForwardSelectionCandidateJob:
     idx: int
     feature_name: str
     candidate_names: tuple[str, ...]
+
 
 @dataclass(frozen=True)
 class ForwardSelectionCandidateContext:
@@ -45,6 +49,7 @@ class ForwardSelectionCandidateContext:
     n_clusters: int
     init_methods: tuple[str, ...]
     random_state: int
+
 
 @dataclass(frozen=True)
 class ForwardSelectionCandidateResult:
@@ -57,6 +62,8 @@ class ForwardSelectionCandidateResult:
     score: float
     best_observed_score: float
     logs: tuple[tuple[str, str, float], ...]
+    silhouette_sample_std: float
+    silhouette_negative_fraction: float
 
 
 def ensure_binary_features(binary_df: pd.DataFrame) -> pd.DataFrame:
@@ -104,6 +111,8 @@ def run_forward_selection_candidate(
     best_score = -np.inf
     best_labels: np.ndarray | None = None
     best_init: str | None = None
+    best_sample_std = np.nan
+    best_negative_fraction = np.nan
     logs: list[tuple[str, str, float]] = []
 
     for init in context.init_methods:
@@ -128,13 +137,18 @@ def run_forward_selection_candidate(
                 init,
             )
             continue
-        score = compute_silhouette(distance_matrix, labels)
+        score, sample_std, negative_fraction = compute_silhouette_diagnostics(
+            distance_matrix,
+            labels,
+        )
         logs.append((candidate.feature_name, init, float(score)))
 
         if score > best_score:
             best_score = score
             best_labels = labels
             best_init = init
+            best_sample_std = sample_std
+            best_negative_fraction = negative_fraction
 
     return ForwardSelectionCandidateResult(
         idx=candidate.idx,
@@ -144,16 +158,18 @@ def run_forward_selection_candidate(
         score=float(best_score),
         best_observed_score=float(best_score),
         logs=tuple(logs),
+        silhouette_sample_std=float(best_sample_std),
+        silhouette_negative_fraction=float(best_negative_fraction),
     )
 
 
 def run_forward_selection(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
-    n_clusters: int = 5,
+    n_clusters: int,
+    baseline_score: float,
     init_methods: tuple[str, ...] = DEFAULT_INIT_METHODS,
     random_state: int = RANDOM_STATE,
-    baseline_score: float = 0.4069,
     min_improvement: float = 1e-6,
     verbose: bool = True,
     candidate_workers: int = 1,
@@ -175,6 +191,8 @@ def run_forward_selection(
     best_score = float(baseline_score)
     best_labels: np.ndarray | None = None
     best_init: str | None = None
+    best_sample_std = np.nan
+    best_negative_fraction = np.nan
     best_observed_score = -np.inf
     candidate_context = ForwardSelectionCandidateContext(
         continuous_df=continuous_df,
@@ -188,7 +206,7 @@ def run_forward_selection(
         logger.info("Start forward selection | baseline = {:.4f}", best_score)
 
     while remaining:
-        local_best: tuple[int, list[str], np.ndarray, str] | None = None
+        local_best: tuple[int, list[str], np.ndarray, str, float, float] | None = None
         local_best_score = -np.inf
         candidate_jobs = [
             ForwardSelectionCandidateJob(
@@ -212,7 +230,8 @@ def run_forward_selection(
         else:
             init_forward_selection_candidate_worker(candidate_context)
             candidate_results = [
-                run_forward_selection_candidate(candidate) for candidate in candidate_jobs
+                run_forward_selection_candidate(candidate)
+                for candidate in candidate_jobs
             ]
 
         for result in candidate_results:
@@ -239,6 +258,8 @@ def run_forward_selection(
                     list(result.candidate_names),
                     result.labels,
                     result.init,
+                    result.silhouette_sample_std,
+                    result.silhouette_negative_fraction,
                 )
 
         if local_best is None or local_best_score < best_score + min_improvement:
@@ -246,7 +267,14 @@ def run_forward_selection(
                 logger.info("Stop: no remaining feature improves enough.")
             break
 
-        selected_idx, selected_names, best_labels, best_init = local_best
+        (
+            selected_idx,
+            selected_names,
+            best_labels,
+            best_init,
+            best_sample_std,
+            best_negative_fraction,
+        ) = local_best
         best_score = local_best_score
         remaining.remove(selected_idx)
 
@@ -269,4 +297,6 @@ def run_forward_selection(
         score=best_score,
         best_observed_score=float(best_observed_score),
         init=best_init,
+        silhouette_sample_std=float(best_sample_std),
+        silhouette_negative_fraction=float(best_negative_fraction),
     )
