@@ -424,9 +424,12 @@ manuscript.
 - Representation learning is GPU-dependent. For the air-pollution case study,
   rerun `src/representation_learning/MVDEC_dense.py` if a fresh
   `airpollution_demvk_fused_representation.pkl` artifact is required.
-- Raw Tiki storefront data are not fully released due to data governance
-  considerations. Processed data required for reproducing the reported
-  experiments are included where permitted.
+- Raw Tiki storefront data collected from publicly accessible Tiki pages are
+  included as `data/raw_data/tiki_merged_data_repaired.xlsx`; see
+  `data/raw_data/README.md` for provenance, a known defect, and why the
+  canonical `tiki_preprocessed.csv` remains the source of truth. A 1-to-1
+  shop mapping for cluster interpretation is provided as
+  `data/preprocessed_data/tiki_row_mapping.csv`.
 
 ## Data and Code Availability
 
