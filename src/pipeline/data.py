@@ -62,9 +62,38 @@ def _legacy_concat_width(best_result: dict) -> int | None:
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
+        if path.suffix.lower() in {".csv", ".tsv", ".txt"}:
+            for line in file:
+                digest.update(line.replace(b"\r\n", b"\n"))
+        else:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validate_source_dataset(
+    best_result: dict,
+    data_path: Path,
+    preprocessed_df: pd.DataFrame,
+) -> None:
+    """Validate source columns and ordered content when metadata is available."""
+
+    preprocessing = best_result.get("preprocessing")
+    if not isinstance(preprocessing, dict):
+        return
+
+    source_sha256 = preprocessing.get("source_sha256")
+    if source_sha256 is not None and source_sha256 != _file_sha256(data_path):
+        msg = (
+            "MvDEC source CSV hash does not match the ordered dataset used to "
+            "train the artifact."
+        )
+        raise ValueError(msg)
+
+    feature_columns = preprocessing.get("feature_columns")
+    if feature_columns is not None and feature_columns != list(preprocessed_df.columns):
+        msg = "MvDEC source feature columns do not match the training dataset."
+        raise ValueError(msg)
 
 
 def _validate_airpollution_preprocessing(
@@ -174,14 +203,6 @@ def _validate_airpollution_preprocessing(
     if preprocessing.get("feature_columns") != columns:
         msg = "Air Pollution scaler feature columns do not match the source CSV."
         raise ValueError(msg)
-    source_sha256 = preprocessing.get("source_sha256")
-    if source_sha256 != _file_sha256(data_path):
-        msg = (
-            "Air Pollution source CSV hash does not match the file used to train "
-            "the MvDEC artifact."
-        )
-        raise ValueError(msg)
-
     data_min = np.asarray(preprocessing.get("data_min", []), dtype=float)
     data_max = np.asarray(preprocessing.get("data_max", []), dtype=float)
     if len(data_min) != len(columns) or len(data_max) != len(columns):
@@ -338,6 +359,7 @@ def load_mvdec_result(
         )
         raise ValueError(msg)
 
+    _validate_source_dataset(best_result, data_path, preprocessed_df)
     _validate_airpollution_preprocessing(best_result, data_path, preprocessed_df)
 
     h_fused_df = pd.DataFrame(

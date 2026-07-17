@@ -6,10 +6,12 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from loguru import logger
 
 from config import PREPROCESSED_DATA_PATH
 from pipeline.data import load_mvdec_result, load_preprocessed_dataset
+from pipeline.interpretation import attach_row_mapping, build_cluster_profiles
 from pipeline.reclustering import (
     artifact_kmeans_config,
     build_assignment_frame,
@@ -46,6 +48,16 @@ def parse_args() -> argparse.Namespace:
         help="Destination CSV for features, embeddings, and cluster assignments.",
     )
     parser.add_argument(
+        "--mapping-path",
+        type=Path,
+        help="Optional row mapping CSV keyed by csv_row_index.",
+    )
+    parser.add_argument(
+        "--profile-output",
+        type=Path,
+        help="Optional destination for raw numeric cluster profiles.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite the output CSV if it already exists.",
@@ -57,8 +69,15 @@ def main() -> None:
     """Recluster the fused representation, report agreement, and export rows."""
 
     args = parse_args()
-    if args.output.exists() and not args.force:
-        msg = f"Output already exists: {args.output}. Use --force to overwrite it."
+    output_paths = [args.output]
+    if args.profile_output is not None:
+        if args.mapping_path is None:
+            msg = "--profile-output requires --mapping-path."
+            raise ValueError(msg)
+        output_paths.append(args.profile_output)
+    existing = [path for path in output_paths if path.exists()]
+    if existing and not args.force:
+        msg = f"Output already exists: {existing}. Use --force to overwrite it."
         raise FileExistsError(msg)
 
     mvdec = load_mvdec_result(
@@ -73,7 +92,25 @@ def main() -> None:
         mvdec.h_fused_df,
         mvdec.labels,
         result,
+        h_view1=mvdec.h_view1,
+        h_view2=mvdec.h_view2,
     )
+
+    if args.mapping_path is not None:
+        mapping = pd.read_csv(args.mapping_path)
+        assignments = attach_row_mapping(assignments, mapping)
+        if args.profile_output is not None:
+            excluded_profile_columns = {"csv_row_index", "merged_row_index"}
+            raw_numeric_columns = [
+                column
+                for column in mapping.select_dtypes(include="number").columns
+                if column not in excluded_profile_columns
+                and mapping[column].notna().any()
+            ]
+            profiles = build_cluster_profiles(assignments, raw_numeric_columns)
+            args.profile_output.parent.mkdir(parents=True, exist_ok=True)
+            profiles.to_csv(args.profile_output, index=False)
+            logger.info("Saved cluster profile CSV to {}", args.profile_output)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     assignments.to_csv(args.output, index=False)

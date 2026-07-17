@@ -9,6 +9,13 @@ from config import H_FUSED_COLUMNS
 from pipeline.data import load_mvdec_result
 
 
+def _normalized_file_sha256(path) -> str:
+    """Return the source hash contract used by MvDEC CSV artifacts."""
+
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(content).hexdigest()
+
+
 def _write_mvdec_inputs(tmp_path, n_rows=4):
     data_path = tmp_path / "tiki_preprocessed.csv"
     result_path = tmp_path / "fused_representation.pkl"
@@ -132,6 +139,57 @@ def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
+def test_load_mvdec_result_validates_tiki_source_order_across_line_endings(
+    tmp_path,
+):
+    """Tiki artifacts reject reordered rows but accept CRLF checkout changes."""
+
+    data_path = tmp_path / "tiki.csv"
+    result_path = tmp_path / "tiki.pkl"
+    source_df = pd.DataFrame(
+        {
+            "followers": [0.0, 0.1, 5.0, 5.1],
+            "revenue": [0.0, 0.2, 5.0, 5.2],
+        }
+    )
+    source_df.to_csv(data_path, index=False, lineterminator="\n")
+    source_sha256 = _normalized_file_sha256(data_path)
+    data_path.write_bytes(data_path.read_bytes().replace(b"\n", b"\r\n"))
+    h_view1 = source_df.to_numpy(dtype=np.float32)
+    h_view2 = h_view1 + 0.2
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "dataset": "TIKI",
+                "fusion_contract": "mvdec2025_encoder_average",
+                "view_output_layout": "eq5_compatible_2_plus_2",
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": np.array([0, 0, 1, 1]),
+                "fusion_dim": 2,
+                "view1_latent_dim": 2,
+                "preprocessing": {
+                    "method": "none",
+                    "feature_columns": list(source_df.columns),
+                    "source_sha256": source_sha256,
+                },
+                "init": "k-means",
+                "score": 0.9,
+                "iteration": 3,
+            },
+            file,
+        )
+
+    result = load_mvdec_result(result_path=result_path, data_path=data_path)
+
+    assert result.h_fused.shape == (4, 2)
+
+    source_df.iloc[::-1].to_csv(data_path, index=False, lineterminator="\n")
+    with pytest.raises(ValueError, match="source CSV hash"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
 def test_load_mvdec_result_rejects_legacy_full_view_average(tmp_path):
     data_path = tmp_path / "airpollution.csv"
     result_path = tmp_path / "legacy_mvdec2025.pkl"
@@ -190,7 +248,7 @@ def test_load_mvdec_result_validates_airpollution_minmax_metadata(
         }
     )
     source_df.to_csv(data_path, index=False)
-    source_sha256 = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    source_sha256 = _normalized_file_sha256(data_path)
     h_view1 = np.array(
         [[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0]],
         dtype=np.float32,
@@ -288,9 +346,7 @@ def test_load_mvdec_result_rejects_missing_airpollution_eigen_mode(tmp_path):
                     "feature_columns": ["feature"],
                     "data_min": [0.0],
                     "data_max": [3.0],
-                    "source_sha256": hashlib.sha256(
-                        data_path.read_bytes()
-                    ).hexdigest(),
+                    "source_sha256": _normalized_file_sha256(data_path),
                 },
                 "init": "k-means",
                 "score": 0.5,

@@ -94,6 +94,9 @@ uv run python scripts/fetch_public_datasets.py --datasets uci_seeds uci_wine
 
 The preprocessing module converts raw Tiki seller data into the standardized
 continuous feature matrix used by the representation-learning stage.
+It removes rows with invalid join years while preserving their original row
+indices, then applies the canonical DBSCAN parameters (`eps=1.5`,
+`min_samples=14`).
 
 ```bash
 uv run python -m data_preprocessing.cli \
@@ -106,6 +109,23 @@ The repository already includes the processed dataset used in the experiments:
 ```text
 data/preprocessed_data/tiki_preprocessed.csv
 ```
+
+To reproduce the saved MvDEC assignments and export interpretation-ready shop
+rows plus raw numeric cluster profiles, run:
+
+```bash
+uv run python scripts/recluster_mvdec.py \
+  --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl \
+  --data-path data/preprocessed_data/tiki_preprocessed.csv \
+  --mapping-path data/preprocessed_data/tiki_row_mapping.csv \
+  --output output/tiki_cluster_interpretation.csv \
+  --profile-output output/tiki_cluster_profiles.csv \
+  --force
+```
+
+The loader validates the ordered source CSV fingerprint recorded by the MvDEC
+artifact. CSV line-ending differences between Linux and Windows do not change
+the fingerprint, but row reordering or value changes are rejected.
 
 ### 2. Representation Learning
 
@@ -425,10 +445,10 @@ manuscript.
   rerun `src/representation_learning/MVDEC_dense.py` if a fresh
   `airpollution_demvk_fused_representation.pkl` artifact is required.
 - Raw Tiki storefront data collected from publicly accessible Tiki pages are
-  included as `data/raw_data/tiki_merged_data_repaired.xlsx`; see
-  `data/raw_data/README.md` for provenance, a known defect, and why the
-  canonical `tiki_preprocessed.csv` remains the source of truth. A 1-to-1
-  shop mapping for cluster interpretation is provided as
+  included as `data/raw_data/tiki_raw_data.xlsx`. The preprocessing pipeline
+  excludes the recovered workbook's invalid `Year Joined = 0` row and
+  reproduces the canonical `tiki_preprocessed.csv`. A 1-to-1 shop mapping for
+  cluster interpretation is provided as
   `data/preprocessed_data/tiki_row_mapping.csv`.
 
 ## Data and Code Availability

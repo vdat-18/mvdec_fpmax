@@ -246,10 +246,15 @@ def is_refinement_epoch_end(training_step, batches_per_epoch):
 
 
 def _file_sha256(path):
+    path = Path(path)
     digest = hashlib.sha256()
-    with Path(path).open('rb') as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b''):
-            digest.update(chunk)
+    with path.open('rb') as file:
+        if path.suffix.lower() in {'.csv', '.tsv', '.txt'}:
+            for line in file:
+                digest.update(line.replace(b'\r\n', b'\n'))
+        else:
+            for chunk in iter(lambda: file.read(1024 * 1024), b''):
+                digest.update(chunk)
     return digest.hexdigest()
 
 

@@ -9,6 +9,7 @@ from config import DATA_DIR, PREPROCESSED_DATA_DIR
 from data_preprocessing.features import (
     add_wilson_features,
     add_years_joined,
+    filter_valid_year_joined_rows,
     rename_to_model_features,
     select_preprocessing_features,
 )
@@ -22,6 +23,7 @@ from data_preprocessing.transforms import (
 
 DEFAULT_RAW_DATA_PATH = DATA_DIR / "raw_data" / "tiki_raw_data.xlsx"
 DEFAULT_OUTPUT_PATH = PREPROCESSED_DATA_DIR / "tiki_preprocessed.csv"
+DEFAULT_DBSCAN_EPS = 1.5
 
 
 @dataclass(frozen=True)
@@ -40,12 +42,16 @@ class PreprocessingResult:
 def preprocess_tiki_dataframe(
     raw_df: pd.DataFrame,
     reference_year: int = 2026,
-    dbscan_eps: float = 1.05,
+    dbscan_eps: float = DEFAULT_DBSCAN_EPS,
     dbscan_min_samples: int = 14,
 ) -> PreprocessingResult:
     """Run the notebook preprocessing steps on an in-memory dataframe."""
 
-    with_years = add_years_joined(raw_df, reference_year=reference_year)
+    cleaned_raw_df = filter_valid_year_joined_rows(
+        raw_df,
+        reference_year=reference_year,
+    )
+    with_years = add_years_joined(cleaned_raw_df, reference_year=reference_year)
     engineered_df = add_wilson_features(with_years)
     selected_features_df = select_preprocessing_features(engineered_df)
     scaled_df = standardize_features(selected_features_df)
@@ -73,7 +79,7 @@ def preprocess_tiki_data(
     input_path: Path = DEFAULT_RAW_DATA_PATH,
     output_path: Path = DEFAULT_OUTPUT_PATH,
     reference_year: int = 2026,
-    dbscan_eps: float = 1.05,
+    dbscan_eps: float = DEFAULT_DBSCAN_EPS,
     dbscan_min_samples: int = 14,
 ) -> PreprocessingResult:
     """Read raw Tiki data, preprocess it, and save the final dataset."""

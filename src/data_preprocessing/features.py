@@ -63,12 +63,29 @@ def wilson_review_share_score(
 
     if pd.isna(positive_count) or pd.isna(total_count) or total_count <= 0:
         return 0.0
+    if positive_count < 0 or positive_count > total_count:
+        return float("nan")
 
     p_hat = positive_count / total_count
     denominator = 1 + z**2 / total_count
     center = p_hat + z**2 / (2 * total_count)
     margin = z * np.sqrt((p_hat * (1 - p_hat) + z**2 / (4 * total_count)) / total_count)
     return float((center - margin) / denominator)
+
+
+def filter_valid_year_joined_rows(
+    df: pd.DataFrame, reference_year: int = 2026
+) -> pd.DataFrame:
+    """Keep rows whose join year is positive and not in the future."""
+
+    require_columns(df, ["Year Joined"])
+    years = df["Year Joined"]
+    if not pd.api.types.is_numeric_dtype(years):
+        msg = "Year Joined must be numeric."
+        raise ValueError(msg)
+
+    valid_mask = years.notna() & years.gt(0) & years.le(reference_year)
+    return df.loc[valid_mask].copy()
 
 
 def add_years_joined(df: pd.DataFrame, reference_year: int = 2026) -> pd.DataFrame:

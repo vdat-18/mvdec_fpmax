@@ -168,6 +168,9 @@ def build_assignment_frame(
     h_fused_df: pd.DataFrame,
     artifact_labels: np.ndarray,
     result: ReclusteringResult,
+    *,
+    h_view1: np.ndarray | None = None,
+    h_view2: np.ndarray | None = None,
 ) -> pd.DataFrame:
     """Combine source features, fused features, and comparable cluster labels."""
 
@@ -176,9 +179,28 @@ def build_assignment_frame(
     if any(len(values) != row_count for values in arrays):
         msg = "Source, embedding, and cluster assignment row counts must match."
         raise ValueError(msg)
+    if (h_view1 is None) != (h_view2 is None):
+        msg = "View embeddings must either both be provided or both be omitted."
+        raise ValueError(msg)
+    if h_view1 is not None and (len(h_view1) != row_count or len(h_view2) != row_count):
+        msg = "View embedding row counts must match the source dataset."
+        raise ValueError(msg)
 
     feature_frame = source_df.reset_index(drop=True).copy()
     feature_frame.insert(0, "original_index", source_df.index.to_numpy())
+    embedding_frames = [h_fused_df.reset_index(drop=True)]
+    if h_view1 is not None and h_view2 is not None:
+        embedding_frames = [
+            pd.DataFrame(
+                h_view1,
+                columns=[f"view1_{index}" for index in range(1, h_view1.shape[1] + 1)],
+            ),
+            pd.DataFrame(
+                h_view2,
+                columns=[f"view2_{index}" for index in range(1, h_view2.shape[1] + 1)],
+            ),
+            *embedding_frames,
+        ]
     label_frame = pd.DataFrame(
         {
             "artifact_cluster": np.asarray(artifact_labels, dtype=int),
@@ -190,7 +212,7 @@ def build_assignment_frame(
         }
     )
     return pd.concat(
-        [feature_frame, h_fused_df.reset_index(drop=True), label_frame],
+        [feature_frame, *embedding_frames, label_frame],
         axis=1,
     )
 

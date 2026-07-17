@@ -6,6 +6,7 @@ from pathlib import Path
 from loguru import logger
 
 from data_preprocessing.pipeline import (
+    DEFAULT_DBSCAN_EPS,
     DEFAULT_OUTPUT_PATH,
     DEFAULT_RAW_DATA_PATH,
     preprocess_tiki_data,
@@ -37,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dbscan-eps",
         type=float,
-        default=1.05,
-        help="DBSCAN eps parameter from the legacy notebook.",
+        default=DEFAULT_DBSCAN_EPS,
+        help="DBSCAN eps parameter used by the canonical Tiki dataset.",
     )
     parser.add_argument(
         "--dbscan-min-samples",
@@ -66,6 +67,10 @@ def main() -> None:
         raise SystemExit(1) from error
 
     logger.info("Raw shape: {}", result.raw_df.shape)
+    logger.info(
+        "Excluded invalid raw rows: {}",
+        len(result.raw_df) - len(result.selected_features_df),
+    )
     logger.info("Selected feature shape: {}", result.selected_features_df.shape)
     logger.info("DBSCAN clusters: {}", result.dbscan.clusters_info)
     logger.info("Saved preprocessed data: {}", args.output)
