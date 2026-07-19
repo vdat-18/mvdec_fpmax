@@ -33,7 +33,9 @@ view1_filters = [500, 500, 2000]
 view2_base_units = 64
 pretrain_epochs = 200
 batch_size = 256
-assignment_change_tolerance = 0.01
+UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE = 0.01
+PUBLIC_ASSIGNMENT_CHANGE_TOLERANCE = 0.001
+assignment_change_tolerance = UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE
 # DEKM 2021 (Fig. 4) shows pulling every embedding dimension toward the
 # centroids underperforms the greedy single-direction pull, so the L2 K-means
 # term defaults to 0; the literal MvDEC 2025 Eq. 11 stays available via
@@ -79,6 +81,23 @@ UNLABELED_DATASETS = {
         'scaling_method': 'none',
     },
 }
+
+
+def resolve_assignment_change_tolerance(dataset_name, override=None):
+    """Return an explicit valid tolerance for one dataset protocol."""
+
+    if override is None:
+        return (
+            UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE
+            if dataset_name in UNLABELED_DATASETS
+            else PUBLIC_ASSIGNMENT_CHANGE_TOLERANCE
+        )
+    tolerance = float(override)
+    if not 0 < tolerance < 1:
+        raise ValueError(
+            '--assignment-change-tolerance must be strictly between 0 and 1.'
+        )
+    return tolerance
 
 
 def view_output_width():
@@ -1217,6 +1236,15 @@ if __name__ == '__main__':
         help='Safety cap for full-epoch refinement cycles.',
     )
     parser.add_argument(
+        '--assignment-change-tolerance',
+        type=float,
+        default=None,
+        help=(
+            'Assignment-change stopping fraction. Defaults to 0.01 for '
+            'unlabeled case studies and 0.001 for public DEKM benchmarks.'
+        ),
+    )
+    parser.add_argument(
         '--greedy-eigen-direction',
         choices=GREEDY_EIGEN_DIRECTIONS,
         default=DEFAULT_GREEDY_EIGEN_DIRECTION,
@@ -1284,7 +1312,10 @@ if __name__ == '__main__':
     pretrain_epochs = 200
     pretrain_batch_size = 256
     batch_size = 256
-    assignment_change_tolerance = 0.01
+    assignment_change_tolerance = resolve_assignment_change_tolerance(
+        ds_name,
+        args.assignment_change_tolerance,
+    )
     if (
         ds_name in UNLABELED_DATASETS
         and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH

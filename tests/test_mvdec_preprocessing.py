@@ -89,6 +89,14 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
     assert mvdec.UNLABELED_DATASETS["TIKI"]["scaling_method"] == "none"
     assert mvdec.KMEANS_N_INIT == 100
     assert mvdec.assignment_change_tolerance == 0.01
+    assert mvdec.resolve_assignment_change_tolerance("AIRPOLLUTION") == 0.01
+    assert mvdec.resolve_assignment_change_tolerance("TIKI") == 0.01
+    assert mvdec.resolve_assignment_change_tolerance("REUTERS") == 0.001
+    assert mvdec.resolve_assignment_change_tolerance("20NEWS") == 0.001
+    assert mvdec.resolve_assignment_change_tolerance("RCV1") == 0.001
+    assert mvdec.resolve_assignment_change_tolerance("REUTERS", 0.005) == 0.005
+    with pytest.raises(ValueError, match="strictly between 0 and 1"):
+        mvdec.resolve_assignment_change_tolerance("REUTERS", 0.0)
 
     kmeans = mvdec.make_kmeans(random_seed=42)
     assert kmeans.n_init == 100

@@ -288,7 +288,10 @@ or `stop_reason=max_epochs_reached` when the safety cap is exhausted. The
 artifact stores the stop reason and completed refinement epoch count.
 
 Refinement stops when no more than 1% of samples change their K-Means assignment
-between consecutive epochs (`assignment_change_tolerance=0.01`).
+for the unlabeled Air Pollution/Tiki case studies
+(`assignment_change_tolerance=0.01`). Public REUTERS/20NEWS/RCV1 benchmarks use
+the DEKM 2021 stopping protocol of 0.1% (`assignment_change_tolerance=0.001`).
+Use `--assignment-change-tolerance` only for an explicitly documented ablation.
 
 ### 3. FP-Max and Clustering Experiments
 
