@@ -4,12 +4,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import OUTPUT_DIR, RANDOM_STATE
+from config import KPROTOTYPES_N_INIT, OUTPUT_DIR, RANDOM_STATE
 from pipeline.clustering import MIXED_DISTANCE_CONTRACT
 from pipeline.data import file_sha256
 
 MANIFEST_FILENAME = "mvdec_experiment_manifest.json"
-MANIFEST_SCHEMA_VERSION = 3
+MANIFEST_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,7 @@ def _manifest_payload(
         "data_sha256": file_sha256(data_path),
         "representation_sha256": file_sha256(representation_path),
         "n_clusters": n_clusters,
+        "kprototypes_n_init": KPROTOTYPES_N_INIT,
         "random_state": RANDOM_STATE,
         "distance_contract": MIXED_DISTANCE_CONTRACT,
     }

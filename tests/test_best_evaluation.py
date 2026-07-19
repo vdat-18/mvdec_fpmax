@@ -65,9 +65,11 @@ def test_evaluate_fixed_configuration_outputs_both_distance_contracts() -> None:
         backend="kprototypes",
         h_fused_df=h_fused_df,
         binary_df=binary_df,
+        mvdec_labels=pd.Series([0, 1, 0, 1, 0, 1]).to_numpy(),
         configuration=_configuration(),
         n_clusters=2,
         seeds=(11, 12),
+        true_labels=pd.Series([0, 0, 0, 1, 1, 1]).to_numpy(),
     )
 
     assert len(runs) == 4
@@ -79,11 +81,24 @@ def test_evaluate_fixed_configuration_outputs_both_distance_contracts() -> None:
     assert set(runs["random_seed"]) == {11, 12}
     assert set(runs["source_job_index"]) == {7}
     assert set(runs["selected_features"]) == {"pattern"}
+    assert (runs["silhouette_delta_vs_mvdec"] > 0).all()
+    assert (runs["acc"] > runs["mvdec_reference_acc"]).all()
+    assert (runs["nmi"] > runs["mvdec_reference_nmi"]).all()
+    assert (
+        runs["silhouette_delta_vs_mvdec"]
+        == runs["silhouette_score"] - runs["mvdec_reference_silhouette_score"]
+    ).all()
 
     summary = aggregate_seed_evaluation(runs)
     assert set(summary["successful_runs"]) == {2}
     assert set(summary["failed_runs"]) == {0}
     assert set(summary["source_job_index"]) == {7}
+    assert (
+        summary["silhouette_delta_vs_mvdec_mean"]
+        == summary["silhouette_mean"] - summary["mvdec_reference_silhouette_score"]
+    ).all()
+    assert (summary["acc_delta_vs_mvdec_mean"] > 0).all()
+    assert (summary["nmi_delta_vs_mvdec_mean"] > 0).all()
 
 
 def test_export_seed_interpretation_joins_mapping_and_profiles(tmp_path) -> None:

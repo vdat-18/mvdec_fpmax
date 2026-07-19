@@ -10,11 +10,13 @@ from sklearn.metrics import silhouette_samples
 import pipeline.clustering as clustering
 import pipeline.experiments as experiments
 import pipeline.forward_selection as forward_selection
+from config import KPROTOTYPES_N_INIT
 from pipeline.clustering import (
     compute_mixed_gower_distance,
     compute_silhouette_diagnostics,
     compute_symmetric_mixed_gower_distance,
     compute_view_weighted_gower_distance,
+    run_kprototypes,
 )
 from pipeline.experiments import serialize_cluster_assignments
 
@@ -94,6 +96,57 @@ def test_cluster_assignments_preserve_preprocessed_row_order() -> None:
     """Serialized labels must round-trip without changing row order."""
 
     assert serialize_cluster_assignments(np.array([2, 0, 1])) == "[2,0,1]"
+
+
+def test_kprototypes_n_init_is_explicit(monkeypatch) -> None:
+    """Clustering must not depend on the kmodes library default for n_init."""
+
+    captured: list[dict[str, object]] = []
+
+    class FakeKPrototypes:
+        def __init__(self, **kwargs) -> None:
+            captured.append(kwargs)
+
+        def fit_predict(self, matrix, categorical):
+            del matrix, categorical
+            return np.array([0, 0, 0, 1, 1, 1])
+
+    monkeypatch.setattr(clustering, "KPrototypes", FakeKPrototypes)
+    run_kprototypes(
+        continuous_df=pd.DataFrame({"x": [0.0, 0.1, 0.2, 4.8, 4.9, 5.0]}),
+        binary_df=pd.DataFrame({"pattern": [1, 1, 1, 0, 0, 0]}),
+        n_clusters=2,
+        init_methods=("cao",),
+        verbose=False,
+    )
+
+    assert captured[0]["n_init"] == KPROTOTYPES_N_INIT
+
+
+def test_forward_selection_kprototypes_n_init_is_explicit(monkeypatch) -> None:
+    """Every FFS candidate must use the project K-Prototypes n_init value."""
+
+    captured: list[dict[str, object]] = []
+
+    class FakeKPrototypes:
+        def __init__(self, **kwargs) -> None:
+            captured.append(kwargs)
+
+        def fit_predict(self, matrix, categorical):
+            del matrix, categorical
+            return np.array([0, 0, 0, 1, 1, 1])
+
+    monkeypatch.setattr(forward_selection, "KPrototypes", FakeKPrototypes)
+    forward_selection.run_forward_selection(
+        continuous_df=pd.DataFrame({"x": [0.0, 0.1, 0.2, 4.8, 4.9, 5.0]}),
+        binary_df=pd.DataFrame({"pattern": [1, 1, 1, 0, 0, 0]}),
+        n_clusters=2,
+        baseline_score=-1.0,
+        init_methods=("cao",),
+        verbose=False,
+    )
+
+    assert captured[0]["n_init"] == KPROTOTYPES_N_INIT
 
 
 def test_cluster_count_and_baseline_are_required_at_low_level_apis() -> None:

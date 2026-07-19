@@ -3,6 +3,7 @@
 from pathlib import Path
 
 RANDOM_STATE = 42
+KPROTOTYPES_N_INIT = 10
 H_FUSED_COLUMNS = [f"fused_{index}" for index in range(1, 12)]
 
 SRC_DIR = Path(__file__).resolve().parent
@@ -10,6 +11,8 @@ PROJECT_DIR = SRC_DIR.parent
 DATA_DIR = PROJECT_DIR / "data"
 PREPROCESSED_DATA_DIR = DATA_DIR / "preprocessed_data"
 OUTPUT_DIR = PROJECT_DIR / "output"
+DEKM_DATASET_DIR = PROJECT_DIR / "external_repos" / "DEKM" / "datasets"
+PUBLIC_BENCHMARK_OUTPUT_DIR = OUTPUT_DIR / "public_benchmark"
 
 PREPROCESSED_DATA_PATH = PREPROCESSED_DATA_DIR / "tiki_preprocessed.csv"
 FUSED_REPRESENTATION_PATH = (
@@ -23,9 +26,7 @@ WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH = (
 WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH = (
     OUTPUT_DIR / "without_ffs_intuitive_view_weighted_native_results.csv"
 )
-FFS_INTUITIVE_NATIVE_RESULTS_PATH = (
-    OUTPUT_DIR / "ffs_intuitive_native_results.csv"
-)
+FFS_INTUITIVE_NATIVE_RESULTS_PATH = OUTPUT_DIR / "ffs_intuitive_native_results.csv"
 FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH = (
     OUTPUT_DIR / "ffs_intuitive_view_weighted_native_results.csv"
 )

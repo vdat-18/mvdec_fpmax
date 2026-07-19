@@ -50,6 +50,11 @@ class MvdecResult:
     evaluation_score: float
     evaluation_sample_std: float
     evaluation_negative_fraction: float
+    true_labels: np.ndarray | None
+    row_indices: np.ndarray | None
+    acc: float | None
+    nmi: float | None
+    source_sha256: str | None
 
 
 def _legacy_concat_width(best_result: dict) -> int | None:
@@ -347,6 +352,28 @@ def load_mvdec_result(
         )
         raise ValueError(msg)
 
+    true_labels = (
+        np.asarray(best_result["true_labels"])
+        if best_result.get("true_labels") is not None
+        else None
+    )
+    if true_labels is not None and (
+        true_labels.ndim != 1 or len(true_labels) != len(labels)
+    ):
+        msg = "MvDEC true_labels must be one-dimensional and match artifact rows."
+        raise ValueError(msg)
+    row_indices = (
+        np.asarray(best_result["row_indices"], dtype=int)
+        if best_result.get("row_indices") is not None
+        else None
+    )
+    if row_indices is not None and not np.array_equal(
+        row_indices,
+        np.arange(len(labels)),
+    ):
+        msg = "MvDEC row_indices must use canonical order 0..n_samples - 1."
+        raise ValueError(msg)
+
     preprocessed_df = pd.read_csv(data_path)
     preprocessed_rows = len(preprocessed_df)
     if preprocessed_rows != h_fused.shape[0]:
@@ -399,4 +426,9 @@ def load_mvdec_result(
         evaluation_score=evaluation_score,
         evaluation_sample_std=evaluation_sample_std,
         evaluation_negative_fraction=evaluation_negative_fraction,
+        true_labels=true_labels,
+        row_indices=row_indices,
+        acc=(float(best_result["acc"]) if best_result.get("acc") is not None else None),
+        nmi=(float(best_result["nmi"]) if best_result.get("nmi") is not None else None),
+        source_sha256=best_result.get("source_sha256"),
     )

@@ -12,7 +12,7 @@ from kmodes.kprototypes import KPrototypes
 from loguru import logger
 from sklearn.metrics import silhouette_samples, silhouette_score
 
-from config import RANDOM_STATE
+from config import KPROTOTYPES_N_INIT, RANDOM_STATE
 from intuitive_kprototypes import IntuitiveKPrototypes
 
 DEFAULT_INIT_METHODS = ("huang", "cao")
@@ -267,6 +267,7 @@ def run_kprototypes(
         model = KPrototypes(
             n_clusters=n_clusters,
             init=init,
+            n_init=KPROTOTYPES_N_INIT,
             random_state=random_state,
             verbose=0,
         )

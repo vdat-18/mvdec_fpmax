@@ -49,9 +49,10 @@ def test_experiment_context_writes_and_reuses_matching_manifest(tmp_path) -> Non
     manifest = json.loads((output_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert first == second
     assert first.n_clusters == 5
-    assert manifest["schema_version"] == 3
+    assert manifest["schema_version"] == 4
     assert manifest["dataset"] == "TIKI"
     assert manifest["n_clusters"] == 5
+    assert manifest["kprototypes_n_init"] == 10
     assert manifest["distance_contract"] == "gower_numeric_asymmetric_binary_v1"
 
 

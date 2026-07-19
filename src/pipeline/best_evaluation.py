@@ -26,6 +26,7 @@ from pipeline.experiments import (
     resolve_rebuilt_feature_names,
     serialize_cluster_assignments,
 )
+from pipeline.external_metrics import compute_external_metrics
 from pipeline.fpmax import BIN_LABELS_BY_SIZE, extract_fpmax_features
 from pipeline.interpretation import attach_row_mapping, build_cluster_profiles
 from pipeline.io import replace_with_retry
@@ -232,9 +233,11 @@ def evaluate_fixed_configuration(
     backend: str,
     h_fused_df: pd.DataFrame,
     binary_df: pd.DataFrame,
+    mvdec_labels: np.ndarray,
     configuration: SelectedConfiguration,
     n_clusters: int,
     seeds: tuple[int, ...],
+    true_labels: np.ndarray | None = None,
     init_strategy: str = "farthest_first",
     strict_init: bool = False,
 ) -> pd.DataFrame:
@@ -254,6 +257,53 @@ def evaluate_fixed_configuration(
             binary_df,
         ),
     }
+    mvdec_labels = np.asarray(mvdec_labels, dtype=int)
+    if mvdec_labels.ndim != 1 or len(mvdec_labels) != len(h_fused_df):
+        msg = "MvDEC reference labels must match the selected representation rows."
+        raise ValueError(msg)
+    if set(np.unique(mvdec_labels)) != set(range(n_clusters)):
+        msg = "MvDEC reference labels must use every cluster ID from 0 to K - 1."
+        raise ValueError(msg)
+    mvdec_sizes = np.bincount(mvdec_labels, minlength=n_clusters).tolist()
+    if any(size == 1 for size in mvdec_sizes):
+        msg = "MvDEC reference labels must contain all clusters without singletons."
+        raise ValueError(msg)
+    true_labels_array = None
+    reference_external = {
+        "mvdec_reference_acc": np.nan,
+        "mvdec_reference_nmi": np.nan,
+    }
+    if true_labels is not None:
+        true_labels_array = np.asarray(true_labels)
+        if true_labels_array.ndim != 1 or len(true_labels_array) != len(h_fused_df):
+            msg = "True labels must match the selected representation rows."
+            raise ValueError(msg)
+        reference_metrics = compute_external_metrics(
+            true_labels_array,
+            mvdec_labels,
+            n_clusters=n_clusters,
+        )
+        reference_external = {
+            "mvdec_reference_acc": reference_metrics.acc,
+            "mvdec_reference_nmi": reference_metrics.nmi,
+        }
+    mvdec_assignments = serialize_cluster_assignments(mvdec_labels)
+    reference_by_contract: dict[str, dict[str, object]] = {}
+    for contract, distance_matrix in distance_matrices.items():
+        reference_score, reference_std, reference_negative = (
+            compute_silhouette_diagnostics(distance_matrix, mvdec_labels)
+        )
+        reference_by_contract[contract] = {
+            **reference_external,
+            "mvdec_reference_silhouette_score": reference_score,
+            "mvdec_reference_sample_std": reference_std,
+            "mvdec_reference_negative_fraction": reference_negative,
+            "mvdec_reference_cluster_sizes": json.dumps(
+                mvdec_sizes,
+                separators=(",", ":"),
+            ),
+            "mvdec_reference_cluster_assignments": mvdec_assignments,
+        }
     configuration_metadata = _configuration_metadata(configuration)
     records: list[dict[str, object]] = []
     for seed in seeds:
@@ -276,9 +326,15 @@ def evaluate_fixed_configuration(
                         "random_seed": seed,
                         "backend": backend,
                         "distance_contract": contract,
+                        **reference_by_contract[contract],
                         "silhouette_score": np.nan,
+                        "silhouette_delta_vs_mvdec": np.nan,
                         "silhouette_sample_std": np.nan,
                         "silhouette_negative_fraction": np.nan,
+                        "acc": np.nan,
+                        "nmi": np.nan,
+                        "acc_delta_vs_mvdec": np.nan,
+                        "nmi_delta_vs_mvdec": np.nan,
                         "cluster_sizes": "[]",
                         "cluster_assignments": "",
                         "status": "failed_value_error",
@@ -297,9 +353,15 @@ def evaluate_fixed_configuration(
                         "random_seed": seed,
                         "backend": backend,
                         "distance_contract": contract,
+                        **reference_by_contract[contract],
                         "silhouette_score": np.nan,
+                        "silhouette_delta_vs_mvdec": np.nan,
                         "silhouette_sample_std": np.nan,
                         "silhouette_negative_fraction": np.nan,
+                        "acc": np.nan,
+                        "nmi": np.nan,
+                        "acc_delta_vs_mvdec": np.nan,
+                        "nmi_delta_vs_mvdec": np.nan,
                         "cluster_sizes": json.dumps(
                             sizes,
                             separators=(",", ":"),
@@ -314,6 +376,9 @@ def evaluate_fixed_configuration(
             continue
 
         for contract, distance_matrix in distance_matrices.items():
+            reference_score = float(
+                reference_by_contract[contract]["mvdec_reference_silhouette_score"]
+            )
             try:
                 score, sample_std, negative_fraction = compute_silhouette_diagnostics(
                     distance_matrix,
@@ -326,9 +391,15 @@ def evaluate_fixed_configuration(
                         "random_seed": seed,
                         "backend": backend,
                         "distance_contract": contract,
+                        **reference_by_contract[contract],
                         "silhouette_score": np.nan,
+                        "silhouette_delta_vs_mvdec": np.nan,
                         "silhouette_sample_std": np.nan,
                         "silhouette_negative_fraction": np.nan,
+                        "acc": np.nan,
+                        "nmi": np.nan,
+                        "acc_delta_vs_mvdec": np.nan,
+                        "nmi_delta_vs_mvdec": np.nan,
                         "cluster_sizes": json.dumps(
                             sizes,
                             separators=(",", ":"),
@@ -339,15 +410,40 @@ def evaluate_fixed_configuration(
                     }
                 )
                 continue
+            external_fields = {
+                "acc": np.nan,
+                "nmi": np.nan,
+                "acc_delta_vs_mvdec": np.nan,
+                "nmi_delta_vs_mvdec": np.nan,
+            }
+            if true_labels_array is not None:
+                external_metrics = compute_external_metrics(
+                    true_labels_array,
+                    labels,
+                    n_clusters=n_clusters,
+                )
+                external_fields = {
+                    "acc": external_metrics.acc,
+                    "nmi": external_metrics.nmi,
+                    "acc_delta_vs_mvdec": (
+                        external_metrics.acc - reference_external["mvdec_reference_acc"]
+                    ),
+                    "nmi_delta_vs_mvdec": (
+                        external_metrics.nmi - reference_external["mvdec_reference_nmi"]
+                    ),
+                }
             records.append(
                 {
                     **configuration_metadata,
                     "random_seed": seed,
                     "backend": backend,
                     "distance_contract": contract,
+                    **reference_by_contract[contract],
                     "silhouette_score": score,
+                    "silhouette_delta_vs_mvdec": score - reference_score,
                     "silhouette_sample_std": sample_std,
                     "silhouette_negative_fraction": negative_fraction,
+                    **external_fields,
                     "cluster_sizes": json.dumps(sizes, separators=(",", ":")),
                     "cluster_assignments": assignments,
                     "status": "ok",
@@ -362,6 +458,9 @@ def aggregate_seed_evaluation(runs: pd.DataFrame) -> pd.DataFrame:
 
     records: list[dict[str, object]] = []
     metadata_columns = [
+        "dataset",
+        "method",
+        "source_sha256",
         "source_job_index",
         "backend",
         "strategy",
@@ -384,10 +483,36 @@ def aggregate_seed_evaluation(runs: pd.DataFrame) -> pd.DataFrame:
         contract_runs = runs[runs["distance_contract"] == contract]
         successful = contract_runs[contract_runs["status"] == "ok"]
         scores = pd.to_numeric(successful["silhouette_score"], errors="coerce").dropna()
+        deltas = pd.to_numeric(
+            successful["silhouette_delta_vs_mvdec"],
+            errors="coerce",
+        ).dropna()
+        acc_values = pd.to_numeric(successful["acc"], errors="coerce").dropna()
+        nmi_values = pd.to_numeric(successful["nmi"], errors="coerce").dropna()
+        acc_deltas = pd.to_numeric(
+            successful["acc_delta_vs_mvdec"],
+            errors="coerce",
+        ).dropna()
+        nmi_deltas = pd.to_numeric(
+            successful["nmi_delta_vs_mvdec"],
+            errors="coerce",
+        ).dropna()
+        reference_row = contract_runs.iloc[0]
         records.append(
             {
                 **metadata,
                 "distance_contract": contract,
+                "mvdec_reference_silhouette_score": reference_row[
+                    "mvdec_reference_silhouette_score"
+                ],
+                "mvdec_reference_sample_std": reference_row[
+                    "mvdec_reference_sample_std"
+                ],
+                "mvdec_reference_negative_fraction": reference_row[
+                    "mvdec_reference_negative_fraction"
+                ],
+                "mvdec_reference_acc": reference_row["mvdec_reference_acc"],
+                "mvdec_reference_nmi": reference_row["mvdec_reference_nmi"],
                 "requested_runs": len(contract_runs),
                 "successful_runs": len(scores),
                 "failed_runs": len(contract_runs) - len(scores),
@@ -397,6 +522,22 @@ def aggregate_seed_evaluation(runs: pd.DataFrame) -> pd.DataFrame:
                 ),
                 "silhouette_min": scores.min(),
                 "silhouette_max": scores.max(),
+                "silhouette_delta_vs_mvdec_mean": deltas.mean(),
+                "silhouette_delta_vs_mvdec_std": (
+                    deltas.std(ddof=1) if len(deltas) > 1 else 0.0
+                ),
+                "silhouette_delta_vs_mvdec_min": deltas.min(),
+                "silhouette_delta_vs_mvdec_max": deltas.max(),
+                "acc_mean": acc_values.mean(),
+                "acc_std_across_seeds": (
+                    acc_values.std(ddof=1) if len(acc_values) > 1 else 0.0
+                ),
+                "acc_delta_vs_mvdec_mean": acc_deltas.mean(),
+                "nmi_mean": nmi_values.mean(),
+                "nmi_std_across_seeds": (
+                    nmi_values.std(ddof=1) if len(nmi_values) > 1 else 0.0
+                ),
+                "nmi_delta_vs_mvdec_mean": nmi_deltas.mean(),
                 "sample_std_mean": pd.to_numeric(
                     successful["silhouette_sample_std"],
                     errors="coerce",
@@ -568,12 +709,17 @@ def main() -> None:
         backend=args.backend,
         h_fused_df=mvdec.h_fused_df,
         binary_df=binary_df,
+        mvdec_labels=mvdec.labels,
         configuration=configuration,
         n_clusters=artifact_n_clusters(mvdec.raw),
         seeds=seeds,
+        true_labels=mvdec.true_labels,
         init_strategy=args.init_strategy,
         strict_init=args.strict_init,
     )
+    runs.insert(0, "dataset", mvdec.raw.get("dataset"))
+    runs.insert(1, "method", "MiMvDEC")
+    runs.insert(2, "source_sha256", mvdec.source_sha256)
     summary = aggregate_seed_evaluation(runs)
     _write_csv(runs, args.runs_output)
     _write_csv(summary, args.summary_output)

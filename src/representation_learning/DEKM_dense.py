@@ -1,14 +1,27 @@
+import argparse
+import time
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from sklearn.cluster import KMeans
-from tensorflow.keras import layers
-from tensorflow.keras import losses
+from tensorflow.keras import layers, losses
 from tensorflow.keras.models import Model
-from utils import get_ACC_NMI
-from utils import get_xy
-from utils import log_csv
-import time
-import argparse
+from utils import get_ACC_NMI, log_csv
+
+from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
+from pipeline.external_metrics import compute_external_metrics
+from pipeline.public_artifacts import (
+    build_public_artifact,
+    public_assignment_frame,
+    public_run_stem,
+    restore_original_order,
+    write_public_artifact,
+    write_public_assignments,
+    write_public_frame,
+)
+from pipeline.public_data import load_dekm_public_dataset
 
 
 def set_random_seed(seed):
@@ -141,7 +154,7 @@ def train(x, y, random_seed=None):
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
         index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
-    return acc, nmi
+    return acc, nmi, H, assignment
 
 
 if __name__ == '__main__':
@@ -154,6 +167,12 @@ if __name__ == '__main__':
     parser.add_argument('ds_name', default='REUTERS')
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--dataset-root', type=Path, default=DEKM_DATASET_DIR)
+    parser.add_argument(
+        '--output-dir',
+        type=Path,
+        default=PUBLIC_BENCHMARK_OUTPUT_DIR / 'dekm',
+    )
     args = parser.parse_args()
     if args.runs < 1:
         raise ValueError('--runs must be at least 1')
@@ -176,19 +195,76 @@ if __name__ == '__main__':
         n_clusters = 4
         hidden_units = 10
 
+    public_dataset = load_dekm_public_dataset(ds_name, args.dataset_root)
     run_metrics = []
+    run_records = []
     time_all_start = time.time()
     for run_index in range(args.runs):
         run_seed = None if args.seed is None else args.seed + run_index
         set_random_seed(run_seed)
         time_start = time.time()
-        x, y = get_xy(ds_name=ds_name, shuffle_seed=run_seed)
+        row_indices = tf.random.shuffle(
+            np.arange(len(public_dataset.X)), seed=run_seed
+        ).numpy()
+        x = public_dataset.X[row_indices]
+        y = public_dataset.y[row_indices]
         ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(
             8000, seed=run_seed
         ).batch(pretrain_batch_size)
         train_base(ds_xx)
-        acc, nmi = train(x, y, random_seed=run_seed)
+        acc, nmi, embedding, labels = train(x, y, random_seed=run_seed)
+        embedding_ordered = restore_original_order(embedding, row_indices)
+        labels_ordered = restore_original_order(labels, row_indices)
+        metrics = compute_external_metrics(
+            public_dataset.y,
+            labels_ordered,
+            n_clusters=n_clusters,
+        )
+        run_stem = public_run_stem('DEKM', ds_name, run_seed, run_index + 1)
+        run_dir = args.output_dir / ds_name.lower()
+        artifact_path = run_dir / f'{run_stem}.pkl'
+        assignments_path = run_dir / f'{run_stem}_assignments.csv'
+        artifact = build_public_artifact(
+            dataset=ds_name,
+            method='DEKM',
+            n_clusters=n_clusters,
+            random_seed=run_seed,
+            source_sha256=public_dataset.source_sha256,
+            labels=labels_ordered,
+            true_labels=public_dataset.y,
+            metrics=metrics,
+            representation=embedding_ordered,
+            representation_key='embedding',
+        )
+        write_public_artifact(artifact, artifact_path)
+        write_public_assignments(
+            public_assignment_frame(
+                dataset=ds_name,
+                method='DEKM',
+                labels=labels_ordered,
+                true_labels=public_dataset.y,
+                random_seed=run_seed,
+            ),
+            assignments_path,
+        )
         run_metrics.append((acc, nmi))
+        run_records.append(
+            {
+                'dataset': ds_name,
+                'method': 'DEKM',
+                'run': run_index + 1,
+                'random_seed': run_seed,
+                'n_samples': len(public_dataset.X),
+                'n_features': public_dataset.X.shape[1],
+                'n_clusters': n_clusters,
+                'source_sha256': public_dataset.source_sha256,
+                'acc': metrics.acc,
+                'nmi': metrics.nmi,
+                'artifact_path': str(artifact_path),
+                'assignments_path': str(assignments_path),
+                'fit_time_seconds': time.time() - time_start,
+            }
+        )
         run_str = (
             f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
             f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
@@ -205,3 +281,25 @@ if __name__ == '__main__':
     )
     print(avg_str)
     log_csv(avg_str.split(';'), file_name=ds_name)
+    runs_frame = pd.DataFrame.from_records(run_records)
+    summary_frame = pd.DataFrame(
+        [
+            {
+                'dataset': ds_name,
+                'method': 'DEKM',
+                'requested_runs': len(runs_frame),
+                'acc_mean': runs_frame['acc'].mean(),
+                'acc_std': (
+                    runs_frame['acc'].std(ddof=1) if len(runs_frame) > 1 else 0.0
+                ),
+                'nmi_mean': runs_frame['nmi'].mean(),
+                'nmi_std': (
+                    runs_frame['nmi'].std(ddof=1) if len(runs_frame) > 1 else 0.0
+                ),
+                'source_sha256': public_dataset.source_sha256,
+            }
+        ]
+    )
+    output_dataset_dir = args.output_dir / ds_name.lower()
+    write_public_frame(runs_frame, output_dataset_dir / 'dekm_runs.csv')
+    write_public_frame(summary_frame, output_dataset_dir / 'dekm_summary.csv')

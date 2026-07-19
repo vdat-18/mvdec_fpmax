@@ -1,7 +1,5 @@
 import argparse
 import hashlib
-import os
-import pickle
 import time
 from pathlib import Path
 
@@ -13,7 +11,19 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from tensorflow.keras import layers
 from tensorflow.keras.models import Model
-from utils import get_ACC_NMI, get_xy, log_csv
+from utils import log_csv
+
+from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
+from pipeline.external_metrics import compute_external_metrics
+from pipeline.public_artifacts import (
+    PUBLIC_ARTIFACT_SCHEMA_VERSION,
+    public_assignment_frame,
+    public_run_stem,
+    write_public_artifact,
+    write_public_assignments,
+    write_public_frame,
+)
+from pipeline.public_data import load_dekm_public_dataset
 
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
@@ -371,6 +381,9 @@ def save_airpollution_mvdec_artifact(
     stop_reason,
     refinement_epochs_completed,
     preprocessing_metadata,
+    true_labels=None,
+    source_sha256=None,
+    external_metrics=None,
 ):
     greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
@@ -397,9 +410,15 @@ def save_airpollution_mvdec_artifact(
     h_view2 = _restore_original_order(np.asarray(h_view2), orig_idx)
     h_fused = _restore_original_order(np.asarray(h_fused), orig_idx)
     labels = _restore_original_order(np.asarray(labels), orig_idx)
+    true_labels_ordered = (
+        _restore_original_order(np.asarray(true_labels), orig_idx)
+        if true_labels is not None
+        else None
+    )
     view_concat_representation = np.concatenate([h_view1, h_view2], axis=1)
 
     artifact = {
+        'schema_version': PUBLIC_ARTIFACT_SCHEMA_VERSION,
         'algorithm': 'MvDEC',
         'dataset': ds_name,
         'paper': '2025_Multi-view Deep Embedded Clustering',
@@ -411,6 +430,9 @@ def save_airpollution_mvdec_artifact(
         'h_fused': h_fused,
         'view_concat_representation': view_concat_representation,
         'labels': labels,
+        'true_labels': true_labels_ordered,
+        'row_indices': np.arange(len(labels), dtype=int),
+        'source_sha256': source_sha256,
         'init': 'k-means',
         'score': float(score),
         'iteration': int(iteration),
@@ -471,12 +493,11 @@ def save_airpollution_mvdec_artifact(
             'preprocessing': preprocessing_metadata,
         },
     }
+    if external_metrics is not None:
+        artifact['acc'] = float(external_metrics.acc)
+        artifact['nmi'] = float(external_metrics.nmi)
 
-    output_dir = os.path.dirname(artifact_path)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    with open(artifact_path, 'wb') as file:
-        pickle.dump(artifact, file)
+    write_public_artifact(artifact, Path(artifact_path))
     print(f'MvDEC artifact was saved to {artifact_path}')
 
 
@@ -634,8 +655,8 @@ def sorted_eig(X):
 
 def _metric_for_labels(features, labels, y=None):
     if y is not None:
-        acc, nmi = get_ACC_NMI(np.array(y), np.array(labels))
-        return f'acc, nmi = {acc, nmi}', (acc, nmi)
+        metrics = compute_external_metrics(y, labels, n_clusters=n_clusters)
+        return f'acc, nmi = {metrics.acc, metrics.nmi}', (metrics.acc, metrics.nmi)
     silhouette = silhouette_score(features, labels)
     return f'silhouette = {silhouette}', silhouette
 
@@ -730,6 +751,7 @@ def train(
     random_seed=None,
     time_start=None,
     artifact_path=AIRPOLLUTION_ARTIFACT_PATH,
+    source_sha256=None,
 ):
     train_start_time = time.time() if time_start is None else time_start
     greedy_index = greedy_eigen_index(greedy_eigen_direction)
@@ -1074,10 +1096,17 @@ def train(
     )
     assignment = final_assignment
     metric_str, final_metric = _metric_for_labels(H, assignment, y=y)
+    artifact_score = float(silhouette_score(H, assignment))
+    external_metrics = None
     if y is None:
         silhouette = final_metric
     else:
         acc, nmi = final_metric
+        external_metrics = compute_external_metrics(
+            y,
+            assignment,
+            n_clusters=n_clusters,
+        )
     final_phase = (
         'final_recomputed_artifact'
         if y is None and orig_idx is not None
@@ -1110,20 +1139,34 @@ def train(
         file_name=train_log_name,
     )
 
-    if y is None and orig_idx is not None:
-        if not os.path.exists('output'):
-            os.makedirs('output')
+    if orig_idx is not None:
         h_ordered = _restore_original_order(H, orig_idx)
         labels_ordered = _restore_original_order(assignment, orig_idx)
-        result = pd.DataFrame(
-            h_ordered,
-            columns=[f'h_{i}' for i in range(H.shape[1])],
-        )
-        result.insert(0, 'orig_index', np.arange(len(orig_idx)))
-        result['cluster'] = labels_ordered
-        result.to_csv(
-            f'output/{ds_name}_{experiment_tag}_clusters.csv',
-            index=False,
+        artifact_path = Path(artifact_path)
+        if y is None:
+            result = pd.DataFrame(
+                h_ordered,
+                columns=[f'h_{i}' for i in range(H.shape[1])],
+            )
+            result.insert(0, 'orig_index', np.arange(len(orig_idx)))
+            result['cluster'] = labels_ordered
+            assignments_path = Path('output') / (
+                f'{ds_name}_{experiment_tag}_clusters.csv'
+            )
+        else:
+            result = public_assignment_frame(
+                dataset=ds_name,
+                method='MvDEC',
+                labels=labels_ordered,
+                true_labels=_restore_original_order(y, orig_idx),
+                random_seed=random_seed,
+            )
+            assignments_path = artifact_path.with_name(
+                f'{artifact_path.stem}_assignments.csv'
+            )
+        write_public_assignments(
+            result,
+            assignments_path,
         )
         save_airpollution_mvdec_artifact(
             artifact_path=artifact_path,
@@ -1131,7 +1174,7 @@ def train(
             h_view2=h2,
             h_fused=H,
             labels=assignment,
-            score=silhouette,
+            score=artifact_score,
             iteration=refinement_epochs_completed,
             orig_idx=orig_idx,
             feature_columns=feature_columns,
@@ -1143,6 +1186,9 @@ def train(
             stop_reason=stop_reason,
             refinement_epochs_completed=refinement_epochs_completed,
             preprocessing_metadata=preprocessing_metadata,
+            true_labels=y,
+            source_sha256=source_sha256,
+            external_metrics=external_metrics,
         )
 
     if y is not None:
@@ -1158,6 +1204,12 @@ if __name__ == '__main__':
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--artifact-path', default=AIRPOLLUTION_ARTIFACT_PATH)
+    parser.add_argument('--dataset-root', type=Path, default=DEKM_DATASET_DIR)
+    parser.add_argument(
+        '--public-output-dir',
+        type=Path,
+        default=PUBLIC_BENCHMARK_OUTPUT_DIR / 'mvdec',
+    )
     parser.add_argument(
         '--max-refinement-epochs',
         type=int,
@@ -1246,7 +1298,13 @@ if __name__ == '__main__':
             loss_ablation_tag(lambda_kmeans, lambda_greedy),
         )
 
+    public_dataset = (
+        None
+        if ds_name in UNLABELED_DATASETS
+        else load_dekm_public_dataset(ds_name, args.dataset_root)
+    )
     run_metrics = []
+    public_run_records = []
     run_experiment_tag = (
         f'{args.greedy_eigen_direction}_eigen_{args.greedy_target_mode}'
         f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
@@ -1261,6 +1319,8 @@ if __name__ == '__main__':
         feature_columns = None
         raw_x = None
         preprocessing_metadata = None
+        source_sha256 = None
+        run_artifact_path = args.artifact_path
         if ds_name in UNLABELED_DATASETS:
             dataset_config = UNLABELED_DATASETS[ds_name]
             x, orig_idx, feature_columns, source_x, preprocessing_metadata = (
@@ -1275,10 +1335,19 @@ if __name__ == '__main__':
                 raw_x = source_x
             y = None
         else:
-            x, y = get_xy(
-                ds_name=ds_name,
-                dir_path=r'external_repos/DEKM/datasets/',
-                shuffle_seed=run_seed,
+            row_indices = tf.random.shuffle(
+                np.arange(len(public_dataset.X)), seed=run_seed
+            ).numpy()
+            x = public_dataset.X[row_indices]
+            y = public_dataset.y[row_indices]
+            orig_idx = row_indices
+            feature_columns = [
+                f'feature_{index + 1}' for index in range(public_dataset.X.shape[1])
+            ]
+            source_sha256 = public_dataset.source_sha256
+            run_stem = public_run_stem('MvDEC', ds_name, run_seed, run_index + 1)
+            run_artifact_path = (
+                args.public_output_dir / ds_name.lower() / f'{run_stem}.pkl'
             )
         ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(
             8000, seed=run_seed
@@ -1297,7 +1366,8 @@ if __name__ == '__main__':
             max_refinement_epochs=args.max_refinement_epochs,
             random_seed=run_seed,
             time_start=time_start,
-            artifact_path=args.artifact_path,
+            artifact_path=run_artifact_path,
+            source_sha256=source_sha256,
         )
         run_metrics.append(metric)
         if y is None:
@@ -1309,6 +1379,27 @@ if __name__ == '__main__':
             )
         else:
             acc, nmi = metric
+            public_run_records.append(
+                {
+                    'dataset': ds_name,
+                    'method': 'MvDEC',
+                    'run': run_index + 1,
+                    'random_seed': run_seed,
+                    'n_samples': len(public_dataset.X),
+                    'n_features': public_dataset.X.shape[1],
+                    'n_clusters': n_clusters,
+                    'source_sha256': public_dataset.source_sha256,
+                    'acc': acc,
+                    'nmi': nmi,
+                    'artifact_path': str(run_artifact_path),
+                    'assignments_path': str(
+                        run_artifact_path.with_name(
+                            f'{run_artifact_path.stem}_assignments.csv'
+                        )
+                    ),
+                    'fit_time_seconds': time.time() - time_start,
+                }
+            )
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
                 f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
@@ -1344,3 +1435,30 @@ if __name__ == '__main__':
         avg_str.split(';'),
         file_name=run_log_name,
     )
+    if public_run_records:
+        runs_frame = pd.DataFrame.from_records(public_run_records)
+        summary_frame = pd.DataFrame(
+            [
+                {
+                    'dataset': ds_name,
+                    'method': 'MvDEC',
+                    'requested_runs': len(runs_frame),
+                    'acc_mean': runs_frame['acc'].mean(),
+                    'acc_std': (
+                        runs_frame['acc'].std(ddof=1)
+                        if len(runs_frame) > 1
+                        else 0.0
+                    ),
+                    'nmi_mean': runs_frame['nmi'].mean(),
+                    'nmi_std': (
+                        runs_frame['nmi'].std(ddof=1)
+                        if len(runs_frame) > 1
+                        else 0.0
+                    ),
+                    'source_sha256': public_dataset.source_sha256,
+                }
+            ]
+        )
+        output_dataset_dir = args.public_output_dir / ds_name.lower()
+        write_public_frame(runs_frame, output_dataset_dir / 'mvdec_runs.csv')
+        write_public_frame(summary_frame, output_dataset_dir / 'mvdec_summary.csv')

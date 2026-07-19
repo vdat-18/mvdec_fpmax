@@ -182,6 +182,61 @@ path. The literal MvDEC 2025 interpretation remains available with
 names to the artifact filename. Final weights, cluster CSVs, and log files also
 include both modes so experiments do not overwrite each other.
 
+### Public text benchmark from the DEKM release
+
+REUTERS, 20NEWS, and RCV1 use the existing files under
+`external_repos/DEKM/datasets/` as the single source of truth. These commands
+do not read or regenerate `data/public/processed/`. Every saved run records a
+source fingerprint, seed, canonical row index, cluster assignment, ACC, and
+NMI.
+
+Run K-Means with the same explicit seeds used by the deep methods:
+
+```bash
+uv run python scripts/run_public_kmeans_baseline.py \
+  --source dekm-release \
+  --datasets REUTERS 20NEWS RCV1 \
+  --seeds 42 43 44 \
+  --output output/public_benchmark/kmeans/kmeans_baseline.xlsx \
+  --force
+```
+
+Run DEKM and MvDEC once per dataset. `--seed 42 --runs 3` produces seeds
+42, 43, and 44 for both methods:
+
+```bash
+uv run python src/representation_learning/DEKM_dense.py REUTERS \
+  --seed 42 --runs 3 \
+  --dataset-root external_repos/DEKM/datasets \
+  --output-dir output/public_benchmark/dekm
+
+uv run python src/representation_learning/MVDEC_dense.py REUTERS \
+  --seed 42 --runs 3 \
+  --dataset-root external_repos/DEKM/datasets \
+  --public-output-dir output/public_benchmark/mvdec
+```
+
+Replace `REUTERS` with `20NEWS` or `RCV1`. Each MvDEC pickle is directly
+usable by MiMvDEC. Pass its matching `*_assignments.csv` as `--data-path`; the
+CSV is a row manifest, not a regenerated feature dataset:
+
+```bash
+uv run mvdec-fpmax ffs-kprototypes \
+  --representation-path output/public_benchmark/mvdec/reuters/mvdec_reuters_seed_42.pkl \
+  --data-path output/public_benchmark/mvdec/reuters/mvdec_reuters_seed_42_assignments.csv \
+  --output-dir output/public_benchmark/mimvdec/reuters/seed_42
+```
+
+After selecting one fixed without-FFS or FFS configuration by Silhouette, run
+`mvdec-evaluate-best` with the matching seed. For labeled public artifacts its
+outputs additionally include ACC, NMI, and their deltas versus MvDEC. Ground
+truth labels are never used by FP-Max, FFS, or model selection.
+
+The released RCV1 directory contains the paper split indices; matching the
+original DEKM loader also requires a readable local scikit-learn RCV1 cache.
+The loader fails instead of downloading or substituting another dataset when
+that cache is unavailable.
+
 This reads `data/preprocessed_data/data_demvk.csv`, applies column-wise Min-Max
 scaling to `[0, 1]`, and saves:
 
@@ -458,6 +513,30 @@ counted as evidence that two rows are similar. The MvDEC baseline is recomputed
 with numeric Gower on `h_fused`; the artifact's Euclidean Silhouette remains an
 audit value and is not used as the FFS improvement threshold.
 
+### Native numeric-Gower baselines
+
+Evaluate continuous K-Means, DEKM, single-view, and MvDEC baselines in their
+own learned representations with numeric Gower:
+
+```powershell
+uv run mvdec-evaluate-native `
+  --n-clusters 5 `
+  --source "DEKM=output/dekm_seed42.pkl" `
+  --source "Single-view=output/single_view_seed42.pkl" `
+  --source "MvDEC=data/preprocessed_data/tiki_mvdec_fused_representation.pkl" `
+  --runs-output output/tiki_v4/native_baseline_runs.csv `
+  --summary-output output/tiki_v4/native_baseline_summary.csv
+```
+
+Pickle sources must be trusted local dictionaries containing `h_fused` and
+`labels`; append `#KEY` to select another continuous representation key when
+the matching labels are stored in the same artifact. Row-level CSV sources are
+also accepted when they contain numeric representation columns plus a
+`cluster`, `label`, or `kmeans_label` column. Repeat the same method name with
+one artifact per seed to obtain `silhouette_mean` and
+`silhouette_std_across_seeds`. MiMvDEC mixed representations remain evaluated
+by `mvdec-evaluate-best` with asymmetric mixed Gower.
+
 ### Multi-seed validation and distance ablation
 
 After the grid finishes, validate one fixed best configuration across explicit
@@ -467,18 +546,18 @@ primary asymmetric contract and the symmetric-Gower ablation:
 
 ```bash
 uv run mvdec-evaluate-best \
-  --results-path output/tiki_v3/ffs_results.csv \
+  --results-path output/tiki_v4/ffs_results.csv \
   --backend kprototypes \
   --score-column final_score \
   --seeds 40 41 42 43 44 \
   --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl \
   --data-path data/preprocessed_data/tiki_preprocessed.csv \
-  --runs-output output/tiki_v3/ffs_best_seed_runs.csv \
-  --summary-output output/tiki_v3/ffs_best_seed_summary.csv \
+  --runs-output output/tiki_v4/ffs_best_seed_runs.csv \
+  --summary-output output/tiki_v4/ffs_best_seed_summary.csv \
   --mapping-path data/preprocessed_data/tiki_row_mapping.csv \
   --interpretation-seed 42 \
-  --interpretation-output output/tiki_v3/ffs_best_interpretation.csv \
-  --profile-output output/tiki_v3/ffs_best_cluster_profiles.csv
+  --interpretation-output output/tiki_v4/ffs_best_interpretation.csv \
+  --profile-output output/tiki_v4/ffs_best_cluster_profiles.csv
 ```
 
 Use `--score-column silhouette_score` for without-FFS summary files and
@@ -487,11 +566,44 @@ also requires `--backend intuitive`; paper-initialized modes additionally use
 `--init-strategy paper --strict-init`. Pass `--job-index` to validate a specific
 successful row instead of selecting the maximum score.
 
-The per-seed CSV stores assignments and Silhouette diagnostics. The summary CSV
-stores `silhouette_mean`, `silhouette_std_across_seeds`, minimum/maximum scores,
-successful/failed run counts, and one row per distance contract. Feature
-selection is intentionally fixed before this validation step, so the reported
-variance measures final-model stability rather than repeating model selection.
+For each distance contract, the command scores both the selected MiMvDEC labels
+and the original MvDEC artifact labels on the exact same rebuilt FP-Max mixed
+representation. The per-seed CSV stores
+`mvdec_reference_silhouette_score`, the selected-model `silhouette_score`, and
+`silhouette_delta_vs_mvdec`. The summary CSV aggregates the selected score and
+delta across seeds. A positive delta means the selected clustering improves on
+the fixed MvDEC assignments under the same representation and distance.
+When the MvDEC artifact contains public ground-truth labels, the same files also
+store `acc`, `nmi`, `mvdec_reference_acc`, `mvdec_reference_nmi`, and the two
+external-metric deltas.
+Feature selection remains fixed, so the variance measures final-model
+stability rather than repeating model selection.
+
+### Optional common-space robustness check
+
+The native mixed-representation comparison above is the primary evaluation for
+the FP-Max representation contribution. As an optional robustness check, the
+common evaluator can also score row-ordered assignments on the same original
+preprocessed numeric data:
+
+```powershell
+uv run mvdec-evaluate-common `
+  --data-path data/preprocessed_data/tiki_preprocessed.csv `
+  --n-clusters 5 `
+  --source "MvDEC=output/TIKI_largest_eigen_selected_dimension_only_clusters.csv" `
+  --source "MiMvDEC without FFS=output/tiki_v4/without_ffs_best_seed_runs.csv" `
+  --source "MiMvDEC with FFS=output/tiki_v4/ffs_best_seed_runs.csv" `
+  --runs-output output/tiki_v4/common_evaluation_runs.csv `
+  --summary-output output/tiki_v4/common_evaluation_summary.csv
+```
+
+Repeat `--source METHOD=PATH.csv` for DEKM, single-view, and other baselines.
+A source may be a row-level CSV with a `cluster` column or a multi-seed CSV
+with JSON `cluster_assignments`. The command computes both
+`common_numeric_euclidean_v1` and `common_numeric_gower_v1` from the same
+ordered data for every method. It rejects ambiguous result grids containing
+more than one assignment for the same method and seed; select and validate one
+fixed configuration first with `mvdec-evaluate-best`.
 
 Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
 coarse/refine parameter trials. Summary CSV files keep only the best valid trial
@@ -502,7 +614,10 @@ manuscript.
 
 ## Reproducibility Notes
 
-- Random seeds are fixed at `42` for local experiment code.
+- Public benchmark seeds are explicit; examples use consecutive seeds starting
+  at `42`, and every method must receive the same list.
+- Every K-Prototypes fit explicitly uses `n_init=10`; the value is recorded in
+  the experiment manifest so resume cannot mix another initialization budget.
 - The cached MvDEC representation contains `h_fused`, `labels`, `init`,
   `score`, and `iteration`. MvDEC 2025 artifacts additionally include
   `h_view1`, `h_view2`, `fusion_dim`, `fusion_contract`,

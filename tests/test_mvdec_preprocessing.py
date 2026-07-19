@@ -1,9 +1,12 @@
 import importlib
+import pickle
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+
+from pipeline.external_metrics import compute_external_metrics
 
 
 def _load_mvdec(monkeypatch):
@@ -118,9 +121,10 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
 
     exact_bounds = mvdec.epoch_batch_bounds(512, 256)
     assert exact_bounds == [(0, 256), (256, 512)]
-    assert [
-        step for step in range(14) if mvdec.is_refinement_epoch_end(step, 7)
-    ] == [6, 13]
+    assert [step for step in range(14) if mvdec.is_refinement_epoch_end(step, 7)] == [
+        6,
+        13,
+    ]
 
 
 def test_epoch_batches_are_balanced_complete_and_reproducible(monkeypatch):
@@ -158,14 +162,20 @@ def test_assignment_change_count_ignores_cluster_id_permutations(monkeypatch):
         np.full_like(previous, -1),
         previous,
     ) == len(previous)
-    assert mvdec.count_aligned_assignment_changes(
-        previous,
-        np.array([2, 2, 0, 0, 1, 1]),
-    ) == 0
-    assert mvdec.count_aligned_assignment_changes(
-        previous,
-        np.array([2, 2, 0, 1, 1, 1]),
-    ) == 1
+    assert (
+        mvdec.count_aligned_assignment_changes(
+            previous,
+            np.array([2, 2, 0, 0, 1, 1]),
+        )
+        == 0
+    )
+    assert (
+        mvdec.count_aligned_assignment_changes(
+            previous,
+            np.array([2, 2, 0, 1, 1, 1]),
+        )
+        == 1
+    )
 
 
 def test_final_clustering_is_recomputed_from_current_model_outputs(monkeypatch):
@@ -293,9 +303,7 @@ def test_greedy_target_modes_are_explicit(monkeypatch):
     assert mvdec.validate_greedy_target_mode("selected_dimension_only") == (
         "selected_dimension_only"
     )
-    assert mvdec.validate_greedy_target_mode("frozen_snapshot") == (
-        "frozen_snapshot"
-    )
+    assert mvdec.validate_greedy_target_mode("frozen_snapshot") == ("frozen_snapshot")
     with pytest.raises(ValueError, match="Unsupported greedy target mode"):
         mvdec.validate_greedy_target_mode("moving_snapshot")
 
@@ -326,6 +334,56 @@ def test_airpollution_artifact_requires_scaler_metadata(tmp_path, monkeypatch):
             refinement_epochs_completed=3,
             preprocessing_metadata=None,
         )
+
+
+def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch):
+    """Labeled MvDEC artifacts must be canonical and carry external metrics."""
+
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
+    monkeypatch.setattr(mvdec, "input_shape", 2)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    monkeypatch.setattr(mvdec, "n_clusters", 2)
+    shuffled_indices = np.array([2, 0, 3, 1])
+    h_view1 = np.arange(8, dtype=np.float32).reshape(4, 2)
+    h_view2 = h_view1 + 1.0
+    labels = np.array([1, 0, 1, 0])
+    truth = np.array([1, 0, 1, 0])
+    metrics = compute_external_metrics(truth, labels, n_clusters=2)
+    artifact_path = tmp_path / "reuters.pkl"
+
+    mvdec.save_airpollution_mvdec_artifact(
+        artifact_path=artifact_path,
+        h_view1=h_view1,
+        h_view2=h_view2,
+        h_fused=(h_view1 + h_view2) / 2,
+        labels=labels,
+        score=0.5,
+        iteration=3,
+        orig_idx=shuffled_indices,
+        feature_columns=["a", "b"],
+        random_seed=42,
+        greedy_eigen_direction="largest",
+        greedy_target_mode="selected_dimension_only",
+        batches_per_epoch=1,
+        max_refinement_epochs=5,
+        stop_reason="converged_assignment",
+        refinement_epochs_completed=3,
+        preprocessing_metadata=None,
+        true_labels=truth,
+        source_sha256="c" * 64,
+        external_metrics=metrics,
+    )
+
+    with artifact_path.open("rb") as file:
+        artifact = pickle.load(file)
+    expected_labels = _restore_original_order(labels, shuffled_indices)
+    assert artifact["labels"].tolist() == expected_labels.tolist()
+    assert artifact["true_labels"].tolist() == expected_labels.tolist()
+    assert artifact["row_indices"].tolist() == [0, 1, 2, 3]
+    assert artifact["source_sha256"] == "c" * 64
+    assert artifact["acc"] == 1.0
+    assert artifact["nmi"] == 1.0
 
 
 def test_unlabeled_preprocessing_rejects_unknown_policy(tmp_path, monkeypatch):

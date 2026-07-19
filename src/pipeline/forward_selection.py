@@ -8,7 +8,7 @@ import pandas as pd
 from kmodes.kprototypes import KPrototypes
 from loguru import logger
 
-from config import RANDOM_STATE
+from config import KPROTOTYPES_N_INIT, RANDOM_STATE
 from pipeline.clustering import (
     DEFAULT_INIT_METHODS,
     compute_mixed_gower_distance,
@@ -122,6 +122,7 @@ def run_forward_selection_candidate(
         model = KPrototypes(
             n_clusters=context.n_clusters,
             init=init,
+            n_init=KPROTOTYPES_N_INIT,
             random_state=context.random_state,
             verbose=0,
         )

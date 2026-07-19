@@ -1,41 +1,21 @@
-import tensorflow as tf
-import numpy as np
 import csv
 import os
-from tensorflow.keras.datasets import mnist
-from tensorflow.keras.datasets import fashion_mnist
+
 import h5py
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.datasets import fashion_mnist, mnist
+
+from pipeline.external_metrics import compute_external_metrics
 
 
 def get_ACC_NMI(_y, _y_pred):
-    y = np.array(_y)
-    y_pred = np.array(_y_pred)
-    s = np.unique(y_pred)
-    t = np.unique(y)
-    if len(s) != len(t):
-        raise ValueError(
-            f'Predicted cluster count {len(s)} does not match true label count {len(t)}.'
-        )
-
-    N = len(np.unique(y_pred))
-    C = np.zeros((N, N), dtype=np.int32)
-    for i in range(N):
-        for j in range(N):
-            idx = np.logical_and(y_pred == s[i], y == t[j])
-            C[i][j] = np.count_nonzero(idx)
-    Cmax = np.amax(C)
-    C = Cmax - C
-    from scipy.optimize import linear_sum_assignment
-    row, col = linear_sum_assignment(C)
-    count = 0
-    for i in range(N):
-        idx = np.logical_and(y_pred == s[row[i]], y == t[col[i]])
-        count += np.count_nonzero(idx)
-    acc = np.round(1.0 * count / len(y), 5)
-
-    from sklearn.metrics import normalized_mutual_info_score
-    nmi = np.round(normalized_mutual_info_score(y, y_pred), 5)
-    return acc, nmi
+    metrics = compute_external_metrics(
+        _y,
+        _y_pred,
+        n_clusters=len(np.unique(_y)),
+    )
+    return np.round(metrics.acc, 5), np.round(metrics.nmi, 5)
 
 
 def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_seed=None):
@@ -83,8 +63,8 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
         norm[norm == 0] = 1
         x = x / norm
     elif ds_name == 'RCV1':
-        from sklearn.datasets import fetch_rcv1
         import scipy.sparse as sp
+        from sklearn.datasets import fetch_rcv1
 
         # Fetch the dataset
         dataset = fetch_rcv1(subset="all")

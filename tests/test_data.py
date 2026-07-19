@@ -31,6 +31,11 @@ def _write_mvdec_inputs(tmp_path, n_rows=4):
             {
                 "h_fused": h_fused,
                 "labels": labels,
+                "true_labels": np.array([0, 0, 1, 1][:n_rows]),
+                "row_indices": np.arange(n_rows),
+                "acc": 1.0,
+                "nmi": 1.0,
+                "source_sha256": "b" * 64,
                 "init": "k-means++",
                 "score": 0.1,
                 "iteration": 1,
@@ -58,6 +63,11 @@ def test_load_mvdec_result_uses_fused_embedding_columns(tmp_path):
     assert result.evaluation_score == expected_score
     assert result.evaluation_sample_std == expected_std
     assert result.evaluation_negative_fraction == expected_negative_fraction
+    assert result.true_labels.tolist() == [0, 0, 1, 1]
+    assert result.row_indices.tolist() == [0, 1, 2, 3]
+    assert result.acc == 1.0
+    assert result.nmi == 1.0
+    assert result.source_sha256 == "b" * 64
 
 
 def test_load_mvdec_result_rejects_preprocessed_row_mismatch(tmp_path):
@@ -111,6 +121,60 @@ def test_load_mvdec_result_accepts_mvdec2025_encoder_average_contract(tmp_path):
     assert result.h_fused.shape == (4, 2)
     assert list(result.h_fused_df.columns) == ["fused_1", "fused_2"]
     np.testing.assert_allclose(result.h_fused, h_fused)
+
+
+def test_load_public_mvdec_result_accepts_assignment_row_manifest(tmp_path):
+    """MiMvDEC may validate public artifact rows without a regenerated X.csv."""
+
+    data_path = tmp_path / "mvdec_assignments.csv"
+    result_path = tmp_path / "mvdec_public.pkl"
+    pd.DataFrame(
+        {
+            "dataset": ["REUTERS"] * 4,
+            "method": ["MvDEC"] * 4,
+            "sample_index": [0, 1, 2, 3],
+            "cluster": [0, 0, 1, 1],
+            "true_label": [0, 0, 1, 1],
+        }
+    ).to_csv(data_path, index=False)
+    h_view1 = np.array(
+        [[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.1, 5.0]],
+        dtype=np.float32,
+    )
+    h_view2 = h_view1 + 0.2
+    with result_path.open("wb") as file:
+        pickle.dump(
+            {
+                "dataset": "REUTERS",
+                "fusion_contract": "mvdec2025_encoder_average",
+                "view_output_layout": "eq5_compatible_2_plus_2000",
+                "final_training_objective": (
+                    "mvdec2025_latent_joint_reconstruction_greedy_l3_trace_logged"
+                ),
+                "h_view1": h_view1,
+                "h_view2": h_view2,
+                "h_fused": (h_view1 + h_view2) / 2,
+                "labels": np.array([0, 0, 1, 1]),
+                "true_labels": np.array([0, 0, 1, 1]),
+                "row_indices": np.arange(4),
+                "fusion_dim": 2,
+                "view1_latent_dim": 2,
+                "n_clusters": 2,
+                "init": "k-means",
+                "score": 0.9,
+                "iteration": 3,
+                "acc": 1.0,
+                "nmi": 1.0,
+                "source_sha256": "d" * 64,
+            },
+            file,
+        )
+
+    result = load_mvdec_result(result_path=result_path, data_path=data_path)
+
+    assert result.true_labels.tolist() == [0, 0, 1, 1]
+    assert result.acc == 1.0
+    assert result.source_sha256 == "d" * 64
 
 
 def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):

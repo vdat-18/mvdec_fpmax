@@ -18,11 +18,19 @@ from sklearn.metrics import (
     silhouette_score,
 )
 
+from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
+from pipeline.external_metrics import compute_external_metrics
+from pipeline.public_artifacts import (
+    build_public_artifact,
+    public_run_stem,
+    write_public_artifact,
+    write_public_assignments,
+)
+from pipeline.public_data import PUBLIC_DATASET_SPECS, load_dekm_public_dataset
+
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
-DEFAULT_OUTPUT_PATH = (
-    PROJECT_DIR / "output" / "public_baselines" / "kmeans_baseline.xlsx"
-)
+DEFAULT_OUTPUT_PATH = PUBLIC_BENCHMARK_OUTPUT_DIR / "kmeans" / "kmeans_baseline.xlsx"
 RANDOM_STATE = 42
 N_INIT = 100
 MAX_ITER = 1000
@@ -39,6 +47,7 @@ class DatasetInputs:
     X: pd.DataFrame
     y: pd.DataFrame | None
     metadata: dict
+    source_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +65,7 @@ class KMeansBaselineResult:
     max_iter: int
     random_state: int
     silhouette: float
+    acc: float | None
     ari: float | None
     nmi: float | None
     cluster_sizes: list[int]
@@ -70,7 +80,19 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line options."""
 
     parser = argparse.ArgumentParser(
-        description="Run K-Means baselines on already-preprocessed public datasets."
+        description="Run K-Means on DEKM release or legacy processed datasets."
+    )
+    parser.add_argument(
+        "--source",
+        choices=["dekm-release", "processed"],
+        default="dekm-release",
+        help="Use the DEKM release files by default; processed preserves legacy mode.",
+    )
+    parser.add_argument(
+        "--dataset-root",
+        type=Path,
+        default=DEKM_DATASET_DIR,
+        help="Root containing the DEKM REUTERS, 20NEWS, and RCV1 folders.",
     )
     parser.add_argument(
         "--config",
@@ -97,13 +119,42 @@ def parse_args() -> argparse.Namespace:
         help="Optional dataset names to run. Defaults to every registry entry.",
     )
     parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[RANDOM_STATE],
+        help="Random seeds shared with DEKM, MvDEC, and MiMvDEC runs.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite an existing workbook.",
     )
 
-
     return parser.parse_args()
+
+
+def load_release_dataset(name: str, dataset_root: Path) -> DatasetInputs:
+    """Load one unmodified DEKM release dataset for the K-Means baseline."""
+
+    dataset = load_dekm_public_dataset(name, dataset_root)
+    return DatasetInputs(
+        name=dataset.spec.name,
+        title=dataset.spec.title,
+        n_clusters=dataset.spec.n_clusters,
+        X=pd.DataFrame(dataset.X),
+        y=pd.DataFrame({"label": dataset.y}),
+        metadata={
+            "source": "DEKM 2021 released dataset files",
+            "source_url": str(Path(dataset_root).resolve()),
+            "n_samples": len(dataset.X),
+            "n_features": dataset.X.shape[1],
+            "n_clusters": dataset.spec.n_clusters,
+            "label_available": True,
+            "notes": ["Loaded without regeneration from the DEKM release contract."],
+        },
+        source_sha256=dataset.source_sha256,
+    )
 
 
 def load_registry(config_path: Path) -> dict:
@@ -170,6 +221,7 @@ def load_dataset(dataset: dict, processed_root: Path) -> DatasetInputs:
         X=X,
         y=y,
         metadata=metadata,
+        source_sha256=metadata.get("source_sha256"),
     )
 
 
@@ -213,6 +265,7 @@ def true_labels(y: pd.DataFrame | None) -> np.ndarray | None:
 def run_kmeans_baseline(
     inputs: DatasetInputs,
     init: str,
+    random_state: int = RANDOM_STATE,
 ) -> tuple[KMeansBaselineResult, pd.DataFrame]:
     """Fit K-Means directly on the already-preprocessed features."""
 
@@ -223,7 +276,7 @@ def run_kmeans_baseline(
         init=init,
         n_init=N_INIT,
         max_iter=MAX_ITER,
-        random_state=RANDOM_STATE,
+        random_state=random_state,
     )
     start = perf_counter()
     labels = model.fit_predict(X)
@@ -231,6 +284,16 @@ def run_kmeans_baseline(
 
     silhouette = float(silhouette_score(X, labels, metric="euclidean"))
     labels_true = true_labels(inputs.y)
+    external_metrics = (
+        None
+        if labels_true is None
+        else compute_external_metrics(
+            labels_true,
+            labels,
+            n_clusters=inputs.n_clusters,
+        )
+    )
+    acc = None if external_metrics is None else external_metrics.acc
     ari = (
         None if labels_true is None else float(adjusted_rand_score(labels_true, labels))
     )
@@ -253,8 +316,9 @@ def run_kmeans_baseline(
         init=init,
         n_init=N_INIT,
         max_iter=MAX_ITER,
-        random_state=RANDOM_STATE,
+        random_state=random_state,
         silhouette=silhouette,
+        acc=acc,
         ari=ari,
         nmi=nmi,
         cluster_sizes=cluster_sizes,
@@ -264,17 +328,23 @@ def run_kmeans_baseline(
         status="ok",
         error_message=None,
     )
-    label_df = make_label_frame(inputs, labels, init)
+    label_df = make_label_frame(inputs, labels, init, random_state)
     return result, label_df
 
 
-def make_label_frame(inputs: DatasetInputs, labels: np.ndarray, init: str) -> pd.DataFrame:
+def make_label_frame(
+    inputs: DatasetInputs,
+    labels: np.ndarray,
+    init: str,
+    random_state: int,
+) -> pd.DataFrame:
     """Build a per-sample label output frame."""
 
     frame = pd.DataFrame(
         {
             "dataset": inputs.name,
             "kmeans_init": init,
+            "random_seed": random_state,
             "sample_index": np.arange(len(labels), dtype=int),
             "kmeans_label": labels.astype(int),
         }
@@ -284,30 +354,25 @@ def make_label_frame(inputs: DatasetInputs, labels: np.ndarray, init: str) -> pd
     return frame
 
 
-def metadata_frame(processed_root: Path, datasets: list[dict]) -> pd.DataFrame:
-    """Build workbook metadata rows for selected datasets."""
+def metadata_record(dataset: DatasetInputs) -> dict[str, object]:
+    """Build one lightweight workbook metadata row."""
 
-    rows = []
-    for dataset in datasets:
-        metadata_path = processed_root / dataset["name"] / "metadata.json"
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        rows.append(
-            {
-                "dataset": dataset["name"],
-                "title": dataset["title"],
-                "source": dataset["source"],
-                "source_url": dataset["url"],
-                "n_samples": metadata["n_samples"],
-                "n_features": metadata["n_features"],
-                "n_clusters": metadata["n_clusters"],
-                "label_available": metadata["label_available"],
-                "notes": " | ".join(metadata.get("notes", [])),
-            }
-        )
-    return pd.DataFrame(rows)
+    metadata = dataset.metadata
+    return {
+        "dataset": dataset.name,
+        "title": dataset.title,
+        "source": metadata.get("source"),
+        "source_url": metadata.get("source_url"),
+        "n_samples": metadata["n_samples"],
+        "n_features": metadata["n_features"],
+        "n_clusters": metadata["n_clusters"],
+        "label_available": metadata["label_available"],
+        "notes": " | ".join(metadata.get("notes", [])),
+        "source_sha256": dataset.source_sha256,
+    }
 
 
-def config_frame() -> pd.DataFrame:
+def config_frame(seeds: list[int]) -> pd.DataFrame:
     """Build workbook rows describing the baseline configuration."""
 
     return pd.DataFrame(
@@ -318,9 +383,9 @@ def config_frame() -> pd.DataFrame:
             {"parameter": "init_grid", "value": json.dumps(list(KMEANS_INITS))},
             {"parameter": "n_init", "value": N_INIT},
             {"parameter": "max_iter", "value": MAX_ITER},
-            {"parameter": "random_state", "value": RANDOM_STATE},
+            {"parameter": "random_seeds", "value": json.dumps(seeds)},
             {"parameter": "internal_metric", "value": "silhouette_euclidean"},
-            {"parameter": "external_metrics", "value": "ARI, NMI"},
+            {"parameter": "external_metrics", "value": "ACC, ARI, NMI"},
         ]
     )
 
@@ -331,7 +396,9 @@ def result_to_dict(result: KMeansBaselineResult) -> dict:
     return {
         "dataset": result.dataset,
         "kmeans_init": result.init,
+        "random_seed": result.random_state,
         "silhouette": result.silhouette,
+        "acc": result.acc,
         "ari": result.ari,
         "nmi": result.nmi,
         "cluster_sizes": json.dumps(result.cluster_sizes),
@@ -348,6 +415,7 @@ def write_workbook(
     results: list[KMeansBaselineResult],
     label_frames: list[pd.DataFrame],
     metadata: pd.DataFrame,
+    seeds: list[int],
 ) -> None:
     """Write all baseline outputs into one Excel workbook."""
 
@@ -356,12 +424,28 @@ def write_workbook(
     labels = (
         pd.concat(label_frames, ignore_index=True) if label_frames else pd.DataFrame()
     )
+    aggregate = (
+        summary.groupby(["dataset", "kmeans_init"], as_index=False)
+        .agg(
+            requested_runs=("random_seed", "size"),
+            silhouette_mean=("silhouette", "mean"),
+            silhouette_std=("silhouette", "std"),
+            acc_mean=("acc", "mean"),
+            acc_std=("acc", "std"),
+            ari_mean=("ari", "mean"),
+            ari_std=("ari", "std"),
+            nmi_mean=("nmi", "mean"),
+            nmi_std=("nmi", "std"),
+        )
+        .fillna(0.0)
+    )
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         summary.to_excel(writer, sheet_name="summary", index=False)
+        aggregate.to_excel(writer, sheet_name="aggregate", index=False)
         labels.to_excel(writer, sheet_name="labels", index=False)
         metadata.to_excel(writer, sheet_name="metadata", index=False)
-        config_frame().to_excel(writer, sheet_name="config", index=False)
+        config_frame(seeds).to_excel(writer, sheet_name="config", index=False)
 
 
 def main() -> None:
@@ -372,34 +456,87 @@ def main() -> None:
         msg = f"Output already exists: {args.output}. Use --force to overwrite."
         raise FileExistsError(msg)
 
-    registry = load_registry(args.config)
-    datasets = selected_datasets(registry, args.datasets)
-    processed_root = resolve_processed_root(registry, args.processed_root)
+    if not args.seeds or len(set(args.seeds)) != len(args.seeds):
+        msg = "--seeds must contain unique integers."
+        raise ValueError(msg)
+
+    if args.source == "dekm-release":
+        dataset_names = args.datasets or list(PUBLIC_DATASET_SPECS)
+        input_loaders = (
+            lambda name=name: load_release_dataset(name, args.dataset_root)
+            for name in dataset_names
+        )
+    else:
+        registry = load_registry(args.config)
+        datasets = selected_datasets(registry, args.datasets)
+        processed_root = resolve_processed_root(registry, args.processed_root)
+        input_loaders = (
+            lambda dataset=dataset: load_dataset(dataset, processed_root)
+            for dataset in datasets
+        )
 
     results: list[KMeansBaselineResult] = []
     label_frames: list[pd.DataFrame] = []
-    for dataset in datasets:
-        inputs = load_dataset(dataset, processed_root)
+    metadata_records: list[dict[str, object]] = []
+    for load_inputs in input_loaders:
+        inputs = load_inputs()
+        metadata_records.append(metadata_record(inputs))
         for init in KMEANS_INITS:
-            logger.info("Running K-Means baseline for {} | init={}", dataset["name"], init)
-            result, label_frame = run_kmeans_baseline(inputs, init)
-            results.append(result)
-            label_frames.append(label_frame)
-            logger.info(
-                "{} init={} silhouette={:.4f} ari={} nmi={}",
-                result.dataset,
-                result.init,
-                result.silhouette,
-                None if result.ari is None else round(result.ari, 4),
-                None if result.nmi is None else round(result.nmi, 4),
-            )
+            for run_index, seed in enumerate(args.seeds, start=1):
+                logger.info(
+                    "Running K-Means baseline for {} | init={} | seed={}",
+                    inputs.name,
+                    init,
+                    seed,
+                )
+                result, label_frame = run_kmeans_baseline(inputs, init, seed)
+                results.append(result)
+                label_frames.append(label_frame)
+                if inputs.y is not None and inputs.source_sha256 is not None:
+                    labels = label_frame["kmeans_label"].to_numpy(dtype=int)
+                    truth = label_frame["true_label"].to_numpy()
+                    run_stem = public_run_stem(
+                        f"KMeans-{init}",
+                        inputs.name,
+                        seed,
+                        run_index,
+                    )
+                    run_dir = args.output.parent / inputs.name.lower()
+                    artifact_path = run_dir / f"{run_stem}.pkl"
+                    assignments_path = run_dir / f"{run_stem}_assignments.csv"
+                    metrics = compute_external_metrics(
+                        truth,
+                        labels,
+                        n_clusters=inputs.n_clusters,
+                    )
+                    artifact = build_public_artifact(
+                        dataset=inputs.name,
+                        method="KMeans",
+                        n_clusters=inputs.n_clusters,
+                        random_seed=seed,
+                        source_sha256=inputs.source_sha256,
+                        labels=labels,
+                        true_labels=truth,
+                        metrics=metrics,
+                    )
+                    artifact["kmeans_init"] = init
+                    write_public_artifact(artifact, artifact_path)
+                    write_public_assignments(label_frame, assignments_path)
+                logger.info(
+                    "{} init={} seed={} silhouette={:.4f} acc={} ari={} nmi={}",
+                    result.dataset,
+                    result.init,
+                    result.random_state,
+                    result.silhouette,
+                    None if result.acc is None else round(result.acc, 4),
+                    None if result.ari is None else round(result.ari, 4),
+                    None if result.nmi is None else round(result.nmi, 4),
+                )
 
-    metadata = metadata_frame(processed_root, datasets)
-    write_workbook(args.output, results, label_frames, metadata)
+    metadata = pd.DataFrame.from_records(metadata_records)
+    write_workbook(args.output, results, label_frames, metadata, args.seeds)
     logger.info("Saved K-Means baseline workbook to {}", args.output)
 
 
 if __name__ == "__main__":
     main()
-
-
