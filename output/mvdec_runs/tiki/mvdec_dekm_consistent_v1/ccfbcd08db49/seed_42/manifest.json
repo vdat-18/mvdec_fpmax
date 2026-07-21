@@ -1,0 +1,144 @@
+{
+  "config": {
+    "assignment_change_tolerance": 0.01,
+    "batch_size": 256,
+    "dataset": "TIKI",
+    "feature_columns": [
+      "followers",
+      "revenue",
+      "yearsjoined",
+      "rating",
+      "goodreview",
+      "mediumreview",
+      "badreview"
+    ],
+    "hidden_units": 5,
+    "input_shape": 7,
+    "kmeans_n_init": 100,
+    "kmeans_refresh_policy": "one_epoch",
+    "l4_reduction": "sum_squared_dimensions_then_mean_batch",
+    "max_refinement_epochs": 1400,
+    "method": "MvDEC-DEKM-consistent",
+    "n_clusters": 5,
+    "preprocessing": {
+      "assumption": "No feature scaling is applied for this dataset.",
+      "constant_features": [],
+      "data_max": [
+        0.1400273992,
+        0.008283297655,
+        1.806134489,
+        0.9030437068,
+        0.9402359526,
+        1.916680834,
+        1.761924492
+      ],
+      "data_min": [
+        -0.07568269992,
+        -0.05493183904,
+        -2.41822628,
+        -3.055399464,
+        -2.303363299,
+        -0.7247974588,
+        -0.7072697442
+      ],
+      "feature_columns": [
+        "followers",
+        "revenue",
+        "yearsjoined",
+        "rating",
+        "goodreview",
+        "mediumreview",
+        "badreview"
+      ],
+      "feature_range": null,
+      "method": "none",
+      "source_path": "data/preprocessed_data/tiki_preprocessed.csv",
+      "source_sha256": "76c3f4cfcef285d14905eb40e6d926bd301a66771900331fc692b4aca18fb7b4"
+    },
+    "pretrain_epochs": 200,
+    "protocol_contract": {
+      "architecture_source": "MvDEC 2025 multi-view encoder-latent fusion",
+      "claim_scope": "MvDEC architecture with DEKM-2021-consistent greedy refinement",
+      "eigen": {
+        "direction": "largest",
+        "order": "ascending",
+        "rationale": "DEKM 2021 sorts ascending and uses the largest/last least-informative direction."
+      },
+      "greedy_target": {
+        "mode": "frozen_snapshot",
+        "rationale": "Frozen transformed-embedding target used by the released DEKM 2021 implementation."
+      },
+      "objective": {
+        "loss_terms": {
+          "L1_reconstruction": {
+            "optimized": true,
+            "weight": 1.0
+          },
+          "L2_kmeans": {
+            "optimized": false,
+            "weight": 0.0
+          },
+          "L3_scatter_trace": {
+            "mathematically_equivalent_to_L2": true,
+            "optimized": false,
+            "weight": 0.0
+          },
+          "L4_greedy": {
+            "optimized": true,
+            "reduction": "sum_squared_dimensions_then_mean_batch",
+            "weight": 1.0
+          }
+        },
+        "name": "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+      },
+      "protocol_id": "mvdec_dekm_consistent_v1",
+      "refinement_source": "DEKM 2021 Algorithm 1 and released implementation",
+      "stopping": {
+        "assignment_change_tolerance": 0.01,
+        "policy": "0.001 for public DEKM benchmarks; 0.01 by design for unlabeled private case studies."
+      }
+    },
+    "refinement_batching_policy": "balanced_shuffled_each_epoch",
+    "source_sha256": "76c3f4cfcef285d14905eb40e6d926bd301a66771900331fc692b4aca18fb7b4",
+    "view1_filters": [
+      250,
+      250,
+      1000
+    ],
+    "view2_base_units": 32
+  },
+  "config_hash": "ccfbcd08db49645649c885e212a7f2e0796a7bf3746d6b5f7b50f2673ebb95b4",
+  "dataset": "TIKI",
+  "error": null,
+  "finished_at_utc": "2026-07-21T08:23:04.815320+00:00",
+  "method": "MvDEC-DEKM-consistent",
+  "metrics": {
+    "silhouette": 0.43028074502944946
+  },
+  "output_sha256": {
+    "artifact": "15e05041347bcd9a35b7937ea6ac12dca186478d802dfa32d62a677925ac0da8",
+    "assignments": "2afbf2df00271d7d69e939a7d2ae7db124f75a4473498247fc55f1a8109cc134",
+    "final_view1": "b69d0eb6ed64af9b0756ec028671fba409e9b0932ab8c02b8e9187208625ebaa",
+    "final_view2": "729a76e640086d6af47ee2036dd86885c560b01ae6bdd3eec2622e3d5db02c5a",
+    "pretrain_view1": "03aae054e2ecd1c30e6b5d2ecb51a1c98eaacda7a538ef29e7501b6eac91e1a2",
+    "pretrain_view2": "05b7b561798791efffda599b31764fcb50e96c75c2dfe636b774463bf514f476",
+    "training_log": "1e255dbf5543d27877b84d99d716f2234670cbe6bc9a6ca934236d65d961c594"
+  },
+  "paths": {
+    "artifact": "artifact.pkl",
+    "assignments": "assignments.csv",
+    "final_view1": "final_view1.weights.h5",
+    "final_view2": "final_view2.weights.h5",
+    "pretrain_view1": "pretrain_view1.weights.h5",
+    "pretrain_view2": "pretrain_view2.weights.h5",
+    "training_log": "training_log.csv"
+  },
+  "protocol_id": "mvdec_dekm_consistent_v1",
+  "run_id": "tiki_mvdec_dekm_consistent_v1_ccfbcd08db49_seed_42",
+  "run_index": 1,
+  "runtime_seconds": 73.95898365974426,
+  "schema_version": 1,
+  "seed": 42,
+  "started_at_utc": "2026-07-21T08:21:51.083978+00:00",
+  "status": "complete"
+}

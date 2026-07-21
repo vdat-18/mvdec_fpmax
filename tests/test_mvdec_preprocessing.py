@@ -109,6 +109,19 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
     assert kmeans.random_state == 42
     assert mvdec.KMEANS_REFRESH_POLICY == "one_epoch"
     assert mvdec.REFINEMENT_BATCHING_POLICY == "balanced_shuffled_each_epoch"
+    run_config = mvdec.resolved_run_config(
+        protocol=mvdec.PRIMARY_MVDEC_PROTOCOL,
+        dataset_name="TIKI",
+        tolerance=0.01,
+        max_refinement_epochs=1400,
+        source_sha256="source-hash",
+        feature_columns=["feature"],
+        preprocessing_metadata=None,
+    )
+    assert (
+        run_config["deterministic_runtime_policy"]
+        == mvdec.DETERMINISTIC_RUNTIME_POLICY
+    )
     assert mvdec.DEFAULT_GREEDY_EIGEN_DIRECTION == "largest"
     assert mvdec.DEFAULT_GREEDY_TARGET_MODE == "frozen_snapshot"
     assert mvdec.validate_max_refinement_epochs(1400) == 1400
@@ -174,6 +187,45 @@ def test_epoch_batches_are_balanced_complete_and_reproducible(monkeypatch):
         np.concatenate(first_epoch),
         np.concatenate(second_epoch),
     )
+
+
+def test_deterministic_runtime_repeats_keras_initialization(monkeypatch):
+    """The same run seed must recreate identical Keras model weights."""
+
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 2)
+    monkeypatch.setattr(mvdec, "hidden_units", 1)
+    monkeypatch.setattr(mvdec, "view1_filters", [3])
+
+    first_metadata = mvdec.configure_deterministic_runtime(42)
+    first_weights = mvdec.model_view1(load_weights=False).get_weights()
+    second_metadata = mvdec.configure_deterministic_runtime(42)
+    second_weights = mvdec.model_view1(load_weights=False).get_weights()
+
+    assert first_metadata == second_metadata
+    assert first_metadata["policy"] == mvdec.DETERMINISTIC_RUNTIME_POLICY
+    for first, second in zip(first_weights, second_weights, strict=True):
+        np.testing.assert_array_equal(first, second)
+    with pytest.raises(ValueError, match="explicit seed"):
+        mvdec.configure_deterministic_runtime(None)
+
+
+def test_pretraining_dataset_repeats_seeded_epoch_order(monkeypatch):
+    """Seeded tf.data shuffling must repeat across isolated run setup."""
+
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "pretrain_batch_size", 2, raising=False)
+    values = np.arange(12, dtype=np.float32).reshape(6, 2)
+
+    mvdec.configure_deterministic_runtime(42)
+    first_dataset = mvdec.make_pretraining_dataset(values, 42)
+    first_order = np.concatenate([batch_x.numpy() for batch_x, _ in first_dataset])
+
+    mvdec.configure_deterministic_runtime(42)
+    second_dataset = mvdec.make_pretraining_dataset(values, 42)
+    second_order = np.concatenate([batch_x.numpy() for batch_x, _ in second_dataset])
+
+    np.testing.assert_array_equal(first_order, second_order)
 
 
 def test_assignment_change_count_ignores_cluster_id_permutations(monkeypatch):

@@ -1,0 +1,2 @@
+dataset,method,protocol_id,config_hash,discovered_runs,completed_runs,failed_runs,silhouette_mean,silhouette_std
+TIKI,MvDEC-DEKM-consistent,mvdec_dekm_consistent_v1,ccfbcd08db49645649c885e212a7f2e0796a7bf3746d6b5f7b50f2673ebb95b4,3,3,0,0.43807925780614215,0.01005384484914597

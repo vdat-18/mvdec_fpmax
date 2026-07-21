@@ -68,6 +68,7 @@ L4_REDUCTION = 'sum_squared_dimensions_then_mean_batch'
 KMEANS_N_INIT = 100
 KMEANS_REFRESH_POLICY = 'one_epoch'
 REFINEMENT_BATCHING_POLICY = 'balanced_shuffled_each_epoch'
+DETERMINISTIC_RUNTIME_POLICY = 'keras_seeded_tf_deterministic_v1'
 MAX_REFINEMENT_EPOCHS = 1400
 DEFAULT_PROGRESS_INTERVAL = 25
 TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
@@ -327,6 +328,7 @@ def resolved_run_config(
         'kmeans_n_init': int(KMEANS_N_INIT),
         'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
         'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
+        'deterministic_runtime_policy': DETERMINISTIC_RUNTIME_POLICY,
         'max_refinement_epochs': int(max_refinement_epochs),
         'assignment_change_tolerance': float(tolerance),
         'l4_reduction': protocol.l4_reduction,
@@ -379,10 +381,43 @@ def loss_ablation_tag(kmeans_weight, greedy_weight):
     return f'_l2w{kmeans_weight:g}_l4w{greedy_weight:g}'
 
 
-def set_random_seed(seed):
-    if seed is not None:
-        np.random.seed(seed)
-        tf.random.set_seed(seed)
+def configure_deterministic_runtime(seed: int | None) -> dict[str, object]:
+    """Reset Keras state and seed every RNG used by one isolated run."""
+
+    if seed is None:
+        raise ValueError('Deterministic MvDEC runs require an explicit seed.')
+    tf.keras.backend.clear_session()
+    tf.keras.utils.set_random_seed(seed)
+    tf.config.experimental.enable_op_determinism()
+    return {
+        'policy': DETERMINISTIC_RUNTIME_POLICY,
+        'seed': int(seed),
+        'tensorflow_version': tf.__version__,
+        'numpy_version': np.__version__,
+        'keras_session_reset': True,
+        'tensorflow_op_determinism': True,
+        'tf_data_deterministic': True,
+    }
+
+
+def make_pretraining_dataset(
+    x: np.ndarray,
+    random_seed: int,
+) -> tf.data.Dataset:
+    """Build a reproducibly shuffled autoencoder pretraining dataset."""
+
+    options = tf.data.Options()
+    options.deterministic = True
+    return (
+        tf.data.Dataset.from_tensor_slices((x, x))
+        .shuffle(
+            buffer_size=len(x),
+            seed=random_seed,
+            reshuffle_each_iteration=True,
+        )
+        .batch(pretrain_batch_size)
+        .with_options(options)
+    )
 
 
 def make_kmeans(random_seed):
@@ -932,6 +967,7 @@ def train_base_view1(
         ds_xx,
         epochs=pretrain_epochs,
         verbose=0,
+        shuffle=False,
         callbacks=[
             PretrainProgressCallback('view1', pretrain_epochs, progress_interval)
         ],
@@ -960,6 +996,7 @@ def train_base_view2(
         ds_xx,
         epochs=pretrain_epochs,
         verbose=0,
+        shuffle=False,
         callbacks=[
             PretrainProgressCallback('view2', pretrain_epochs, progress_interval)
         ],
@@ -1778,7 +1815,7 @@ if __name__ == '__main__':
     time_all_start = time.time()
     for run_index in range(args.runs):
         run_seed = None if args.seed is None else args.seed + run_index
-        set_random_seed(run_seed)
+        runtime_metadata = configure_deterministic_runtime(run_seed)
         time_start = time.time()
         print(
             f'start:dataset:{ds_name}; run:{run_index + 1}/{args.runs}; '
@@ -1844,6 +1881,7 @@ if __name__ == '__main__':
             'seed': run_seed,
             'run_index': run_index + 1,
             'started_at_utc': datetime.now(UTC).isoformat(),
+            'runtime': runtime_metadata,
             'config': run_config,
             'paths': {
                 'artifact': run_paths.artifact.name,
@@ -1856,9 +1894,7 @@ if __name__ == '__main__':
             },
         }
         write_run_manifest(run_paths.manifest, manifest_base)
-        ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(
-            8000, seed=run_seed
-        ).batch(pretrain_batch_size)
+        ds_xx = make_pretraining_dataset(x, run_seed)
         try:
             train_base_view1(
                 ds_xx,
