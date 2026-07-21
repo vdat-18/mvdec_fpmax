@@ -15,9 +15,6 @@ DEKM_DATASET_DIR = PROJECT_DIR / "external_repos" / "DEKM" / "datasets"
 PUBLIC_BENCHMARK_OUTPUT_DIR = OUTPUT_DIR / "public_benchmark"
 
 PREPROCESSED_DATA_PATH = PREPROCESSED_DATA_DIR / "tiki_preprocessed.csv"
-FUSED_REPRESENTATION_PATH = (
-    PREPROCESSED_DATA_DIR / "tiki_mvdec_fused_representation.pkl"
-)
 WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH = OUTPUT_DIR / "without_ffs_results.csv"
 FFS_RESULTS_PATH = OUTPUT_DIR / "ffs_results.csv"
 WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH = (

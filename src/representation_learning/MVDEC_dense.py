@@ -1,6 +1,9 @@
 import argparse
 import hashlib
+import json
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -15,10 +18,17 @@ from utils import log_csv
 
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import compute_external_metrics
+from pipeline.mvdec_runs import (
+    append_run_log,
+    build_summary_frames,
+    load_run_manifests,
+    prepare_run_directory,
+    resolve_run_paths,
+    write_run_manifest,
+)
 from pipeline.public_artifacts import (
     PUBLIC_ARTIFACT_SCHEMA_VERSION,
     public_assignment_frame,
-    public_run_stem,
     write_public_artifact,
     write_public_assignments,
     write_public_frame,
@@ -36,28 +46,30 @@ batch_size = 256
 UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE = 0.01
 PUBLIC_ASSIGNMENT_CHANGE_TOLERANCE = 0.001
 assignment_change_tolerance = UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE
-# DEKM 2021 (Fig. 4) shows pulling every embedding dimension toward the
-# centroids underperforms the greedy single-direction pull, so the L2 K-means
-# term defaults to 0; the literal MvDEC 2025 Eq. 11 stays available via
-# --lambda-kmeans 1.
+# DEKM 2021 (Fig. 4) reports that the greedy last-direction update outperforms
+# pulling every transformed dimension on MNIST. L2 and its trace-equivalent L3
+# therefore remain diagnostics rather than optimized terms in the primary
+# DEKM-consistent protocol.
 DEFAULT_LAMBDA_KMEANS = 0.0
 DEFAULT_LAMBDA_GREEDY = 1.0
 lambda_reconstruction = 1.0
 lambda_kmeans = DEFAULT_LAMBDA_KMEANS
 lambda_orthonormal = 0.0
 lambda_greedy = DEFAULT_LAMBDA_GREEDY
-AIRPOLLUTION_ARTIFACT_PATH = (
-    'data/preprocessed_data/airpollution_demvk_fused_representation.pkl'
-)
-TIKI_ARTIFACT_PATH = 'data/preprocessed_data/tiki_mvdec_fused_representation.pkl'
 GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
 GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
 DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
-DEFAULT_GREEDY_TARGET_MODE = 'selected_dimension_only'
+DEFAULT_GREEDY_TARGET_MODE = 'frozen_snapshot'
+PRIMARY_PROTOCOL_ID = 'mvdec_dekm_consistent_v1'
+CUSTOM_PROTOCOL_ID = 'custom'
+PROTOCOL_IDS = (PRIMARY_PROTOCOL_ID, CUSTOM_PROTOCOL_ID)
+EIGENVALUE_ORDER = 'ascending'
+L4_REDUCTION = 'sum_squared_dimensions_then_mean_batch'
 KMEANS_N_INIT = 100
 KMEANS_REFRESH_POLICY = 'one_epoch'
 REFINEMENT_BATCHING_POLICY = 'balanced_shuffled_each_epoch'
 MAX_REFINEMENT_EPOCHS = 1400
+DEFAULT_PROGRESS_INTERVAL = 25
 TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
 UNLABELED_DATASETS = {
     'AIRPOLLUTION': {
@@ -67,7 +79,6 @@ UNLABELED_DATASETS = {
         'view1_filters': [500, 500, 2000],
         'view2_base_units': 64,
         'n_clusters': 4,
-        'artifact_path': AIRPOLLUTION_ARTIFACT_PATH,
         'scaling_method': 'minmax',
     },
     'TIKI': {
@@ -77,10 +88,98 @@ UNLABELED_DATASETS = {
         'view1_filters': [250, 250, 1000],
         'view2_base_units': 32,
         'n_clusters': 5,
-        'artifact_path': TIKI_ARTIFACT_PATH,
         'scaling_method': 'none',
     },
 }
+
+
+@dataclass(frozen=True)
+class MvdecProtocol:
+    """Resolved immutable identity for one MvDEC training configuration."""
+
+    protocol_id: str
+    claim_scope: str
+    architecture_source: str
+    refinement_source: str
+    reconstruction_weight: float
+    kmeans_weight: float
+    scatter_trace_weight: float
+    greedy_weight: float
+    eigenvalue_order: str
+    greedy_eigen_direction: str
+    greedy_target_mode: str
+    l4_reduction: str
+
+    def manifest_contract(self, tolerance: float) -> dict[str, object]:
+        """Return the explicit paper and optimization contract for artifacts."""
+
+        return {
+            'protocol_id': self.protocol_id,
+            'claim_scope': self.claim_scope,
+            'architecture_source': self.architecture_source,
+            'refinement_source': self.refinement_source,
+            'objective': {
+                'name': final_training_objective(self),
+                'loss_terms': {
+                    'L1_reconstruction': {
+                        'weight': self.reconstruction_weight,
+                        'optimized': self.reconstruction_weight > 0,
+                    },
+                    'L2_kmeans': {
+                        'weight': self.kmeans_weight,
+                        'optimized': self.kmeans_weight > 0,
+                    },
+                    'L3_scatter_trace': {
+                        'weight': self.scatter_trace_weight,
+                        'optimized': self.scatter_trace_weight > 0,
+                        'mathematically_equivalent_to_L2': True,
+                    },
+                    'L4_greedy': {
+                        'weight': self.greedy_weight,
+                        'optimized': self.greedy_weight > 0,
+                        'reduction': self.l4_reduction,
+                    },
+                },
+            },
+            'eigen': {
+                'order': self.eigenvalue_order,
+                'direction': self.greedy_eigen_direction,
+                'rationale': (
+                    'DEKM 2021 sorts ascending and uses the largest/last '
+                    'least-informative direction.'
+                ),
+            },
+            'greedy_target': {
+                'mode': self.greedy_target_mode,
+                'rationale': (
+                    'Frozen transformed-embedding target used by the released '
+                    'DEKM 2021 implementation.'
+                ),
+            },
+            'stopping': {
+                'assignment_change_tolerance': float(tolerance),
+                'policy': (
+                    '0.001 for public DEKM benchmarks; 0.01 by design for '
+                    'unlabeled private case studies.'
+                ),
+            },
+        }
+
+
+PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
+    protocol_id=PRIMARY_PROTOCOL_ID,
+    claim_scope='MvDEC architecture with DEKM-2021-consistent greedy refinement',
+    architecture_source='MvDEC 2025 multi-view encoder-latent fusion',
+    refinement_source='DEKM 2021 Algorithm 1 and released implementation',
+    reconstruction_weight=1.0,
+    kmeans_weight=DEFAULT_LAMBDA_KMEANS,
+    scatter_trace_weight=0.0,
+    greedy_weight=DEFAULT_LAMBDA_GREEDY,
+    eigenvalue_order=EIGENVALUE_ORDER,
+    greedy_eigen_direction=DEFAULT_GREEDY_EIGEN_DIRECTION,
+    greedy_target_mode=DEFAULT_GREEDY_TARGET_MODE,
+    l4_reduction=L4_REDUCTION,
+)
 
 
 def resolve_assignment_change_tolerance(dataset_name, override=None):
@@ -100,6 +199,23 @@ def resolve_assignment_change_tolerance(dataset_name, override=None):
     return tolerance
 
 
+def validate_protocol_assignment_change_tolerance(
+    protocol: MvdecProtocol,
+    dataset_name: str,
+    tolerance: float,
+) -> float:
+    """Require custom protocol identity for stopping-tolerance ablations."""
+
+    expected = resolve_assignment_change_tolerance(dataset_name)
+    if protocol.protocol_id == PRIMARY_PROTOCOL_ID and tolerance != expected:
+        raise ValueError(
+            f'{PRIMARY_PROTOCOL_ID} fixes assignment-change tolerance at '
+            f'{expected:g} for {dataset_name}. Use --protocol custom for '
+            'tolerance ablations.'
+        )
+    return tolerance
+
+
 def view_output_width():
     return hidden_units + input_shape
 
@@ -108,13 +224,113 @@ def view_output_layout():
     return f'eq5_compatible_{hidden_units}_plus_{input_shape}'
 
 
-def final_training_objective(kmeans_weight, greedy_weight):
+def final_training_objective(protocol: MvdecProtocol) -> str:
+    """Return an objective name that does not overclaim paper fidelity."""
+
+    if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
+        return 'mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy'
     parts = ['reconstruction']
-    if kmeans_weight > 0:
+    if protocol.kmeans_weight > 0:
         parts.append('kmeans')
-    if greedy_weight > 0:
+    if protocol.scatter_trace_weight > 0:
+        parts.append('scatter_trace')
+    if protocol.greedy_weight > 0:
         parts.append('greedy')
-    return f'mvdec2025_latent_joint_{"_".join(parts)}_l3_trace_logged'
+    return f'mvdec_custom_{"_".join(parts)}'
+
+
+def resolve_mvdec_protocol(
+    protocol_id: str,
+    kmeans_weight: float,
+    greedy_weight: float,
+    eigen_direction: str,
+    target_mode: str,
+) -> MvdecProtocol:
+    """Resolve and validate a named primary protocol or explicit ablation."""
+
+    if protocol_id not in PROTOCOL_IDS:
+        raise ValueError(f'Unsupported MvDEC protocol: {protocol_id!r}.')
+    if kmeans_weight < 0 or greedy_weight < 0:
+        raise ValueError('MvDEC loss weights must be non-negative.')
+    greedy_eigen_index(eigen_direction)
+    validate_greedy_target_mode(target_mode)
+    resolved = MvdecProtocol(
+        protocol_id=protocol_id,
+        claim_scope=(
+            PRIMARY_MVDEC_PROTOCOL.claim_scope
+            if protocol_id == PRIMARY_PROTOCOL_ID
+            else 'Explicit custom ablation; not a faithful paper-replication claim'
+        ),
+        architecture_source=PRIMARY_MVDEC_PROTOCOL.architecture_source,
+        refinement_source=(
+            PRIMARY_MVDEC_PROTOCOL.refinement_source
+            if protocol_id == PRIMARY_PROTOCOL_ID
+            else 'User-configured MvDEC ablation'
+        ),
+        reconstruction_weight=1.0,
+        kmeans_weight=float(kmeans_weight),
+        scatter_trace_weight=0.0,
+        greedy_weight=float(greedy_weight),
+        eigenvalue_order=EIGENVALUE_ORDER,
+        greedy_eigen_direction=eigen_direction,
+        greedy_target_mode=target_mode,
+        l4_reduction=L4_REDUCTION,
+    )
+    if protocol_id == PRIMARY_PROTOCOL_ID and resolved != PRIMARY_MVDEC_PROTOCOL:
+        raise ValueError(
+            f'{PRIMARY_PROTOCOL_ID} is immutable. Use --protocol custom for '
+            'loss, eigen-direction, or target-mode ablations.'
+        )
+    return resolved
+
+
+def protocol_contract_sha256(contract: dict[str, object]) -> str:
+    """Hash the canonical resolved protocol contract stored in an artifact."""
+
+    encoded = json.dumps(contract, sort_keys=True, separators=(',', ':')).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def protocol_method_name(protocol: MvdecProtocol) -> str:
+    """Return the human-readable method label for tables and artifacts."""
+
+    if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
+        return 'MvDEC-DEKM-consistent'
+    return 'MvDEC custom ablation'
+
+
+def resolved_run_config(
+    protocol: MvdecProtocol,
+    dataset_name: str,
+    tolerance: float,
+    max_refinement_epochs: int,
+    source_sha256: str | None,
+    feature_columns: list[str],
+    preprocessing_metadata: dict[str, object] | None,
+) -> dict[str, object]:
+    """Return the full seed-independent configuration used for run identity."""
+
+    return {
+        'dataset': dataset_name,
+        'method': protocol_method_name(protocol),
+        'protocol_contract': protocol.manifest_contract(tolerance),
+        'source_sha256': source_sha256,
+        'feature_columns': list(feature_columns),
+        'preprocessing': preprocessing_metadata,
+        'n_clusters': int(n_clusters),
+        'input_shape': int(input_shape),
+        'hidden_units': int(hidden_units),
+        'view1_filters': list(view1_filters),
+        'view2_base_units': int(view2_base_units),
+        'pretrain_epochs': int(pretrain_epochs),
+        'batch_size': int(batch_size),
+        'kmeans_n_init': int(KMEANS_N_INIT),
+        'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
+        'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
+        'max_refinement_epochs': int(max_refinement_epochs),
+        'assignment_change_tolerance': float(tolerance),
+        'l4_reduction': protocol.l4_reduction,
+    }
 
 
 def latent_embedding(view_output):
@@ -154,13 +370,6 @@ def build_greedy_target(
     return target
 
 
-def append_artifact_suffix(artifact_path, suffix):
-    if not suffix:
-        return str(artifact_path)
-    path = Path(artifact_path)
-    return str(path.with_name(f'{path.stem}{suffix}{path.suffix}'))
-
-
 def loss_ablation_tag(kmeans_weight, greedy_weight):
     if (
         kmeans_weight == DEFAULT_LAMBDA_KMEANS
@@ -168,20 +377,6 @@ def loss_ablation_tag(kmeans_weight, greedy_weight):
     ):
         return ''
     return f'_l2w{kmeans_weight:g}_l4w{greedy_weight:g}'
-
-
-def artifact_path_for_greedy_mode(artifact_path, direction, target_mode):
-    greedy_eigen_index(direction)
-    validate_greedy_target_mode(target_mode)
-    if (
-        direction == DEFAULT_GREEDY_EIGEN_DIRECTION
-        and target_mode == DEFAULT_GREEDY_TARGET_MODE
-    ):
-        return str(artifact_path)
-    return append_artifact_suffix(
-        artifact_path,
-        f'_{direction}_eigen_{target_mode}',
-    )
 
 
 def set_random_seed(seed):
@@ -236,6 +431,21 @@ def validate_max_refinement_epochs(max_refinement_epochs):
     if max_refinement_epochs < 1:
         raise ValueError('max_refinement_epochs must be at least 1.')
     return int(max_refinement_epochs)
+
+
+def validate_progress_interval(progress_interval: int) -> int:
+    """Return a valid positive interval for concise console heartbeats."""
+
+    if progress_interval < 1:
+        raise ValueError('progress_interval must be at least 1.')
+    return int(progress_interval)
+
+
+def should_log_progress(completed: int, total: int, interval: int) -> bool:
+    """Log the first, final, and every configured progress interval."""
+
+    interval = validate_progress_interval(interval)
+    return completed == 1 or completed == total or completed % interval == 0
 
 
 def epoch_batch_bounds(
@@ -403,6 +613,9 @@ def save_airpollution_mvdec_artifact(
     true_labels=None,
     source_sha256=None,
     external_metrics=None,
+    protocol=PRIMARY_MVDEC_PROTOCOL,
+    run_id=None,
+    config_hash=None,
 ):
     greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
@@ -412,7 +625,19 @@ def save_airpollution_mvdec_artifact(
     greedy_eigen_position = (
         hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
     )
-    training_objective = final_training_objective(lambda_kmeans, lambda_greedy)
+    if any(
+        (
+            protocol.greedy_eigen_direction != greedy_eigen_direction,
+            protocol.greedy_target_mode != greedy_target_mode,
+            protocol.kmeans_weight != lambda_kmeans,
+            protocol.greedy_weight != lambda_greedy,
+        )
+    ):
+        raise ValueError('MvDEC artifact settings do not match its protocol contract.')
+    protocol_contract = protocol.manifest_contract(assignment_change_tolerance)
+    protocol_sha256 = protocol_contract_sha256(protocol_contract)
+    training_objective = final_training_objective(protocol)
+    method_name = protocol_method_name(protocol)
     if ds_name == 'AIRPOLLUTION':
         if not isinstance(preprocessing_metadata, dict):
             raise ValueError(
@@ -438,9 +663,22 @@ def save_airpollution_mvdec_artifact(
 
     artifact = {
         'schema_version': PUBLIC_ARTIFACT_SCHEMA_VERSION,
-        'algorithm': 'MvDEC',
+        'algorithm_family': 'MvDEC',
+        'algorithm': method_name,
+        'method_name': method_name,
+        'protocol_id': protocol.protocol_id,
+        'run_id': run_id,
+        'config_hash': config_hash,
+        'protocol_contract': protocol_contract,
+        'protocol_contract_sha256': protocol_sha256,
+        'claim_scope': protocol.claim_scope,
+        'architecture_source': protocol.architecture_source,
+        'refinement_source': protocol.refinement_source,
         'dataset': ds_name,
-        'paper': '2025_Multi-view Deep Embedded Clustering',
+        'paper_basis': [
+            '2025_Multi-view Deep Embedded Clustering architecture',
+            '2021_Deep Embedded K-Means Clustering refinement',
+        ],
         'fusion_contract': 'mvdec2025_encoder_average',
         'view_output_layout': view_output_layout(),
         'final_training_objective': training_objective,
@@ -468,7 +706,7 @@ def save_airpollution_mvdec_artifact(
         'refinement_epochs_completed': int(refinement_epochs_completed),
         'n_samples': int(h_fused.shape[0]),
         'feature_columns': feature_columns,
-        'eigenvalue_order': 'ascending',
+        'eigenvalue_order': EIGENVALUE_ORDER,
         'greedy_eigen_direction': greedy_eigen_direction,
         'greedy_eigen_index': int(greedy_eigen_position),
         'greedy_target_mode': greedy_target_mode,
@@ -498,15 +736,20 @@ def save_airpollution_mvdec_artifact(
             'model_view_output_dim': int(view_output_width()),
             'model_view_output_layout': view_output_layout(),
             'final_training_objective': training_objective,
-            'eigenvalue_order': 'ascending',
+            'protocol_id': protocol.protocol_id,
+            'run_id': run_id,
+            'config_hash': config_hash,
+            'protocol_contract': protocol_contract,
+            'protocol_contract_sha256': protocol_sha256,
+            'eigenvalue_order': EIGENVALUE_ORDER,
             'greedy_eigen_direction': greedy_eigen_direction,
             'greedy_eigen_index': int(greedy_eigen_position),
             'greedy_target_mode': greedy_target_mode,
             'loss_weights': {
-                'reconstruction': float(lambda_reconstruction),
-                'kmeans': float(lambda_kmeans),
-                'orthonormal_trace_logged': float(lambda_orthonormal),
-                'greedy': float(lambda_greedy),
+                'reconstruction': protocol.reconstruction_weight,
+                'kmeans': protocol.kmeans_weight,
+                'scatter_trace_diagnostic': protocol.scatter_trace_weight,
+                'greedy': protocol.greedy_weight,
             },
             'fusion': 'h_fused = (view1_latent + view2_latent) / 2',
             'preprocessing': preprocessing_metadata,
@@ -520,7 +763,7 @@ def save_airpollution_mvdec_artifact(
     print(f'MvDEC artifact was saved to {artifact_path}')
 
 
-def model_view1(load_weights=True):
+def model_view1(load_weights=True, weights_path=None):
     filters = view1_filters
     init = 'glorot_uniform'
     activation = 'relu'
@@ -547,12 +790,17 @@ def model_view1(load_weights=True):
     output = layers.Concatenate()([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
-        model.load_weights(f'weight_base_view1_{ds_name}.weights.h5')
+        path = (
+            Path(weights_path)
+            if weights_path is not None
+            else Path(f'weight_base_view1_{ds_name}.weights.h5')
+        )
+        model.load_weights(path)
         print('model_view1: weights was loaded')
     return model
 
 
-def model_view2(load_weights=True):
+def model_view2(load_weights=True, weights_path=None):
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
@@ -604,7 +852,12 @@ def model_view2(load_weights=True):
     output = layers.Concatenate()([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
-        model.load_weights(f'weight_base_view2_{ds_name}.weights.h5')
+        path = (
+            Path(weights_path)
+            if weights_path is not None
+            else Path(f'weight_base_view2_{ds_name}.weights.h5')
+        )
+        model.load_weights(path)
         print('model_view2: weights was loaded')
     return model
 
@@ -641,26 +894,87 @@ def loss_train_base(y_true, y_pred):
     return squared_euclidean_per_sample(y_true, y_pred)
 
 
-def train_base_view1(ds_xx):
+class PretrainProgressCallback(tf.keras.callbacks.Callback):
+    """Print compact, immediately flushed pretraining progress."""
+
+    def __init__(self, view_name: str, total_epochs: int, interval: int) -> None:
+        super().__init__()
+        self.view_name = view_name
+        self.total_epochs = total_epochs
+        self.interval = validate_progress_interval(interval)
+        self.started_at = None
+
+    def on_train_begin(self, logs=None):
+        self.started_at = time.time()
+
+    def on_epoch_end(self, epoch, logs=None):
+        completed = epoch + 1
+        if not should_log_progress(completed, self.total_epochs, self.interval):
+            return
+        loss = float((logs or {}).get('loss', np.nan))
+        elapsed = time.time() - self.started_at
+        print(
+            f'progress:pretrain_{self.view_name}; dataset:{ds_name}; '
+            f'epoch:{completed}/{self.total_epochs}; loss:{loss:.5f}; '
+            f'elapsed:{elapsed:.1f}s',
+            flush=True,
+        )
+
+
+def train_base_view1(
+    ds_xx,
+    progress_interval=DEFAULT_PROGRESS_INTERVAL,
+    weights_path=None,
+):
     model = model_view1(load_weights=False)
     model.compile(optimizer='adam', loss=loss_train_base)
-    history = model.fit(ds_xx, epochs=pretrain_epochs, verbose=0)
+    history = model.fit(
+        ds_xx,
+        epochs=pretrain_epochs,
+        verbose=0,
+        callbacks=[
+            PretrainProgressCallback('view1', pretrain_epochs, progress_interval)
+        ],
+    )
     print(
         f'pretrain view1 {ds_name}: epochs={pretrain_epochs}; '
-        f'final_loss={history.history["loss"][-1]:.5f}'
+        f'final_loss={history.history["loss"][-1]:.5f}',
+        flush=True,
     )
-    model.save_weights(f'weight_base_view1_{ds_name}.weights.h5')
+    path = (
+        Path(weights_path)
+        if weights_path is not None
+        else Path(f'weight_base_view1_{ds_name}.weights.h5')
+    )
+    model.save_weights(path)
 
 
-def train_base_view2(ds_xx):
+def train_base_view2(
+    ds_xx,
+    progress_interval=DEFAULT_PROGRESS_INTERVAL,
+    weights_path=None,
+):
     model = model_view2(load_weights=False)
     model.compile(optimizer='adam', loss=loss_train_base)
-    history = model.fit(ds_xx, epochs=pretrain_epochs, verbose=0)
+    history = model.fit(
+        ds_xx,
+        epochs=pretrain_epochs,
+        verbose=0,
+        callbacks=[
+            PretrainProgressCallback('view2', pretrain_epochs, progress_interval)
+        ],
+    )
     print(
         f'pretrain view2 {ds_name}: epochs={pretrain_epochs}; '
-        f'final_loss={history.history["loss"][-1]:.5f}'
+        f'final_loss={history.history["loss"][-1]:.5f}',
+        flush=True,
     )
-    model.save_weights(f'weight_base_view2_{ds_name}.weights.h5')
+    path = (
+        Path(weights_path)
+        if weights_path is not None
+        else Path(f'weight_base_view2_{ds_name}.weights.h5')
+    )
+    model.save_weights(path)
 
 
 def sorted_eig(X):
@@ -736,6 +1050,7 @@ def _log_training_phase(
     input_space_reference=None,
     extra_fields=None,
     file_name=None,
+    log_path=None,
     print_console=True,
 ):
     extra_str = ''
@@ -753,8 +1068,12 @@ def _log_training_phase(
         f'time:{time.time() - train_start_time:.3f}'
     )
     if print_console:
-        print(log_str)
-    log_csv(log_str.split(';'), file_name=ds_name if file_name is None else file_name)
+        print(log_str, flush=True)
+    fields = log_str.split(';')
+    if log_path is not None:
+        append_run_log(Path(log_path), fields)
+    else:
+        log_csv(fields, file_name=ds_name if file_name is None else file_name)
 
 
 def train(
@@ -769,24 +1088,44 @@ def train(
     max_refinement_epochs=MAX_REFINEMENT_EPOCHS,
     random_seed=None,
     time_start=None,
-    artifact_path=AIRPOLLUTION_ARTIFACT_PATH,
+    artifact_path=None,
     source_sha256=None,
+    progress_interval=DEFAULT_PROGRESS_INTERVAL,
+    protocol=PRIMARY_MVDEC_PROTOCOL,
+    run_id=None,
+    config_hash=None,
+    training_log_path=None,
+    pretrain_view1_path=None,
+    pretrain_view2_path=None,
+    final_view1_path=None,
+    final_view2_path=None,
+    assignments_path=None,
 ):
     train_start_time = time.time() if time_start is None else time_start
+    if any(
+        (
+            protocol.greedy_eigen_direction != greedy_eigen_direction,
+            protocol.greedy_target_mode != greedy_target_mode,
+            protocol.kmeans_weight != lambda_kmeans,
+            protocol.greedy_weight != lambda_greedy,
+        )
+    ):
+        raise ValueError('MvDEC training settings do not match its protocol contract.')
     greedy_index = greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
     max_refinement_epochs = validate_max_refinement_epochs(
         max_refinement_epochs
     )
+    progress_interval = validate_progress_interval(progress_interval)
     batches_per_epoch = number_of_batches(len(x), batch_size)
     kmeans_refresh_interval = batches_per_epoch
     max_training_steps = max_refinement_epochs * batches_per_epoch
     batch_rng = np.random.default_rng(random_seed)
     experiment_tag = (
-        f'{greedy_eigen_direction}_eigen_{greedy_target_mode}'
+        f'{protocol.protocol_id}_{greedy_eigen_direction}_eigen_{greedy_target_mode}'
         f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
     )
-    train_log_name = f'{ds_name}_{experiment_tag.upper()}'
+    train_log_name = run_id or f'{ds_name}_{experiment_tag.upper()}'
     log_str = (
         'phase; space; metric; silhouette_input_space; loss; '
         'n_changed_assignment; cluster_sizes; '
@@ -794,9 +1133,12 @@ def train(
         'greedy_target_mode; '
         f'time:{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}'
     )
-    log_csv(log_str.split(';'), file_name=train_log_name)
-    model1 = model_view1()
-    model2 = model_view2()
+    if training_log_path is not None:
+        append_run_log(Path(training_log_path), log_str.split(';'))
+    else:
+        log_csv(log_str.split(';'), file_name=train_log_name)
+    model1 = model_view1(weights_path=pretrain_view1_path)
+    model2 = model_view2(weights_path=pretrain_view2_path)
 
     optimizer = tf.keras.optimizers.Adam()
     loss_value = 0
@@ -832,6 +1174,7 @@ def train(
             train_start_time=train_start_time,
             input_space_reference=x if y is None else None,
             file_name=train_log_name,
+            log_path=training_log_path,
         )
 
     input_kmeans = make_kmeans(random_seed).fit(x)
@@ -848,6 +1191,7 @@ def train(
         train_start_time=train_start_time,
         input_space_reference=x if y is None else None,
         file_name=train_log_name,
+        log_path=training_log_path,
     )
     for ite in range(max_training_steps):
         log_paper_step_checkpoint = ite % kmeans_refresh_interval == 0
@@ -923,7 +1267,18 @@ def train(
                 input_space_reference=x if y is None else None,
                 extra_fields=eigen_log_fields,
                 file_name=train_log_name,
+                log_path=training_log_path,
+                print_console=False,
             )
+            refinement_epoch = ite // kmeans_refresh_interval
+            if refinement_epoch == 0 or refinement_epoch % progress_interval == 0:
+                print(
+                    f'progress:refinement; dataset:{ds_name}; '
+                    f'epoch:{refinement_epoch}/{max_refinement_epochs}; '
+                    f'{metric_str}; changed:{n_change_assignment}/{len(x)}; '
+                    f'elapsed:{time.time() - train_start_time:.1f}s',
+                    flush=True,
+                )
             greedy_metric_str, _ = _metric_for_labels(
                 H_vt_greedy_target,
                 assignment,
@@ -939,6 +1294,7 @@ def train(
                 train_start_time=train_start_time,
                 extra_fields=eigen_log_fields,
                 file_name=train_log_name,
+                log_path=training_log_path,
                 print_console=False,
             )
 
@@ -1081,6 +1437,7 @@ def train(
                     ),
                 },
                 file_name=train_log_name,
+                log_path=training_log_path,
                 print_console=False,
             )
 
@@ -1088,12 +1445,18 @@ def train(
 
     if stop_reason == 'max_epochs_reached':
         refinement_epochs_completed = max_refinement_epochs
-    model1.save_weights(
-        f'weight_final_view1_{ds_name}_{experiment_tag}.weights.h5'
+    resolved_final_view1_path = (
+        Path(final_view1_path)
+        if final_view1_path is not None
+        else Path(f'weight_final_view1_{ds_name}_{experiment_tag}.weights.h5')
     )
-    model2.save_weights(
-        f'weight_final_view2_{ds_name}_{experiment_tag}.weights.h5'
+    resolved_final_view2_path = (
+        Path(final_view2_path)
+        if final_view2_path is not None
+        else Path(f'weight_final_view2_{ds_name}_{experiment_tag}.weights.h5')
     )
+    model1.save_weights(resolved_final_view1_path)
+    model2.save_weights(resolved_final_view2_path)
     stop_log_str = (
         f'phase:training_stop; stop_reason:{stop_reason}; '
         f'refinement_epochs_completed:{refinement_epochs_completed}; '
@@ -1101,7 +1464,10 @@ def train(
         f'time:{time.time() - train_start_time:.3f}'
     )
     print(stop_log_str)
-    log_csv(stop_log_str.split(';'), file_name=train_log_name)
+    if training_log_path is not None:
+        append_run_log(Path(training_log_path), stop_log_str.split(';'))
+    else:
+        log_csv(stop_log_str.split(';'), file_name=train_log_name)
 
     h1, h2, H, final_assignment = recompute_final_clustering(
         model1,
@@ -1141,6 +1507,7 @@ def train(
         train_start_time=train_start_time,
         input_space_reference=x if y is None else None,
         extra_fields={
+            'protocol_id': protocol.protocol_id,
             'greedy_eigen_direction': greedy_eigen_direction,
             'greedy_eigen_index': (
                 hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
@@ -1156,9 +1523,12 @@ def train(
             'loss_scope': 'last_completed_epoch_mean',
         },
         file_name=train_log_name,
+        log_path=training_log_path,
     )
 
     if orig_idx is not None:
+        if artifact_path is None:
+            raise ValueError('MvDEC train requires a run-owned artifact path.')
         h_ordered = _restore_original_order(H, orig_idx)
         labels_ordered = _restore_original_order(assignment, orig_idx)
         artifact_path = Path(artifact_path)
@@ -1168,20 +1538,30 @@ def train(
                 columns=[f'h_{i}' for i in range(H.shape[1])],
             )
             result.insert(0, 'orig_index', np.arange(len(orig_idx)))
+            result.insert(1, 'protocol_id', protocol.protocol_id)
+            result.insert(2, 'run_id', run_id)
+            result.insert(3, 'config_hash', config_hash)
             result['cluster'] = labels_ordered
-            assignments_path = Path('output') / (
-                f'{ds_name}_{experiment_tag}_clusters.csv'
+            assignments_path = (
+                Path(assignments_path)
+                if assignments_path is not None
+                else Path('output') / f'{ds_name}_{experiment_tag}_clusters.csv'
             )
         else:
             result = public_assignment_frame(
                 dataset=ds_name,
-                method='MvDEC',
+                method=protocol_method_name(protocol),
                 labels=labels_ordered,
                 true_labels=_restore_original_order(y, orig_idx),
                 random_seed=random_seed,
             )
-            assignments_path = artifact_path.with_name(
-                f'{artifact_path.stem}_assignments.csv'
+            result.insert(2, 'protocol_id', protocol.protocol_id)
+            result.insert(3, 'run_id', run_id)
+            result.insert(4, 'config_hash', config_hash)
+            assignments_path = (
+                Path(assignments_path)
+                if assignments_path is not None
+                else artifact_path.with_name(f'{artifact_path.stem}_assignments.csv')
             )
         write_public_assignments(
             result,
@@ -1208,6 +1588,9 @@ def train(
             true_labels=y,
             source_sha256=source_sha256,
             external_metrics=external_metrics,
+            protocol=protocol,
+            run_id=run_id,
+            config_hash=config_hash,
         )
 
     if y is not None:
@@ -1221,8 +1604,35 @@ if __name__ == '__main__':
     )
     parser.add_argument('ds_name', default='AIRPOLLUTION')
     parser.add_argument('--runs', type=int, default=3)
-    parser.add_argument('--seed', type=int, default=None)
-    parser.add_argument('--artifact-path', default=AIRPOLLUTION_ARTIFACT_PATH)
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='First explicit run seed; subsequent runs use seed + run index.',
+    )
+    parser.add_argument(
+        '--protocol',
+        choices=PROTOCOL_IDS,
+        default=PRIMARY_PROTOCOL_ID,
+        help=(
+            'Immutable primary DEKM-consistent protocol, or custom for an '
+            'explicit loss/eigen/target ablation.'
+        ),
+    )
+    parser.add_argument(
+        '--artifact-path',
+        default=None,
+        help=(
+            'Legacy private-output anchor. When set, its parent/stem becomes '
+            'the run root; artifacts still use isolated seed directories.'
+        ),
+    )
+    parser.add_argument(
+        '--output-dir',
+        type=Path,
+        default=Path('output/mvdec_runs'),
+        help='Root directory for isolated private-dataset MvDEC runs.',
+    )
     parser.add_argument('--dataset-root', type=Path, default=DEKM_DATASET_DIR)
     parser.add_argument(
         '--public-output-dir',
@@ -1230,10 +1640,21 @@ if __name__ == '__main__':
         default=PUBLIC_BENCHMARK_OUTPUT_DIR / 'mvdec',
     )
     parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Overwrite files owned by the exact same dataset/config/seed run_id.',
+    )
+    parser.add_argument(
         '--max-refinement-epochs',
         type=int,
         default=MAX_REFINEMENT_EPOCHS,
         help='Safety cap for full-epoch refinement cycles.',
+    )
+    parser.add_argument(
+        '--progress-interval',
+        type=int,
+        default=DEFAULT_PROGRESS_INTERVAL,
+        help='Print one compact progress heartbeat every N epochs.',
     )
     parser.add_argument(
         '--assignment-change-tolerance',
@@ -1248,37 +1669,53 @@ if __name__ == '__main__':
         '--greedy-eigen-direction',
         choices=GREEDY_EIGEN_DIRECTIONS,
         default=DEFAULT_GREEDY_EIGEN_DIRECTION,
-        help='Use the largest or smallest within-cluster scatter eigenvalue for L4.',
+        help=(
+            'Largest is the DEKM-consistent last/least-informative direction; '
+            'use --protocol custom for smallest-eigen sensitivity runs.'
+        ),
     )
     parser.add_argument(
         '--greedy-target-mode',
         choices=GREEDY_TARGET_MODES,
         default=DEFAULT_GREEDY_TARGET_MODE,
-        help='Use the paper-style selected dimension or the frozen DEKM target.',
+        help=(
+            'Frozen snapshot matches the released DEKM implementation; use '
+            '--protocol custom for selected-dimension-only ablations.'
+        ),
     )
     parser.add_argument(
         '--lambda-kmeans',
         type=float,
         default=DEFAULT_LAMBDA_KMEANS,
         help=(
-            'Weight of the L2 K-means loss; defaults to 0 per DEKM 2021 '
-            'Fig. 4, set 1 for the literal MvDEC 2025 Eq. 11.'
+            'L2 K-means weight. The primary protocol fixes it at 0 because '
+            'DEKM 2021 selects greedy last-direction refinement and L3 is '
+            'trace-equivalent to L2. Use --protocol custom for ablations.'
         ),
     )
     parser.add_argument(
         '--lambda-greedy',
         type=float,
         default=DEFAULT_LAMBDA_GREEDY,
-        help='Weight of the L4 greedy loss; set 0 to ablate it.',
+        help=(
+            'L4 greedy weight, fixed at 1 by the primary protocol. Use '
+            '--protocol custom to ablate it.'
+        ),
     )
     args = parser.parse_args()
     if args.runs < 1:
         raise ValueError('--runs must be at least 1')
-    if args.lambda_kmeans < 0 or args.lambda_greedy < 0:
-        raise ValueError('--lambda-kmeans and --lambda-greedy must be non-negative.')
-    lambda_kmeans = args.lambda_kmeans
-    lambda_greedy = args.lambda_greedy
+    protocol = resolve_mvdec_protocol(
+        args.protocol,
+        args.lambda_kmeans,
+        args.lambda_greedy,
+        args.greedy_eigen_direction,
+        args.greedy_target_mode,
+    )
+    lambda_kmeans = protocol.kmeans_weight
+    lambda_greedy = protocol.greedy_weight
     validate_max_refinement_epochs(args.max_refinement_epochs)
+    validate_progress_interval(args.progress_interval)
     if args.ds_name is None or args.ds_name not in [
         'AIRPOLLUTION',
         'TIKI',
@@ -1316,18 +1753,15 @@ if __name__ == '__main__':
         ds_name,
         args.assignment_change_tolerance,
     )
-    if (
-        ds_name in UNLABELED_DATASETS
-        and args.artifact_path == AIRPOLLUTION_ARTIFACT_PATH
-    ):
-        args.artifact_path = append_artifact_suffix(
-            artifact_path_for_greedy_mode(
-                UNLABELED_DATASETS[ds_name]['artifact_path'],
-                args.greedy_eigen_direction,
-                args.greedy_target_mode,
-            ),
-            loss_ablation_tag(lambda_kmeans, lambda_greedy),
-        )
+    validate_protocol_assignment_change_tolerance(
+        protocol,
+        ds_name,
+        assignment_change_tolerance,
+    )
+    private_output_root = args.output_dir
+    if args.artifact_path is not None:
+        legacy_anchor = Path(args.artifact_path)
+        private_output_root = legacy_anchor.parent / legacy_anchor.stem
 
     public_dataset = (
         None
@@ -1335,23 +1769,27 @@ if __name__ == '__main__':
         else load_dekm_public_dataset(ds_name, args.dataset_root)
     )
     run_metrics = []
-    public_run_records = []
-    run_experiment_tag = (
-        f'{args.greedy_eigen_direction}_eigen_{args.greedy_target_mode}'
-        f'{loss_ablation_tag(lambda_kmeans, lambda_greedy)}'
+    config_dirs = set()
+    output_root = (
+        private_output_root
+        if ds_name in UNLABELED_DATASETS
+        else args.public_output_dir
     )
-    run_log_name = f'{ds_name}_{run_experiment_tag.upper()}'
     time_all_start = time.time()
     for run_index in range(args.runs):
         run_seed = None if args.seed is None else args.seed + run_index
         set_random_seed(run_seed)
         time_start = time.time()
+        print(
+            f'start:dataset:{ds_name}; run:{run_index + 1}/{args.runs}; '
+            f'seed:{run_seed}',
+            flush=True,
+        )
         orig_idx = None
         feature_columns = None
         raw_x = None
         preprocessing_metadata = None
         source_sha256 = None
-        run_artifact_path = args.artifact_path
         if ds_name in UNLABELED_DATASETS:
             dataset_config = UNLABELED_DATASETS[ds_name]
             x, orig_idx, feature_columns, source_x, preprocessing_metadata = (
@@ -1364,6 +1802,7 @@ if __name__ == '__main__':
             )
             if preprocessing_metadata['method'] != 'none':
                 raw_x = source_x
+            source_sha256 = preprocessing_metadata['source_sha256']
             y = None
         else:
             row_indices = tf.random.shuffle(
@@ -1376,77 +1815,155 @@ if __name__ == '__main__':
                 f'feature_{index + 1}' for index in range(public_dataset.X.shape[1])
             ]
             source_sha256 = public_dataset.source_sha256
-            run_stem = public_run_stem('MvDEC', ds_name, run_seed, run_index + 1)
-            run_artifact_path = (
-                args.public_output_dir / ds_name.lower() / f'{run_stem}.pkl'
-            )
+        run_config = resolved_run_config(
+            protocol=protocol,
+            dataset_name=ds_name,
+            tolerance=assignment_change_tolerance,
+            max_refinement_epochs=args.max_refinement_epochs,
+            source_sha256=source_sha256,
+            feature_columns=feature_columns,
+            preprocessing_metadata=preprocessing_metadata,
+        )
+        run_paths = resolve_run_paths(
+            output_root=output_root,
+            dataset=ds_name,
+            protocol_id=protocol.protocol_id,
+            config=run_config,
+            seed=run_seed,
+            run_index=run_index + 1,
+        )
+        prepare_run_directory(run_paths, force=args.force)
+        config_dirs.add(run_paths.config_dir)
+        manifest_base = {
+            'run_id': run_paths.run_id,
+            'status': 'running',
+            'dataset': ds_name,
+            'method': protocol_method_name(protocol),
+            'protocol_id': protocol.protocol_id,
+            'config_hash': run_paths.config_hash,
+            'seed': run_seed,
+            'run_index': run_index + 1,
+            'started_at_utc': datetime.now(UTC).isoformat(),
+            'config': run_config,
+            'paths': {
+                'artifact': run_paths.artifact.name,
+                'assignments': run_paths.assignments.name,
+                'pretrain_view1': run_paths.pretrain_view1.name,
+                'pretrain_view2': run_paths.pretrain_view2.name,
+                'final_view1': run_paths.final_view1.name,
+                'final_view2': run_paths.final_view2.name,
+                'training_log': run_paths.training_log.name,
+            },
+        }
+        write_run_manifest(run_paths.manifest, manifest_base)
         ds_xx = tf.data.Dataset.from_tensor_slices((x, x)).shuffle(
             8000, seed=run_seed
         ).batch(pretrain_batch_size)
-        train_base_view1(ds_xx)
-        train_base_view2(ds_xx)
-        metric = train(
-            x,
-            y=y,
-            raw_x=raw_x,
-            orig_idx=orig_idx,
-            feature_columns=feature_columns,
-            preprocessing_metadata=preprocessing_metadata,
-            greedy_eigen_direction=args.greedy_eigen_direction,
-            greedy_target_mode=args.greedy_target_mode,
-            max_refinement_epochs=args.max_refinement_epochs,
-            random_seed=run_seed,
-            time_start=time_start,
-            artifact_path=run_artifact_path,
-            source_sha256=source_sha256,
-        )
+        try:
+            train_base_view1(
+                ds_xx,
+                args.progress_interval,
+                weights_path=run_paths.pretrain_view1,
+            )
+            train_base_view2(
+                ds_xx,
+                args.progress_interval,
+                weights_path=run_paths.pretrain_view2,
+            )
+            metric = train(
+                x,
+                y=y,
+                raw_x=raw_x,
+                orig_idx=orig_idx,
+                feature_columns=feature_columns,
+                preprocessing_metadata=preprocessing_metadata,
+                greedy_eigen_direction=args.greedy_eigen_direction,
+                greedy_target_mode=args.greedy_target_mode,
+                max_refinement_epochs=args.max_refinement_epochs,
+                random_seed=run_seed,
+                time_start=time_start,
+                artifact_path=run_paths.artifact,
+                source_sha256=source_sha256,
+                progress_interval=args.progress_interval,
+                protocol=protocol,
+                run_id=run_paths.run_id,
+                config_hash=run_paths.config_hash,
+                training_log_path=run_paths.training_log,
+                pretrain_view1_path=run_paths.pretrain_view1,
+                pretrain_view2_path=run_paths.pretrain_view2,
+                final_view1_path=run_paths.final_view1,
+                final_view2_path=run_paths.final_view2,
+                assignments_path=run_paths.assignments,
+            )
+        except Exception as error:
+            write_run_manifest(
+                run_paths.manifest,
+                {
+                    **manifest_base,
+                    'status': 'failed',
+                    'runtime_seconds': time.time() - time_start,
+                    'finished_at_utc': datetime.now(UTC).isoformat(),
+                    'error': {
+                        'type': type(error).__name__,
+                        'message': str(error),
+                    },
+                },
+            )
+            raise
         run_metrics.append(metric)
         if y is None:
+            metrics_payload = {'silhouette': float(metric)}
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
+                f'run_id:{run_paths.run_id}; '
+                f'protocol_id:{protocol.protocol_id}; '
                 f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
                 f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'silhouette:{metric}; time:{time.time() - time_start:.3f}'
             )
         else:
             acc, nmi = metric
-            public_run_records.append(
-                {
-                    'dataset': ds_name,
-                    'method': 'MvDEC',
-                    'run': run_index + 1,
-                    'random_seed': run_seed,
-                    'n_samples': len(public_dataset.X),
-                    'n_features': public_dataset.X.shape[1],
-                    'n_clusters': n_clusters,
-                    'source_sha256': public_dataset.source_sha256,
-                    'acc': acc,
-                    'nmi': nmi,
-                    'artifact_path': str(run_artifact_path),
-                    'assignments_path': str(
-                        run_artifact_path.with_name(
-                            f'{run_artifact_path.stem}_assignments.csv'
-                        )
-                    ),
-                    'fit_time_seconds': time.time() - time_start,
-                }
-            )
+            metrics_payload = {'acc': float(acc), 'nmi': float(nmi)}
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
+                f'run_id:{run_paths.run_id}; '
+                f'protocol_id:{protocol.protocol_id}; '
                 f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
                 f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
             )
         print(run_str)
-        log_csv(
-            run_str.split(';'),
-            file_name=run_log_name,
+        append_run_log(run_paths.training_log, run_str.split(';'))
+        output_hashes = {
+            name: _file_sha256(path)
+            for name, path in {
+                'artifact': run_paths.artifact,
+                'assignments': run_paths.assignments,
+                'pretrain_view1': run_paths.pretrain_view1,
+                'pretrain_view2': run_paths.pretrain_view2,
+                'final_view1': run_paths.final_view1,
+                'final_view2': run_paths.final_view2,
+                'training_log': run_paths.training_log,
+            }.items()
+        }
+        write_run_manifest(
+            run_paths.manifest,
+            {
+                **manifest_base,
+                'status': 'complete',
+                'runtime_seconds': time.time() - time_start,
+                'finished_at_utc': datetime.now(UTC).isoformat(),
+                'metrics': metrics_payload,
+                'output_sha256': output_hashes,
+                'error': None,
+            },
         )
 
     if ds_name in UNLABELED_DATASETS:
         avg_silhouette = float(np.nanmean(np.asarray(run_metrics, dtype=float)))
         avg_str = (
             f'average over {args.runs} runs; silhouette:{avg_silhouette:.5f}; '
+            f'protocol_id:{protocol.protocol_id}; '
             f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
             f'greedy_target_mode:{args.greedy_target_mode}; '
             f'time:{time.time() - time_all_start:.3f}'
@@ -1457,39 +1974,14 @@ if __name__ == '__main__':
         avg_nmi = float(np.nanmean(metrics[:, 1]))
         avg_str = (
             f'average over {args.runs} runs; acc:{avg_acc:.5f}; nmi:{avg_nmi:.5f}; '
+            f'protocol_id:{protocol.protocol_id}; '
             f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
             f'greedy_target_mode:{args.greedy_target_mode}; '
             f'time:{time.time() - time_all_start:.3f}'
-        )
-    print(avg_str)
-    log_csv(
-        avg_str.split(';'),
-        file_name=run_log_name,
     )
-    if public_run_records:
-        runs_frame = pd.DataFrame.from_records(public_run_records)
-        summary_frame = pd.DataFrame(
-            [
-                {
-                    'dataset': ds_name,
-                    'method': 'MvDEC',
-                    'requested_runs': len(runs_frame),
-                    'acc_mean': runs_frame['acc'].mean(),
-                    'acc_std': (
-                        runs_frame['acc'].std(ddof=1)
-                        if len(runs_frame) > 1
-                        else 0.0
-                    ),
-                    'nmi_mean': runs_frame['nmi'].mean(),
-                    'nmi_std': (
-                        runs_frame['nmi'].std(ddof=1)
-                        if len(runs_frame) > 1
-                        else 0.0
-                    ),
-                    'source_sha256': public_dataset.source_sha256,
-                }
-            ]
-        )
-        output_dataset_dir = args.public_output_dir / ds_name.lower()
-        write_public_frame(runs_frame, output_dataset_dir / 'mvdec_runs.csv')
-        write_public_frame(summary_frame, output_dataset_dir / 'mvdec_summary.csv')
+    print(avg_str)
+    for config_dir in sorted(config_dirs):
+        manifests = load_run_manifests(config_dir)
+        runs_frame, summary_frame = build_summary_frames(manifests)
+        write_public_frame(runs_frame, config_dir / 'mvdec_runs.csv')
+        write_public_frame(summary_frame, config_dir / 'mvdec_summary.csv')

@@ -6,7 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pipeline.data import file_sha256, load_mvdec_result
 from pipeline.external_metrics import compute_external_metrics
+from pipeline.mvdec_runs import (
+    build_run_id,
+    canonical_config_hash,
+    write_run_manifest,
+)
 
 
 def _load_mvdec(monkeypatch):
@@ -103,9 +109,18 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
     assert kmeans.random_state == 42
     assert mvdec.KMEANS_REFRESH_POLICY == "one_epoch"
     assert mvdec.REFINEMENT_BATCHING_POLICY == "balanced_shuffled_each_epoch"
+    assert mvdec.DEFAULT_GREEDY_EIGEN_DIRECTION == "largest"
+    assert mvdec.DEFAULT_GREEDY_TARGET_MODE == "frozen_snapshot"
     assert mvdec.validate_max_refinement_epochs(1400) == 1400
     with pytest.raises(ValueError, match="max_refinement_epochs"):
         mvdec.validate_max_refinement_epochs(0)
+    assert mvdec.validate_progress_interval(25) == 25
+    with pytest.raises(ValueError, match="progress_interval"):
+        mvdec.validate_progress_interval(0)
+    assert mvdec.should_log_progress(1, 200, 25)
+    assert mvdec.should_log_progress(25, 200, 25)
+    assert mvdec.should_log_progress(200, 200, 25)
+    assert not mvdec.should_log_progress(26, 200, 25)
     assert mvdec.number_of_batches(3765, 256) == 15
     assert mvdec.number_of_batches(1799, 256) == 7
     assert mvdec.number_of_batches(512, 256) == 2
@@ -284,27 +299,6 @@ def test_build_greedy_target_changes_only_selected_direction(
     )
 
 
-def test_largest_mode_uses_default_artifact_path(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-
-    assert (
-        mvdec.artifact_path_for_greedy_mode(
-            "air.pkl",
-            "largest",
-            "selected_dimension_only",
-        )
-        == "air.pkl"
-    )
-    assert (
-        mvdec.artifact_path_for_greedy_mode(
-            "air.pkl",
-            "smallest",
-            "selected_dimension_only",
-        )
-        == "air_smallest_eigen_selected_dimension_only.pkl"
-    )
-
-
 def test_greedy_target_modes_are_explicit(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -314,6 +308,79 @@ def test_greedy_target_modes_are_explicit(monkeypatch):
     assert mvdec.validate_greedy_target_mode("frozen_snapshot") == ("frozen_snapshot")
     with pytest.raises(ValueError, match="Unsupported greedy target mode"):
         mvdec.validate_greedy_target_mode("moving_snapshot")
+
+
+def test_primary_protocol_is_explicit_and_immutable(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PRIMARY_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+
+    assert protocol == mvdec.PRIMARY_MVDEC_PROTOCOL
+    assert (
+        mvdec.final_training_objective(protocol)
+        == "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+    )
+    contract = protocol.manifest_contract(0.001)
+    assert contract["objective"]["loss_terms"]["L2_kmeans"] == {
+        "weight": 0.0,
+        "optimized": False,
+    }
+    assert contract["objective"]["loss_terms"]["L3_scatter_trace"]["optimized"] is False
+    assert contract["eigen"]["direction"] == "largest"
+    assert contract["greedy_target"]["mode"] == "frozen_snapshot"
+    assert (
+        mvdec.validate_protocol_assignment_change_tolerance(
+            protocol,
+            "REUTERS",
+            0.001,
+        )
+        == 0.001
+    )
+    with pytest.raises(ValueError, match="--protocol custom"):
+        mvdec.validate_protocol_assignment_change_tolerance(
+            protocol,
+            "REUTERS",
+            0.005,
+        )
+
+    with pytest.raises(ValueError, match="immutable"):
+        mvdec.resolve_mvdec_protocol(
+            mvdec.PRIMARY_PROTOCOL_ID,
+            kmeans_weight=1.0,
+            greedy_weight=1.0,
+            eigen_direction="largest",
+            target_mode="frozen_snapshot",
+        )
+
+
+def test_custom_protocol_cannot_claim_primary_objective(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.CUSTOM_PROTOCOL_ID,
+        kmeans_weight=1.0,
+        greedy_weight=1.0,
+        eigen_direction="smallest",
+        target_mode="selected_dimension_only",
+    )
+
+    assert protocol.protocol_id == "custom"
+    assert mvdec.final_training_objective(protocol).startswith("mvdec_custom_")
+    assert "Eq. 11" not in mvdec.final_training_objective(protocol)
+    assert (
+        mvdec.validate_protocol_assignment_change_tolerance(
+            protocol,
+            "REUTERS",
+            0.005,
+        )
+        == 0.005
+    )
 
 
 def test_airpollution_artifact_requires_scaler_metadata(tmp_path, monkeypatch):
@@ -352,6 +419,7 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     monkeypatch.setattr(mvdec, "input_shape", 2)
     monkeypatch.setattr(mvdec, "hidden_units", 2)
     monkeypatch.setattr(mvdec, "n_clusters", 2)
+    monkeypatch.setattr(mvdec, "assignment_change_tolerance", 0.001)
     shuffled_indices = np.array([2, 0, 3, 1])
     h_view1 = np.arange(8, dtype=np.float32).reshape(4, 2)
     h_view2 = h_view1 + 1.0
@@ -359,6 +427,20 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     truth = np.array([1, 0, 1, 0])
     metrics = compute_external_metrics(truth, labels, n_clusters=2)
     artifact_path = tmp_path / "reuters.pkl"
+    data_path = tmp_path / "reuters.csv"
+    pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    run_config = {
+        "dataset": "REUTERS",
+        "protocol_contract": mvdec.PRIMARY_MVDEC_PROTOCOL.manifest_contract(0.001),
+    }
+    config_hash = canonical_config_hash(run_config)
+    run_id = build_run_id(
+        "REUTERS",
+        mvdec.PRIMARY_PROTOCOL_ID,
+        config_hash,
+        seed=42,
+        run_index=1,
+    )
 
     mvdec.save_airpollution_mvdec_artifact(
         artifact_path=artifact_path,
@@ -372,7 +454,7 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
         feature_columns=["a", "b"],
         random_seed=42,
         greedy_eigen_direction="largest",
-        greedy_target_mode="selected_dimension_only",
+        greedy_target_mode="frozen_snapshot",
         batches_per_epoch=1,
         max_refinement_epochs=5,
         stop_reason="converged_assignment",
@@ -381,6 +463,23 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
         true_labels=truth,
         source_sha256="c" * 64,
         external_metrics=metrics,
+        run_id=run_id,
+        config_hash=config_hash,
+    )
+
+    write_run_manifest(
+        tmp_path / "manifest.json",
+        {
+            "run_id": run_id,
+            "status": "complete",
+            "dataset": "REUTERS",
+            "protocol_id": mvdec.PRIMARY_PROTOCOL_ID,
+            "config_hash": config_hash,
+            "config": run_config,
+            "seed": 42,
+            "paths": {"artifact": str(artifact_path)},
+            "output_sha256": {"artifact": file_sha256(artifact_path)},
+        },
     )
 
     with artifact_path.open("rb") as file:
@@ -392,6 +491,32 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     assert artifact["source_sha256"] == "c" * 64
     assert artifact["acc"] == 1.0
     assert artifact["nmi"] == 1.0
+    assert artifact["protocol_id"] == mvdec.PRIMARY_PROTOCOL_ID
+    assert artifact["algorithm_family"] == "MvDEC"
+    assert artifact["algorithm"] == "MvDEC-DEKM-consistent"
+    assert artifact["method_name"] == "MvDEC-DEKM-consistent"
+    assert artifact["claim_scope"] == mvdec.PRIMARY_MVDEC_PROTOCOL.claim_scope
+    assert artifact["protocol_contract"]["eigen"]["direction"] == "largest"
+    assert artifact["protocol_contract"]["greedy_target"]["mode"] == ("frozen_snapshot")
+    assert len(artifact["protocol_contract_sha256"]) == 64
+
+    loaded = load_mvdec_result(result_path=artifact_path, data_path=data_path)
+    assert loaded.raw["method_name"] == "MvDEC-DEKM-consistent"
+
+    artifact["protocol_contract"]["eigen"]["direction"] = "smallest"
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+    with pytest.raises(ValueError, match="contract SHA-256"):
+        load_mvdec_result(result_path=artifact_path, data_path=data_path)
+
+    tampered_hash = mvdec.protocol_contract_sha256(artifact["protocol_contract"])
+    artifact["protocol_contract_sha256"] = tampered_hash
+    artifact["config"]["protocol_contract"] = artifact["protocol_contract"]
+    artifact["config"]["protocol_contract_sha256"] = tampered_hash
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+    with pytest.raises(ValueError, match="immutable protocol"):
+        load_mvdec_result(result_path=artifact_path, data_path=data_path)
 
 
 def test_unlabeled_preprocessing_rejects_unknown_policy(tmp_path, monkeypatch):

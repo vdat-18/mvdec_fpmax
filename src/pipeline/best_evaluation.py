@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-from config import FUSED_REPRESENTATION_PATH, PREPROCESSED_DATA_PATH
+from config import PREPROCESSED_DATA_PATH
 from pipeline.clustering import (
     MIXED_DISTANCE_CONTRACT,
     SYMMETRIC_DISTANCE_CONTRACT,
@@ -635,7 +635,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--representation-path",
         type=Path,
-        default=FUSED_REPRESENTATION_PATH,
+        required=True,
     )
     parser.add_argument("--data-path", type=Path, default=PREPROCESSED_DATA_PATH)
     parser.add_argument("--runs-output", type=Path, required=True)

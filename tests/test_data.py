@@ -78,7 +78,7 @@ def test_load_mvdec_result_rejects_preprocessed_row_mismatch(tmp_path):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
-def test_load_mvdec_result_accepts_mvdec2025_encoder_average_contract(tmp_path):
+def test_load_mvdec_result_rejects_protocol_less_encoder_average(tmp_path):
     data_path = tmp_path / "airpollution.csv"
     result_path = tmp_path / "mvdec2025.pkl"
     pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
@@ -116,15 +116,11 @@ def test_load_mvdec_result_accepts_mvdec2025_encoder_average_contract(tmp_path):
             file,
         )
 
-    result = load_mvdec_result(result_path=result_path, data_path=data_path)
-
-    assert result.h_fused.shape == (4, 2)
-    assert list(result.h_fused_df.columns) == ["fused_1", "fused_2"]
-    np.testing.assert_allclose(result.h_fused, h_fused)
+    with pytest.raises(ValueError, match="Legacy MvDEC artifact"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
-def test_load_public_mvdec_result_accepts_assignment_row_manifest(tmp_path):
-    """MiMvDEC may validate public artifact rows without a regenerated X.csv."""
+def test_load_public_mvdec_result_rejects_protocol_less_artifact(tmp_path):
 
     data_path = tmp_path / "mvdec_assignments.csv"
     result_path = tmp_path / "mvdec_public.pkl"
@@ -170,11 +166,8 @@ def test_load_public_mvdec_result_accepts_assignment_row_manifest(tmp_path):
             file,
         )
 
-    result = load_mvdec_result(result_path=result_path, data_path=data_path)
-
-    assert result.true_labels.tolist() == [0, 0, 1, 1]
-    assert result.acc == 1.0
-    assert result.source_sha256 == "d" * 64
+    with pytest.raises(ValueError, match="Legacy MvDEC artifact"):
+        load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
 def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):
@@ -234,15 +227,8 @@ def test_load_mvdec_result_validates_tiki_source_order_across_line_endings(
     with result_path.open("wb") as file:
         pickle.dump(
             {
-                "dataset": "TIKI",
-                "fusion_contract": "mvdec2025_encoder_average",
-                "view_output_layout": "eq5_compatible_2_plus_2",
-                "h_view1": h_view1,
-                "h_view2": h_view2,
                 "h_fused": (h_view1 + h_view2) / 2,
                 "labels": np.array([0, 0, 1, 1]),
-                "fusion_dim": 2,
-                "view1_latent_dim": 2,
                 "preprocessing": {
                     "method": "none",
                     "feature_columns": list(source_df.columns),
@@ -307,7 +293,7 @@ def test_load_mvdec_result_rejects_legacy_full_view_average(tmp_path):
         ("smallest", 0, "selected_dimension_only"),
     ],
 )
-def test_load_mvdec_result_validates_airpollution_minmax_metadata(
+def test_load_mvdec_result_rejects_legacy_airpollution_modes(
     tmp_path,
     greedy_eigen_direction,
     greedy_eigen_index,
@@ -378,17 +364,7 @@ def test_load_mvdec_result_validates_airpollution_minmax_metadata(
             file,
         )
 
-    result = load_mvdec_result(result_path=result_path, data_path=data_path)
-
-    assert result.raw["preprocessing"]["method"] == "minmax"
-    assert result.raw["greedy_eigen_direction"] == greedy_eigen_direction
-    assert result.raw["greedy_target_mode"] == greedy_target_mode
-    assert result.raw["batches_per_epoch"] == 2
-    assert result.raw["stop_reason"] == "converged_assignment"
-
-    source_df.loc[0, "distance"] = 99.0
-    source_df.to_csv(data_path, index=False)
-    with pytest.raises(ValueError, match="source CSV hash"):
+    with pytest.raises(ValueError, match="Legacy MvDEC artifact"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
@@ -429,7 +405,7 @@ def test_load_mvdec_result_rejects_missing_airpollution_eigen_mode(tmp_path):
             file,
         )
 
-    with pytest.raises(ValueError, match="greedy_eigen_direction"):
+    with pytest.raises(ValueError, match="Legacy MvDEC artifact"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 
@@ -466,7 +442,7 @@ def test_load_mvdec_result_rejects_encoder_average_latent_dim_mismatch(tmp_path)
             file,
         )
 
-    with pytest.raises(ValueError, match="view1_latent_dim"):
+    with pytest.raises(ValueError, match="Legacy MvDEC artifact"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
 
 

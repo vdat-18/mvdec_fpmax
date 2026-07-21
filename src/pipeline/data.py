@@ -1,6 +1,7 @@
 """Load preprocessed data and cached MvDEC representation output."""
 
 import hashlib
+import json
 import pickle
 import re
 from dataclasses import dataclass
@@ -10,8 +11,18 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import silhouette_score
 
-from config import FUSED_REPRESENTATION_PATH, H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
+from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
+from pipeline.mvdec_runs import (
+    RUN_MANIFEST_FILENAME,
+    load_run_manifest,
+    resolve_manifest_output_path,
+)
+
+PRIMARY_MVDEC_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
+PRIMARY_MVDEC_OBJECTIVE = "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+PRIMARY_MVDEC_METHOD = "MvDEC-DEKM-consistent"
+PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
 
 
 def fused_embedding_columns(n_columns: int) -> list[str]:
@@ -223,7 +234,156 @@ def _validate_airpollution_preprocessing(
         raise ValueError(msg)
 
 
-def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None:
+def _protocol_contract_sha256(contract: dict[str, object]) -> str:
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_mvdec_protocol_contract(best_result: dict) -> None:
+    """Validate the resolved protocol identity and detect artifact tampering."""
+
+    protocol_id = best_result.get("protocol_id")
+    contract = best_result.get("protocol_contract")
+    stored_hash = best_result.get("protocol_contract_sha256")
+    config = best_result.get("config")
+    if not isinstance(contract, dict) or not isinstance(config, dict):
+        msg = (
+            "MvDEC protocol artifacts require dictionary contract and config metadata."
+        )
+        raise ValueError(msg)
+    if not isinstance(stored_hash, str) or stored_hash != _protocol_contract_sha256(
+        contract
+    ):
+        msg = "MvDEC protocol contract SHA-256 is missing or does not match."
+        raise ValueError(msg)
+    if any(
+        (
+            contract.get("protocol_id") != protocol_id,
+            config.get("protocol_id") != protocol_id,
+            config.get("protocol_contract") != contract,
+            config.get("protocol_contract_sha256") != stored_hash,
+        )
+    ):
+        msg = "MvDEC protocol identity is inconsistent across artifact metadata."
+        raise ValueError(msg)
+
+    objective = contract.get("objective")
+    eigen = contract.get("eigen")
+    greedy_target = contract.get("greedy_target")
+    stopping = contract.get("stopping")
+    if not all(
+        isinstance(section, dict)
+        for section in (objective, eigen, greedy_target, stopping)
+    ):
+        msg = "MvDEC protocol contract is missing objective/eigen/target/stopping."
+        raise ValueError(msg)
+    if objective.get("name") != best_result.get("final_training_objective"):
+        msg = "MvDEC objective name does not match its protocol contract."
+        raise ValueError(msg)
+
+    if protocol_id not in {PRIMARY_MVDEC_PROTOCOL_ID, "custom"}:
+        msg = f"Unsupported MvDEC protocol_id: {protocol_id!r}."
+        raise ValueError(msg)
+    if protocol_id != PRIMARY_MVDEC_PROTOCOL_ID:
+        if not str(objective.get("name", "")).startswith("mvdec_custom_"):
+            msg = "Custom MvDEC protocols must use an explicit custom objective name."
+            raise ValueError(msg)
+        return
+
+    loss_terms = objective.get("loss_terms")
+    expected_loss_terms = {
+        "L1_reconstruction": {"weight": 1.0, "optimized": True},
+        "L2_kmeans": {"weight": 0.0, "optimized": False},
+        "L3_scatter_trace": {
+            "weight": 0.0,
+            "optimized": False,
+            "mathematically_equivalent_to_L2": True,
+        },
+        "L4_greedy": {
+            "weight": 1.0,
+            "optimized": True,
+            "reduction": "sum_squared_dimensions_then_mean_batch",
+        },
+    }
+    expected_tolerance = (
+        0.01 if best_result.get("dataset") in PRIVATE_MVDEC_DATASETS else 0.001
+    )
+    expected_loss_weights = {
+        "reconstruction": 1.0,
+        "kmeans": 0.0,
+        "scatter_trace_diagnostic": 0.0,
+        "greedy": 1.0,
+    }
+    if any(
+        (
+            best_result.get("algorithm_family") != "MvDEC",
+            best_result.get("algorithm") != PRIMARY_MVDEC_METHOD,
+            best_result.get("method_name") != PRIMARY_MVDEC_METHOD,
+            objective.get("name") != PRIMARY_MVDEC_OBJECTIVE,
+            loss_terms != expected_loss_terms,
+            eigen.get("order") != "ascending",
+            eigen.get("direction") != "largest",
+            greedy_target.get("mode") != "frozen_snapshot",
+            config.get("loss_weights") != expected_loss_weights,
+            config.get("eigenvalue_order") != "ascending",
+            config.get("greedy_eigen_direction") != "largest",
+            config.get("greedy_target_mode") != "frozen_snapshot",
+            best_result.get("eigenvalue_order") != "ascending",
+            best_result.get("greedy_eigen_direction") != "largest",
+            best_result.get("greedy_target_mode") != "frozen_snapshot",
+            not np.isclose(
+                float(config.get("assignment_change_tolerance", np.nan)),
+                expected_tolerance,
+            ),
+            not np.isclose(
+                float(stopping.get("assignment_change_tolerance", np.nan)),
+                expected_tolerance,
+            ),
+        )
+    ):
+        msg = "MvDEC-DEKM-consistent artifact violates its immutable protocol."
+        raise ValueError(msg)
+
+
+def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
+    """Require a complete run manifest that owns and hashes this artifact."""
+
+    run_id = best_result.get("run_id")
+    config_hash = best_result.get("config_hash")
+    if not isinstance(run_id, str) or not isinstance(config_hash, str):
+        msg = "Paper-ready MvDEC artifacts require run_id and config_hash."
+        raise ValueError(msg)
+    manifest_path = result_path.parent / RUN_MANIFEST_FILENAME
+    manifest = load_run_manifest(manifest_path)
+    artifact_config = best_result.get("config", {})
+    manifest_config = manifest.get("config", {})
+    output_sha256 = manifest.get("output_sha256", {}).get("artifact")
+    if any(
+        (
+            manifest.get("status") != "complete",
+            manifest.get("run_id") != run_id,
+            manifest.get("config_hash") != config_hash,
+            manifest.get("dataset") != best_result.get("dataset"),
+            manifest.get("protocol_id") != best_result.get("protocol_id"),
+            artifact_config.get("run_id") != run_id,
+            artifact_config.get("config_hash") != config_hash,
+            artifact_config.get("seed") != manifest.get("seed"),
+            manifest_config.get("protocol_contract")
+            != best_result.get("protocol_contract"),
+            resolve_manifest_output_path(manifest, "artifact").resolve()
+            != result_path.resolve(),
+            output_sha256 != file_sha256(result_path),
+        )
+    ):
+        msg = "MvDEC artifact does not match its complete run manifest."
+        raise ValueError(msg)
+
+
+def _validate_mvdec2025_contract(
+    best_result: dict,
+    h_fused: np.ndarray,
+    result_path: Path,
+) -> None:
     view_output_layout = best_result.get("view_output_layout")
     if view_output_layout is not None and not re.fullmatch(
         r"eq5_compatible_\d+_plus_\d+",
@@ -232,22 +392,14 @@ def _validate_mvdec2025_contract(best_result: dict, h_fused: np.ndarray) -> None
         msg = f"Unexpected MvDEC 2025 view_output_layout: {view_output_layout!r}."
         raise ValueError(msg)
 
-    final_training_objective = best_result.get("final_training_objective")
-    if final_training_objective not in {
-        None,
-        "dekm2021_greedy_cluster_loss_after_reconstruction_pretrain",
-        "mvdec2025_joint_reconstruction_kmeans_orthonormal_greedy_loss",
-        "mvdec2025_joint_reconstruction_kmeans_greedy_l3_trace_logged",
-        "mvdec2025_latent_joint_reconstruction_kmeans_greedy_l3_trace_logged",
-        "mvdec2025_latent_joint_reconstruction_greedy_l3_trace_logged",
-        "mvdec2025_latent_joint_reconstruction_kmeans_l3_trace_logged",
-        "mvdec2025_latent_joint_reconstruction_l3_trace_logged",
-    }:
+    if best_result.get("protocol_id") is None:
         msg = (
-            "Unexpected MvDEC 2025 final_training_objective: "
-            f"{final_training_objective!r}."
+            "Legacy MvDEC artifact has no protocol contract. Regenerate it with "
+            "mvdec_dekm_consistent_v1 before using it in the paper pipeline."
         )
         raise ValueError(msg)
+    _validate_mvdec_protocol_contract(best_result)
+    _validate_mvdec_run_manifest(best_result, result_path)
 
     h_view1 = np.asarray(best_result.get("h_view1"))
     h_view2 = np.asarray(best_result.get("h_view2"))
@@ -301,7 +453,7 @@ def load_preprocessed_dataset(
 
 
 def load_mvdec_result(
-    result_path: Path = FUSED_REPRESENTATION_PATH,
+    result_path: Path,
     data_path: Path = PREPROCESSED_DATA_PATH,
     allow_legacy_concat: bool = False,
 ) -> MvdecResult:
@@ -320,7 +472,7 @@ def load_mvdec_result(
 
     fusion_contract = best_result.get("fusion_contract")
     if fusion_contract == "mvdec2025_encoder_average":
-        _validate_mvdec2025_contract(best_result, h_fused)
+        _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif fusion_contract == "mvdec2025_figure_output_average":
         if not allow_legacy_concat:
             msg = (
@@ -328,7 +480,7 @@ def load_mvdec_result(
                 "it so h_fused contains only the averaged encoder embeddings."
             )
             raise ValueError(msg)
-        _validate_mvdec2025_contract(best_result, h_fused)
+        _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif not allow_legacy_concat and h_fused.shape[1] == _legacy_concat_width(
         best_result
     ):

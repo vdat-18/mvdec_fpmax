@@ -17,11 +17,11 @@ Forward Feature Selection (FFS).
 data/
   preprocessed_data/
     tiki_preprocessed.csv        # 1,799 x 7 preprocessed Tiki features
-    *_fused_representation.pkl   # GPU-produced MvDEC representations
   public/                        # reproducible public dataset workspace
   raw_data/
     seller_store_urls.csv        # seller storefront URLs used during collection
 output/
+  mvdec_runs/                    # protocol/config/seed-isolated GPU outputs
   without_ffs_results.csv
   ffs_results.csv
   post_without_ffs_intuitive_results.csv
@@ -51,9 +51,9 @@ uv pip install tensorflow  # TensorFlow MvDEC representation stage
 uv pip install torch       # PyTorch public MvDEC-paper baseline
 ```
 
-The MvDEC representation-learning stage is expected to run in a GPU runtime,
-then the dataset-specific `*_fused_representation.pkl` artifacts are pushed
-back into `data/preprocessed_data/` for local full-grid experiments.
+The MvDEC representation-learning stage is expected to run in a GPU runtime.
+Copy the complete `output/mvdec_runs/<dataset>/<protocol>/<config>/<seed>/`
+directory back for local experiments; standalone legacy pickles are rejected.
 
 ## Workflow
 
@@ -115,7 +115,7 @@ rows plus raw numeric cluster profiles, run:
 
 ```bash
 uv run python scripts/recluster_mvdec.py \
-  --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl \
+  --representation-path output/mvdec_runs/tiki/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/artifact.pkl \
   --data-path data/preprocessed_data/tiki_preprocessed.csv \
   --mapping-path data/preprocessed_data/tiki_row_mapping.csv \
   --output output/tiki_cluster_interpretation.csv \
@@ -152,35 +152,46 @@ For the air-pollution case study, the current in-repo producer is:
 ```bash
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 \
+  --seed 42 \
   --max-refinement-epochs 1400 \
+  --protocol mvdec_dekm_consistent_v1 \
   --greedy-eigen-direction largest \
-  --greedy-target-mode selected_dimension_only \
-  --artifact-path data/preprocessed_data/airpollution_demvk_fused_representation.pkl
+  --greedy-target-mode frozen_snapshot \
+  --output-dir output/mvdec_runs
 ```
 
-The greedy step exposes the eigen-direction and target semantics independently:
+The primary protocol combines the MvDEC 2025 multi-view architecture with the
+DEKM 2021 greedy refinement selected by Algorithm 1 and Fig. 4:
 
 ```bash
-# Literal MvDEC 2025 configuration
+# Primary: released-DEKM frozen target in the largest/last eigen direction
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 --seed 42 \
-  --greedy-eigen-direction smallest \
-  --greedy-target-mode selected_dimension_only
+  --protocol mvdec_dekm_consistent_v1
 
-# Largest-eigen direction used by the original DEKM 2021 implementation
+# Explicit target-semantics ablation
 uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
   --runs 3 --seed 42 \
+  --protocol custom \
   --greedy-eigen-direction largest \
   --greedy-target-mode selected_dimension_only
 ```
 
-The default is `largest` plus `selected_dimension_only`, matching the
-eigen-direction selected by the original DEKM 2021 implementation while
-retaining the explicit MvDEC target semantics. It keeps the standard artifact
-path. The literal MvDEC 2025 interpretation remains available with
-`--greedy-eigen-direction smallest`; non-default combinations add both mode
-names to the artifact filename. Final weights, cluster CSVs, and log files also
-include both modes so experiments do not overwrite each other.
+`mvdec_dekm_consistent_v1` is immutable: `L1=1`, `L2=0`, `L3=0`, `L4=1`,
+ascending eigenvalues, the largest/last eigen direction, and the released-DEKM
+`frozen_snapshot` target. DEKM 2021 reports on MNIST that optimizing this last
+direction outperforms pulling every transformed dimension. Because `V` is
+orthonormal, `L3` is trace-equivalent to `L2`; both remain logged diagnostics
+rather than optimized terms. This is a documented hybrid protocol, not a claim
+to implement MvDEC 2025 Eq. (11) literally. Any loss, smallest-eigen, or
+selected-dimension-only experiment must use `--protocol custom` and is labeled
+as an ablation in its artifact contract.
+
+The largest direction is intentional. DEKM sorts eigenvalues ascending and
+identifies the last/largest direction as least informative. This also matches
+the MvDEC 2025 reference to the "last dimension"; its separate statement that
+the smallest eigenvalue is least informative is treated as an internal paper
+inconsistency rather than the repository default.
 
 ### Public text benchmark from the DEKM release
 
@@ -212,18 +223,19 @@ uv run python src/representation_learning/DEKM_dense.py REUTERS \
 
 uv run python src/representation_learning/MVDEC_dense.py REUTERS \
   --seed 42 --runs 3 \
+  --protocol mvdec_dekm_consistent_v1 \
   --dataset-root external_repos/DEKM/datasets \
   --public-output-dir output/public_benchmark/mvdec
 ```
 
-Replace `REUTERS` with `20NEWS` or `RCV1`. Each MvDEC pickle is directly
-usable by MiMvDEC. Pass its matching `*_assignments.csv` as `--data-path`; the
-CSV is a row manifest, not a regenerated feature dataset:
+Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
+usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
+`--data-path`; the CSV is a row manifest, not a regenerated feature dataset:
 
 ```bash
 uv run mvdec-fpmax ffs-kprototypes \
-  --representation-path output/public_benchmark/mvdec/reuters/mvdec_reuters_seed_42.pkl \
-  --data-path output/public_benchmark/mvdec/reuters/mvdec_reuters_seed_42_assignments.csv \
+  --representation-path output/public_benchmark/mvdec/reuters/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/artifact.pkl \
+  --data-path output/public_benchmark/mvdec/reuters/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/assignments.csv \
   --output-dir output/public_benchmark/mimvdec/reuters/seed_42
 ```
 
@@ -238,23 +250,45 @@ The loader fails instead of downloading or substituting another dataset when
 that cache is unavailable.
 
 This reads `data/preprocessed_data/data_demvk.csv`, applies column-wise Min-Max
-scaling to `[0, 1]`, and saves:
+scaling to `[0, 1]`, and saves each seed under an immutable config directory:
 
 ```text
-data/preprocessed_data/airpollution_demvk_fused_representation.pkl
-output/AIRPOLLUTION_clusters.csv
+output/mvdec_runs/airpollution/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/
+  manifest.json
+  artifact.pkl
+  assignments.csv
+  pretrain_view1.weights.h5
+  pretrain_view2.weights.h5
+  final_view1.weights.h5
+  final_view2.weights.h5
+  training_log.csv
+```
+
+`run_id` contains dataset, protocol, the first 12 characters of the full config
+SHA-256, and seed. Existing non-empty run directories are rejected by default;
+`--force` clears only the files owned by that exact run identity. Different
+seeds and custom configurations therefore cannot overwrite one another.
+`mvdec_runs.csv` and `mvdec_summary.csv` live in the config directory and are
+rebuilt from `status=complete` manifests; failed manifests remain available for
+audit but are excluded from metric aggregation.
+
+After copying GPU outputs, audit every output hash and reload every complete
+artifact through the production loader:
+
+```bash
+uv run mvdec-audit-runs --root output/mvdec_runs
 ```
 
 The loader rejects the previous legacy full-view-output artifact. Regenerate it
 before running air-pollution FP-Max/clustering modes.
 
-For MvDEC 2025 air-pollution artifacts, each model output uses the Eq.
+For DEKM-consistent MvDEC air-pollution artifacts, each model output uses the Eq.
 (5)-compatible layout `10 latent + 13 reconstruction`, while clustering and
 export use only the latent heads: `h_fused = (h_view1_latent +
 h_view2_latent) / 2`. Therefore, `h_fused`, `h_view1`, and `h_view2` are all
-10-dimensional. Joint training combines reconstruction, K-Means, and greedy
-losses; the trace-equivalent L3 term is logged with weight zero to avoid
-duplicating L2's gradient.
+10-dimensional. Primary joint training optimizes reconstruction `L1` and greedy
+`L4`. K-Means `L2` and trace-equivalent `L3` are measured but have zero weight,
+so the artifact objective must not be described as MvDEC 2025 Eq. (11).
 
 The run logs both `baseline_raw_input` and `baseline_scaled_input` so scale
 dominance is visible. The pickle records the scaling method, fitted per-column
@@ -264,9 +298,12 @@ paper does not publish its fitted scaler.
 
 Step 9 logs split `L4_greedy` into `L4_selected_direction` and
 `L4_nonselected_snapshot_anchor`, plus their fractions of total L4. Their sum
-equals `L4_greedy`. In `selected_dimension_only`, the snapshot-anchor component
-and its gradient are exactly zero. In `frozen_snapshot`, both components can be
-non-zero.
+equals `L4_greedy`. The primary `frozen_snapshot` mode reproduces the target
+construction in the released DEKM code, so both components can be non-zero.
+In the `selected_dimension_only` custom ablation, the snapshot-anchor component
+and its gradient are exactly zero. The current squared-distance reduction is
+recorded in the protocol contract; changing it is a separate, not-yet-applied
+fidelity decision.
 
 Every K-Means refresh uses a fixed `n_init=100`. The previous inherited DEKM
 behavior that replaced `n_init` with `2 * n_iter_` has been removed because the
@@ -291,7 +328,16 @@ Refinement stops when no more than 1% of samples change their K-Means assignment
 for the unlabeled Air Pollution/Tiki case studies
 (`assignment_change_tolerance=0.01`). Public REUTERS/20NEWS/RCV1 benchmarks use
 the DEKM 2021 stopping protocol of 0.1% (`assignment_change_tolerance=0.001`).
-Use `--assignment-change-tolerance` only for an explicitly documented ablation.
+The private 1% tolerance is an intentional repository design choice, not a
+value claimed from either paper. The resolved tolerance and stop reason are
+stored in every new protocol artifact. Use `--assignment-change-tolerance` only
+with `--protocol custom`; the primary protocol rejects a different tolerance.
+
+New protocol artifacts are validated when loaded: the loader recomputes the
+protocol-contract SHA-256 and checks the objective, loss weights, eigen mode,
+target mode, and dataset-specific tolerance. CSV assignments and summaries use
+`MvDEC-DEKM-consistent` as the method label while retaining `MvDEC` separately
+as the algorithm family.
 
 ### 3. FP-Max and Clustering Experiments
 
@@ -526,7 +572,7 @@ uv run mvdec-evaluate-native `
   --n-clusters 5 `
   --source "DEKM=output/dekm_seed42.pkl" `
   --source "Single-view=output/single_view_seed42.pkl" `
-  --source "MvDEC=data/preprocessed_data/tiki_mvdec_fused_representation.pkl" `
+  --source "MvDEC-DEKM-consistent=output/mvdec_runs/tiki/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/artifact.pkl" `
   --runs-output output/tiki_v4/native_baseline_runs.csv `
   --summary-output output/tiki_v4/native_baseline_summary.csv
 ```
@@ -553,7 +599,7 @@ uv run mvdec-evaluate-best \
   --backend kprototypes \
   --score-column final_score \
   --seeds 40 41 42 43 44 \
-  --representation-path data/preprocessed_data/tiki_mvdec_fused_representation.pkl \
+  --representation-path output/mvdec_runs/tiki/mvdec_dekm_consistent_v1/<config_hash_12>/seed_42/artifact.pkl \
   --data-path data/preprocessed_data/tiki_preprocessed.csv \
   --runs-output output/tiki_v4/ffs_best_seed_runs.csv \
   --summary-output output/tiki_v4/ffs_best_seed_summary.csv \
@@ -593,7 +639,7 @@ preprocessed numeric data:
 uv run mvdec-evaluate-common `
   --data-path data/preprocessed_data/tiki_preprocessed.csv `
   --n-clusters 5 `
-  --source "MvDEC=output/TIKI_largest_eigen_selected_dimension_only_clusters.csv" `
+  --source "MvDEC-DEKM-consistent=output/TIKI_mvdec_dekm_consistent_v1_largest_eigen_frozen_snapshot_clusters.csv" `
   --source "MiMvDEC without FFS=output/tiki_v4/without_ffs_best_seed_runs.csv" `
   --source "MiMvDEC with FFS=output/tiki_v4/ffs_best_seed_runs.csv" `
   --runs-output output/tiki_v4/common_evaluation_runs.csv `
@@ -612,8 +658,9 @@ Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
 coarse/refine parameter trials. Summary CSV files keep only the best valid trial
 per grid row or FFS candidate selection result.
 
-The included outputs reproduce the sensitivity-analysis tables used in the
-manuscript.
+Paper-ready MvDEC outputs are not bundled with the repository. Regenerate the
+required Air Pollution and Tiki runs under `output/mvdec_runs/` and audit them
+before reproducing the manuscript tables.
 
 ## Reproducibility Notes
 
@@ -621,13 +668,12 @@ manuscript.
   at `42`, and every method must receive the same list.
 - Every K-Prototypes fit explicitly uses `n_init=10`; the value is recorded in
   the experiment manifest so resume cannot mix another initialization budget.
-- The cached MvDEC representation contains `h_fused`, `labels`, `init`,
-  `score`, and `iteration`. MvDEC 2025 artifacts additionally include
-  `h_view1`, `h_view2`, `fusion_dim`, `fusion_contract`,
-  `view_output_layout`, and `final_training_objective`.
+- Each paper-ready MvDEC run stores `artifact.pkl`, assignments, weights, log,
+  output hashes, and a complete `manifest.json`. The loader verifies the run
+  manifest before exposing `h_fused` or labels.
 - Representation learning is GPU-dependent. For the air-pollution case study,
-  rerun `src/representation_learning/MVDEC_dense.py` if a fresh
-  `airpollution_demvk_fused_representation.pkl` artifact is required.
+  rerun `src/representation_learning/MVDEC_dense.py`; no pre-C1 Air/Tiki MvDEC
+  pickle is retained as a fallback.
 - Raw Tiki storefront data collected from publicly accessible Tiki pages are
   included as `data/raw_data/tiki_raw_data.xlsx`. The preprocessing pipeline
   excludes the recovered workbook's invalid `Year Joined = 0` row and

@@ -9,7 +9,6 @@ from loguru import logger
 
 import config as project_config
 from config import (
-    FUSED_REPRESENTATION_PATH,
     PREPROCESSED_DATA_PATH,
     RANDOM_STATE,
 )
@@ -243,7 +242,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--representation-path",
         type=Path,
-        default=FUSED_REPRESENTATION_PATH,
+        required=True,
         help="Fused representation pickle produced by the GPU stage.",
     )
     parser.add_argument(
