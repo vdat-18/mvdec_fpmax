@@ -235,6 +235,15 @@ POST_FFS_INTUITIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    "random_state",
+    "init_strategy",
+    "fit_time_seconds",
+    "labels_hash",
+    "converged",
+    "n_iter",
+    "initial_prototype_indices",
+    "final_cost",
+    "cluster_assignments",
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -276,6 +285,15 @@ POST_WITHOUT_FFS_INTUITIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    "random_state",
+    "init_strategy",
+    "fit_time_seconds",
+    "labels_hash",
+    "converged",
+    "n_iter",
+    "initial_prototype_indices",
+    "final_cost",
+    "cluster_assignments",
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -599,6 +617,14 @@ class PostFfsIntuitiveRecord:
     mu_param: float
     gamma: float
     beta: float
+    random_state: int
+    init_strategy: str | None
+    fit_time_seconds: float
+    labels_hash: str
+    converged: bool | None
+    n_iter: int | None
+    initial_prototype_indices: list[int]
+    final_cost: float
     status: str
     error_message: str | None
     alpha: float | None = None
@@ -645,6 +671,14 @@ class PostWithoutFfsIntuitiveRecord:
     mu_param: float
     gamma: float
     beta: float
+    random_state: int
+    init_strategy: str | None
+    fit_time_seconds: float
+    labels_hash: str
+    converged: bool | None
+    n_iter: int | None
+    initial_prototype_indices: list[int]
+    final_cost: float
     status: str
     error_message: str | None
     alpha: float | None = None
@@ -3994,6 +4028,16 @@ def make_post_ffs_intuitive_record(
         mu_param=job.intuitive_params.mu_param,
         gamma=job.intuitive_params.gamma,
         beta=job.intuitive_params.beta,
+        random_state=context.random_state,
+        init_strategy=(clustering.init_strategy if clustering else None),
+        fit_time_seconds=(clustering.fit_time_seconds if clustering else np.nan),
+        labels_hash=(clustering.labels_hash if clustering else ""),
+        converged=(clustering.converged if clustering else None),
+        n_iter=(clustering.n_iter if clustering else None),
+        initial_prototype_indices=(
+            clustering.initial_prototype_indices if clustering else []
+        ),
+        final_cost=(clustering.final_cost if clustering else np.nan),
         status=status,
         error_message=error_message,
         alpha=job.intuitive_params.view_weight_alpha,
@@ -4136,6 +4180,16 @@ def make_post_without_ffs_intuitive_record(
         mu_param=job.intuitive_params.mu_param,
         gamma=job.intuitive_params.gamma,
         beta=job.intuitive_params.beta,
+        random_state=context.random_state,
+        init_strategy=(clustering.init_strategy if clustering else None),
+        fit_time_seconds=(clustering.fit_time_seconds if clustering else np.nan),
+        labels_hash=(clustering.labels_hash if clustering else ""),
+        converged=(clustering.converged if clustering else None),
+        n_iter=(clustering.n_iter if clustering else None),
+        initial_prototype_indices=(
+            clustering.initial_prototype_indices if clustering else []
+        ),
+        final_cost=(clustering.final_cost if clustering else np.nan),
         status=status,
         error_message=error_message,
         alpha=job.intuitive_params.view_weight_alpha,

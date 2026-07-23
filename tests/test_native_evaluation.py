@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import pytest
+from sklearn.metrics import silhouette_score
 
 from pipeline.native_evaluation import (
     NATIVE_NUMERIC_GOWER_CONTRACT,
@@ -99,9 +100,13 @@ def test_native_evaluation_aggregates_repeated_method_runs(tmp_path) -> None:
     assert len(evaluated) == 2
     assert set(evaluated["distance_contract"]) == {NATIVE_NUMERIC_GOWER_CONTRACT}
     assert evaluated.loc[0, "silhouette_score"] > evaluated.loc[1, "silhouette_score"]
+    assert evaluated.loc[0, "euclidean_silhouette_score"] == pytest.approx(
+        silhouette_score(_representation(), runs[0].labels)
+    )
     assert summary.loc[0, "requested_runs"] == 2
     assert summary.loc[0, "successful_runs"] == 2
     assert summary.loc[0, "silhouette_std_across_seeds"] > 0
+    assert summary.loc[0, "euclidean_silhouette_std_across_seeds"] > 0
 
 
 def test_native_artifact_rejects_another_cluster_count(tmp_path) -> None:

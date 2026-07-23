@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "TIKI": {
+      "data_path": "data/preprocessed_data/tiki_preprocessed.csv",
+      "representation_root": "output/mvdec_runs/tiki/mvdec_dekm_consistent_v1",
+      "output_root": "output/tiki/fpmax_without_ffs",
+      "seeds": [44],
+      "workers": 4
+    }
+  }
+}

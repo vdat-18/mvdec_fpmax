@@ -1,0 +1,10 @@
+{
+  "data_sha256": "76c3f4cfcef285d14905eb40e6d926bd301a66771900331fc692b4aca18fb7b4",
+  "dataset": "TIKI",
+  "distance_contract": "gower_numeric_asymmetric_binary_v1",
+  "kprototypes_n_init": 10,
+  "n_clusters": 5,
+  "random_state": 44,
+  "representation_sha256": "d9f6e9a19b7e88a8703717d00a509e0266599fb8121980cd430d9ecdfda721bc",
+  "schema_version": 4
+}

@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from loguru import logger
+from sklearn.metrics import silhouette_score
 
 from pipeline.clustering import (
     compute_gower_distance,
@@ -296,6 +297,9 @@ def evaluate_native_runs(runs: list[NativeRun], n_clusters: int) -> pd.DataFrame
             distance_matrix,
             run.labels,
         )
+        euclidean_score = float(
+            silhouette_score(run.representation.to_numpy(), run.labels)
+        )
         sizes = np.bincount(run.labels, minlength=n_clusters).astype(int).tolist()
         records.append(
             {
@@ -309,6 +313,7 @@ def evaluate_native_runs(runs: list[NativeRun], n_clusters: int) -> pd.DataFrame
                 "n_clusters": n_clusters,
                 "distance_contract": NATIVE_NUMERIC_GOWER_CONTRACT,
                 "silhouette_score": score,
+                "euclidean_silhouette_score": euclidean_score,
                 "silhouette_sample_std": sample_std,
                 "silhouette_negative_fraction": negative_fraction,
                 "cluster_sizes": json.dumps(sizes, separators=(",", ":")),
@@ -326,6 +331,9 @@ def aggregate_native_evaluation(runs: pd.DataFrame) -> pd.DataFrame:
     records: list[dict[str, object]] = []
     for method, group in runs.groupby("method", sort=True):
         scores = pd.to_numeric(group["silhouette_score"], errors="coerce").dropna()
+        euclidean_scores = pd.to_numeric(
+            group["euclidean_silhouette_score"], errors="coerce"
+        ).dropna()
         records.append(
             {
                 "method": method,
@@ -339,6 +347,12 @@ def aggregate_native_evaluation(runs: pd.DataFrame) -> pd.DataFrame:
                 ),
                 "silhouette_min": scores.min(),
                 "silhouette_max": scores.max(),
+                "euclidean_silhouette_mean": euclidean_scores.mean(),
+                "euclidean_silhouette_std_across_seeds": (
+                    euclidean_scores.std(ddof=1) if len(euclidean_scores) > 1 else 0.0
+                ),
+                "euclidean_silhouette_min": euclidean_scores.min(),
+                "euclidean_silhouette_max": euclidean_scores.max(),
                 "sample_std_mean": pd.to_numeric(
                     group["silhouette_sample_std"],
                     errors="coerce",

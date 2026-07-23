@@ -60,6 +60,7 @@ def _manifest_payload(
     data_path: Path,
     representation_path: Path,
     n_clusters: int,
+    random_state: int,
 ) -> dict[str, int | str]:
     dataset = artifact.get("dataset")
     if not isinstance(dataset, str) or not dataset.strip():
@@ -73,7 +74,7 @@ def _manifest_payload(
         "representation_sha256": file_sha256(representation_path),
         "n_clusters": n_clusters,
         "kprototypes_n_init": KPROTOTYPES_N_INIT,
-        "random_state": RANDOM_STATE,
+        "random_state": random_state,
         "distance_contract": MIXED_DISTANCE_CONTRACT,
     }
 
@@ -116,6 +117,7 @@ def build_experiment_context(
     data_path: Path,
     representation_path: Path,
     requested_output_dir: Path | None = None,
+    random_state: int = RANDOM_STATE,
 ) -> ExperimentContext:
     """Validate artifact settings and prepare an isolated output directory."""
 
@@ -132,6 +134,7 @@ def build_experiment_context(
         data_path,
         representation_path,
         n_clusters,
+        random_state,
     )
     _ensure_manifest(output_dir, payload)
     return ExperimentContext(

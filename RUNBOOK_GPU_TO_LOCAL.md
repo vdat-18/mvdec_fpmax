@@ -128,3 +128,31 @@ $REP = Get-ChildItem "output/mvdec_runs/tiki/mvdec_dekm_consistent_v1" `
   Select-Object -First 1 -ExpandProperty FullName
 $OUTPUT = "output/tiki"
 ```
+
+When all configured Tiki MvDEC artifacts are present locally, run the complete
+without-FFS grid across every configured seed with one command:
+
+```powershell
+uv run --no-sync mvdec-without-ffs TIKI
+```
+
+Paths, seeds, worker count, and per-seed output directories are defined in
+`configs/private_experiments.json`. The command reruns the grid by default;
+add `--resume` only when continuing an interrupted run.
+
+Run the complete FFS grid for only the selected Tiki seed with:
+
+```powershell
+uv run mvdec-ffs TIKI --seed 44 --workers 4 --candidate-workers 2
+```
+
+After the K-Prototypes grids finish, run Intuitive on every usable source row
+with the same configured artifact seed:
+
+```powershell
+uv run mvdec-intuitive TIKI --seed 44 --source without-ffs --param-workers 4
+uv run mvdec-intuitive TIKI --seed 44 --source ffs --param-workers 4
+```
+
+These commands rerun the Intuitive outputs by default. Add `--resume` only to
+continue an interrupted run with an unchanged provenance contract.

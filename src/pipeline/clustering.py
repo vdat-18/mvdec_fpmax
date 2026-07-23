@@ -67,6 +67,8 @@ class IntuitiveClusteringResult:
 
 
 MixedClusteringResult = KPrototypesResult | IntuitiveClusteringResult
+DEFAULT_INTUITIVE_INIT_STRATEGY = "farthest_first"
+DEFAULT_INTUITIVE_STRICT_INIT = False
 
 
 def labels_hash(labels: np.ndarray) -> str:
@@ -319,8 +321,8 @@ def run_intuitive_kprototypes(
     gamma: float = 0.5,
     beta: float = 2.0,
     max_iter: int = 100,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
     empty_cluster_policy: str = "raise",
     min_cluster_size: int = 1,
     distance_matrix: np.ndarray | None = None,

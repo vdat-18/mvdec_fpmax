@@ -56,6 +56,30 @@ def test_experiment_context_writes_and_reuses_matching_manifest(tmp_path) -> Non
     assert manifest["distance_contract"] == "gower_numeric_asymmetric_binary_v1"
 
 
+def test_experiment_context_records_requested_downstream_random_state(
+    tmp_path,
+) -> None:
+    """The manifest must record the seed used by downstream clustering."""
+
+    data_path = tmp_path / "data.csv"
+    representation_path = tmp_path / "artifact.pkl"
+    output_dir = tmp_path / "results"
+    data_path.write_text("x\n1\n", encoding="utf-8")
+    representation_path.write_bytes(b"trusted artifact")
+
+    build_experiment_context(
+        _artifact(),
+        data_path,
+        representation_path,
+        output_dir,
+        random_state=44,
+    )
+
+    manifest = json.loads((output_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+
+    assert manifest["random_state"] == 44
+
+
 def test_default_output_directories_are_dataset_scoped(
     tmp_path,
     monkeypatch,

@@ -25,6 +25,9 @@ mvdec-evaluate-best = "pipeline.best_evaluation:main"
 mvdec-evaluate-common = "pipeline.common_evaluation:main"
 mvdec-evaluate-native = "pipeline.native_evaluation:main"
 mvdec-audit-runs = "pipeline.mvdec_audit:main"
+mvdec-without-ffs = "pipeline.private_without_ffs:main"
+mvdec-ffs = "pipeline.private_ffs:main"
+mvdec-intuitive = "pipeline.private_intuitive:main"
 
 [dependency-groups]
 dev = [
