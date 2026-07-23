@@ -1,4 +1,4 @@
-"""Tests for configured private post-Intuitive orchestration."""
+"""Tests for configured private native-Intuitive orchestration."""
 
 import json
 from pathlib import Path
@@ -9,6 +9,11 @@ import pytest
 
 import pipeline.private_intuitive as private_intuitive
 from pipeline.experiment_context import ExperimentContext
+from pipeline.intuitive_protocol import (
+    DEFAULT_PROTOCOL_CONFIG_PATH,
+    PRIMARY_PROTOCOL_ID,
+    load_intuitive_protocol,
+)
 from pipeline.private_without_ffs import PrivateExperimentSpec
 
 
@@ -32,6 +37,44 @@ def _fixture_spec(tmp_path: Path) -> tuple[PrivateExperimentSpec, Path]:
     return spec, artifact_path
 
 
+def test_mimvdec_intuitive_protocol_config_is_versioned_and_valid() -> None:
+    """The configured primary protocol must match the implemented behavior."""
+
+    protocol = load_intuitive_protocol(
+        DEFAULT_PROTOCOL_CONFIG_PATH,
+        PRIMARY_PROTOCOL_ID,
+    )
+
+    assert protocol.protocol_id == "mimvdec_intuitive_v1"
+    assert protocol.numeric_input == "h_fused"
+    assert protocol.numeric_preprocessing == "none"
+    assert protocol.selection_metric == (
+        "silhouette_gower_numeric_asymmetric_binary_v1"
+    )
+    assert protocol.zero_phi_policy == "paper_literal_zero_weight"
+    assert protocol.without_ffs_mode == "intuitive_native_all_fpmax_features"
+    assert protocol.ffs_mode == "intuitive_native_forward_selection"
+    assert protocol.parameter_search == "exhaustive"
+    assert protocol.fpmax_strategies == ("uniform", "quantile", "kmeans")
+    assert protocol.fpmax_n_bins == (3, 5, 7)
+    assert len(protocol.fpmax_min_supports) == 19
+    assert len(protocol.mu_params) == 9
+    assert len(protocol.gammas) == 9
+    assert protocol.betas == (2.0, 3.0, 4.0, 5.0)
+
+
+def test_protocol_config_rejects_behavior_not_supported_by_runner(tmp_path) -> None:
+    """A manifest contract must not claim behavior the runner does not execute."""
+
+    payload = json.loads(DEFAULT_PROTOCOL_CONFIG_PATH.read_text(encoding="utf-8"))
+    payload["protocols"][PRIMARY_PROTOCOL_ID]["numeric_preprocessing"] = "minmax"
+    config_path = tmp_path / "intuitive_protocols.json"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Unsupported settings"):
+        load_intuitive_protocol(config_path, PRIMARY_PROTOCOL_ID)
+
+
 def test_configured_intuitive_uses_seed_and_persists_provenance(
     tmp_path,
     monkeypatch,
@@ -39,13 +82,15 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     """The runner must propagate seed 44 and write an auditable manifest."""
 
     spec, _artifact_path = _fixture_spec(tmp_path)
-    output_dir = spec.output_root / "seed_44"
-    output_dir.mkdir(parents=True)
-    source_path = output_dir / "ffs_results.csv"
-    source_path.write_text("job_index,status\n0,ok\n", encoding="utf-8")
+    seed_output_dir = spec.output_root / "seed_44"
+    protocol_output_dir = seed_output_dir / "mimvdec_intuitive_v1"
+    protocol_output_dir.mkdir(parents=True)
+    stale_trial_path = protocol_output_dir / "ffs_intuitive_native_trials.csv"
+    stale_trial_path.write_text("stale\n1\n", encoding="utf-8")
     mvdec_result = SimpleNamespace(
         raw={"dataset": "TIKI", "n_clusters": 5},
         h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
+        evaluation_score=0.25,
     )
     captured = {}
 
@@ -70,14 +115,20 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
 
     def fake_run(**kwargs):
         captured["run"] = kwargs
+        assert not stale_trial_path.exists()
         results = pd.DataFrame(
             [{"job_index": 0, "random_state": kwargs["random_state"]}]
         )
         results.to_csv(kwargs["save_path"], index=False)
+        trial_path = kwargs["save_path"].with_name("ffs_intuitive_native_trials.csv")
+        pd.DataFrame([{"trial_index": 0, "status": "ok"}]).to_csv(
+            trial_path,
+            index=False,
+        )
         return results
 
     monkeypatch.setattr(private_intuitive, "build_experiment_context", fake_context)
-    monkeypatch.setattr(private_intuitive, "run_post_ffs_intuitive", fake_run)
+    monkeypatch.setattr(private_intuitive, "run_ffs_intuitive_native", fake_run)
 
     results = private_intuitive.run_configured_intuitive(
         dataset="TIKI",
@@ -90,37 +141,53 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     assert captured["context"]["random_state"] == 44
     assert captured["run"]["random_state"] == 44
     assert captured["run"]["param_workers"] == 3
-    assert captured["run"]["ffs_path"] == source_path
     assert captured["run"]["resume"] is False
+    assert captured["run"]["baseline_score"] == 0.25
+    assert captured["run"]["two_stage"] is False
+    assert captured["run"]["candidate_workers"] == 1
+    assert len(captured["run"]["supports"]) == 19
+    assert captured["run"]["init_strategy"] == "farthest_first"
+    assert captured["run"]["non_membership"] == "paper"
+    assert captured["run"]["max_iter"] == 100
+    assert len(captured["run"]["intuitive_param_grid"]) == 324
 
-    manifest_path = output_dir / "post_ffs_intuitive_manifest.json"
+    output_dir = protocol_output_dir
+    manifest_path = output_dir / "ffs_intuitive_native_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 4
     assert manifest["status"] == "complete"
     assert manifest["contract"]["seed"] == 44
     assert manifest["contract"]["source"] == "ffs"
-    assert manifest["contract"]["initialization"] == {
-        "strategy": "farthest_first",
-        "strict": False,
-    }
-    assert len(manifest["contract"]["parameter_grid"]) > 1
+    assert manifest["contract"]["protocol_id"] == "mimvdec_intuitive_v1"
+    assert manifest["contract"]["protocol"]["numeric_preprocessing"] == "none"
+    assert manifest["contract"]["protocol"]["initialization_strategy"] == (
+        "farthest_first"
+    )
+    assert manifest["contract"]["protocol"]["strict_initialization"] is False
+    assert manifest["contract"]["protocol"]["ffs_mode"] == (
+        "intuitive_native_forward_selection"
+    )
+    assert manifest["contract"]["baseline_numeric_gower_silhouette"] == 0.25
+    assert "source_results_path" not in manifest["contract"]
+    assert manifest["contract"]["model_audit_columns"]
+    assert len(manifest["contract"]["parameter_grid"]) == 324
     assert manifest["output"]["row_count"] == 1
     assert manifest["output"]["results_sha256"]
+    assert manifest["output"]["trial_row_count"] == 1
+    assert manifest["output"]["trials_sha256"]
 
 
-def test_configured_intuitive_resume_rejects_changed_source(
+def test_configured_intuitive_resume_rejects_changed_artifact(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Resume must fail when the source grid has changed."""
+    """Resume must fail when the MvDEC representation has changed."""
 
     spec, _artifact_path = _fixture_spec(tmp_path)
-    output_dir = spec.output_root / "seed_44"
-    output_dir.mkdir(parents=True)
-    source_path = output_dir / "ffs_results.csv"
-    source_path.write_text("job_index,status\n0,ok\n", encoding="utf-8")
     mvdec_result = SimpleNamespace(
         raw={"dataset": "TIKI", "n_clusters": 5},
         h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
+        evaluation_score=0.25,
     )
 
     monkeypatch.setattr(
@@ -148,14 +215,76 @@ def test_configured_intuitive_resume_rejects_changed_source(
         results.to_csv(kwargs["save_path"], index=False)
         return results
 
-    monkeypatch.setattr(private_intuitive, "run_post_ffs_intuitive", fake_run)
+    monkeypatch.setattr(private_intuitive, "run_ffs_intuitive_native", fake_run)
     private_intuitive.run_configured_intuitive("TIKI", 44, "ffs")
 
-    source_path.write_text("job_index,status\n0,ok\n1,ok\n", encoding="utf-8")
+    _artifact_path.write_bytes(b"changed artifact")
     with pytest.raises(ValueError, match="contract does not match"):
         private_intuitive.run_configured_intuitive(
             "TIKI",
             44,
             "ffs",
             resume=True,
+        )
+
+
+def test_without_ffs_runs_native_intuitive_without_kprototypes_source(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Without-FFS must build FP-Max directly instead of reading K-Prototypes CSV."""
+
+    spec, _artifact_path = _fixture_spec(tmp_path)
+    mvdec_result = SimpleNamespace(
+        raw={"dataset": "TIKI", "n_clusters": 5},
+        h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
+        evaluation_score=0.25,
+    )
+    captured = {}
+
+    monkeypatch.setattr(private_intuitive, "load_experiment_spec", lambda *_: spec)
+    monkeypatch.setattr(
+        private_intuitive,
+        "load_mvdec_result",
+        lambda *_: mvdec_result,
+    )
+    monkeypatch.setattr(
+        private_intuitive,
+        "build_experiment_context",
+        lambda **kwargs: ExperimentContext(
+            dataset="TIKI",
+            n_clusters=5,
+            output_dir=kwargs["requested_output_dir"],
+        ),
+    )
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        results = pd.DataFrame([{"job_index": 0, "status": "ok"}])
+        results.to_csv(kwargs["save_path"], index=False)
+        return results
+
+    monkeypatch.setattr(
+        private_intuitive,
+        "run_without_ffs_intuitive_native",
+        fake_run,
+    )
+
+    private_intuitive.run_configured_intuitive("TIKI", 44, "without-ffs")
+
+    assert captured["save_path"].name == "without_ffs_intuitive_native_results.csv"
+    assert captured["two_stage"] is False
+    assert len(captured["intuitive_param_grid"]) == 324
+
+
+def test_configured_intuitive_rejects_multiple_parallel_axes() -> None:
+    """One process hierarchy at a time prevents nested worker oversubscription."""
+
+    with pytest.raises(ValueError, match="only one parallel axis"):
+        private_intuitive.run_configured_intuitive(
+            "TIKI",
+            44,
+            "ffs",
+            workers=2,
+            param_workers=2,
         )

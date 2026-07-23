@@ -13,11 +13,12 @@ from loguru import logger
 from sklearn.metrics import silhouette_samples, silhouette_score
 
 from config import KPROTOTYPES_N_INIT, RANDOM_STATE
-from intuitive_kprototypes import IntuitiveKPrototypes
+from intuitive_kprototypes import IntuitiveKPrototypes, NonMembershipStrategy
 
 DEFAULT_INIT_METHODS = ("huang", "cao")
 MIXED_DISTANCE_CONTRACT = "gower_numeric_asymmetric_binary_v1"
 SYMMETRIC_DISTANCE_CONTRACT = "gower_numeric_symmetric_binary_v1"
+INTUITIVE_SELECTION_METRIC = f"silhouette_{MIXED_DISTANCE_CONTRACT}"
 ClusteringBackend = Literal["kprototypes", "intuitive"]
 
 
@@ -60,6 +61,12 @@ class IntuitiveClusteringResult:
     min_cluster_size: int
     initial_prototype_indices: list[int]
     final_cost: float
+    final_numeric_phi: dict[str, float]
+    final_categorical_phi: dict[str, float]
+    final_numeric_weights: dict[str, float]
+    final_categorical_weights: dict[str, float]
+    final_numeric_weights_scaled: dict[str, float]
+    final_categorical_weights_scaled: dict[str, float]
     silhouette_sample_std: float
     silhouette_negative_fraction: float
     view_weight_alpha: float | None = None
@@ -69,6 +76,16 @@ class IntuitiveClusteringResult:
 MixedClusteringResult = KPrototypesResult | IntuitiveClusteringResult
 DEFAULT_INTUITIVE_INIT_STRATEGY = "farthest_first"
 DEFAULT_INTUITIVE_STRICT_INIT = False
+DEFAULT_INTUITIVE_MAX_ITER = 100
+DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY = "raise"
+DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE = 1
+INTUITIVE_NUMERIC_INPUT = "h_fused"
+INTUITIVE_NUMERIC_PREPROCESSING = "none"
+INTUITIVE_CATEGORICAL_INPUT = "fpmax_binary_features"
+INTUITIVE_NON_MEMBERSHIP = "paper"
+INTUITIVE_ZERO_PHI_POLICY = "paper_literal_zero_weight"
+INTUITIVE_DISTANCE_MODE = "paper_scaled_attribute_weights"
+INTUITIVE_STOPPING_MODE = "exact_assignment"
 
 
 def labels_hash(labels: np.ndarray) -> str:
@@ -83,6 +100,27 @@ def cluster_sizes(labels: np.ndarray, n_clusters: int) -> list[int]:
     """Return cluster sizes with empty clusters represented as zeros."""
 
     return np.bincount(np.asarray(labels, dtype=int), minlength=n_clusters).tolist()
+
+
+def _feature_value_map(
+    columns: pd.Index,
+    values: np.ndarray,
+    value_name: str,
+) -> dict[str, float]:
+    """Map a model vector to its dataframe feature names in column order."""
+
+    feature_names = [str(column) for column in columns]
+    if len(set(feature_names)) != len(feature_names):
+        msg = f"Feature names must be unique when recording {value_name}."
+        raise ValueError(msg)
+    values_array = np.asarray(values, dtype=float)
+    if values_array.shape != (len(feature_names),):
+        msg = (
+            f"{value_name} must contain one value per feature: "
+            f"expected {len(feature_names)}, got {values_array.shape}."
+        )
+        raise ValueError(msg)
+    return dict(zip(feature_names, values_array.astype(float).tolist(), strict=True))
 
 
 def compute_gower_distance(df: pd.DataFrame) -> np.ndarray:
@@ -320,11 +358,12 @@ def run_intuitive_kprototypes(
     mu_param: float = 0.5,
     gamma: float = 0.5,
     beta: float = 2.0,
-    max_iter: int = 100,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
     init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
     strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
-    empty_cluster_policy: str = "raise",
-    min_cluster_size: int = 1,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
     distance_matrix: np.ndarray | None = None,
     view_weight_alpha: float | None = None,
     view_weighted_distance_matrix: np.ndarray | None = None,
@@ -352,6 +391,7 @@ def run_intuitive_kprototypes(
         random_state=random_state,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
         empty_cluster_policy=empty_cluster_policy,
         min_cluster_size=min_cluster_size,
         view_weight_alpha=view_weight_alpha,
@@ -376,6 +416,7 @@ def run_intuitive_kprototypes(
         )
     sizes = cluster_sizes(labels, n_clusters)
     final_cost = float(result.distances[np.arange(len(labels)), labels].sum())
+    weights = result.weights
 
     if verbose:
         logger.info(
@@ -408,6 +449,36 @@ def run_intuitive_kprototypes(
         min_cluster_size=min_cluster_size,
         initial_prototype_indices=result.initial_prototype_indices.astype(int).tolist(),
         final_cost=final_cost,
+        final_numeric_phi=_feature_value_map(
+            continuous_df.columns,
+            weights.numeric_phi,
+            "final_numeric_phi",
+        ),
+        final_categorical_phi=_feature_value_map(
+            binary_df.columns,
+            weights.categorical_phi,
+            "final_categorical_phi",
+        ),
+        final_numeric_weights=_feature_value_map(
+            continuous_df.columns,
+            weights.numeric,
+            "final_numeric_weights",
+        ),
+        final_categorical_weights=_feature_value_map(
+            binary_df.columns,
+            weights.categorical,
+            "final_categorical_weights",
+        ),
+        final_numeric_weights_scaled=_feature_value_map(
+            continuous_df.columns,
+            weights.numeric_scaled,
+            "final_numeric_weights_scaled",
+        ),
+        final_categorical_weights_scaled=_feature_value_map(
+            binary_df.columns,
+            weights.categorical_scaled,
+            "final_categorical_weights_scaled",
+        ),
         silhouette_sample_std=sample_std,
         silhouette_negative_fraction=negative_fraction,
         view_weight_alpha=view_weight_alpha,

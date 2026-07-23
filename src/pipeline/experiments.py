@@ -48,7 +48,15 @@ from config import (
     WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_PAPER_NATIVE_RESULTS_PATH,
     WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH,
 )
+from intuitive_kprototypes import NonMembershipStrategy
 from pipeline.clustering import (
+    DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    DEFAULT_INTUITIVE_INIT_STRATEGY,
+    DEFAULT_INTUITIVE_MAX_ITER,
+    DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    DEFAULT_INTUITIVE_STRICT_INIT,
+    INTUITIVE_NON_MEMBERSHIP,
+    IntuitiveClusteringResult,
     MixedClusteringResult,
     cluster_sizes,
     compute_mixed_gower_distance,
@@ -90,6 +98,14 @@ SILHOUETTE_AUDIT_COLUMNS = [
     "silhouette_sample_std",
     "silhouette_negative_fraction",
     "cluster_assignments",
+]
+INTUITIVE_MODEL_AUDIT_COLUMNS = [
+    "final_numeric_phi",
+    "final_categorical_phi",
+    "final_numeric_weights",
+    "final_categorical_weights",
+    "final_numeric_weights_scaled",
+    "final_categorical_weights_scaled",
 ]
 
 WITHOUT_FFS_COLUMNS = [
@@ -134,6 +150,7 @@ WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -157,6 +174,7 @@ WITHOUT_FFS_INTUITIVE_NATIVE_TRIAL_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     "status",
     "error_message",
     "is_best",
@@ -178,6 +196,7 @@ WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -196,6 +215,7 @@ FFS_INTUITIVE_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -215,6 +235,7 @@ FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -222,6 +243,7 @@ FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS = [
 
 POST_FFS_INTUITIVE_COLUMNS = [
     "job_index",
+    "protocol_id",
     "ffs_job_index",
     "strategy",
     "n_bins",
@@ -243,6 +265,7 @@ POST_FFS_INTUITIVE_COLUMNS = [
     "n_iter",
     "initial_prototype_indices",
     "final_cost",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     "cluster_assignments",
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
@@ -265,6 +288,7 @@ POST_FFS_INTUITIVE_VIEW_WEIGHTED_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -272,6 +296,7 @@ POST_FFS_INTUITIVE_VIEW_WEIGHTED_COLUMNS = [
 
 POST_WITHOUT_FFS_INTUITIVE_COLUMNS = [
     "job_index",
+    "protocol_id",
     "without_ffs_job_index",
     "strategy",
     "n_bins",
@@ -293,6 +318,7 @@ POST_WITHOUT_FFS_INTUITIVE_COLUMNS = [
     "n_iter",
     "initial_prototype_indices",
     "final_cost",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     "cluster_assignments",
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
@@ -315,6 +341,7 @@ POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -336,6 +363,7 @@ POST_FFS_INTUITIVE_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -357,6 +385,7 @@ POST_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -377,6 +406,7 @@ POST_WITHOUT_FFS_INTUITIVE_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -398,6 +428,7 @@ POST_WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_BEST_COLUMNS = [
     "mu_param",
     "gamma",
     "beta",
+    *INTUITIVE_MODEL_AUDIT_COLUMNS,
     *SILHOUETTE_AUDIT_COLUMNS,
     "status",
     "error_message",
@@ -498,6 +529,12 @@ class NativeIntuitiveTrialRecord:
     status: str
     error_message: str | None
     is_best: bool
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -521,6 +558,12 @@ class WithoutFfsIntuitiveNativeRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -547,6 +590,12 @@ class WithoutFfsIntuitiveViewWeightedNativeRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -571,6 +620,12 @@ class FfsIntuitiveNativeRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -597,6 +652,12 @@ class FfsIntuitiveViewWeightedNativeRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -604,6 +665,7 @@ class PostFfsIntuitiveRecord:
     """One Intuitive run on a feature set selected by FFS."""
 
     job_index: int
+    protocol_id: str | None
     ffs_job_index: int
     strategy: str
     n_bins: int
@@ -632,6 +694,12 @@ class PostFfsIntuitiveRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -651,6 +719,13 @@ class PostFfsIntuitiveContext:
     n_selected_features: int
     n_clusters: int
     random_state: int
+    protocol_id: str | None = None
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE
 
 
 @dataclass(frozen=True)
@@ -658,6 +733,7 @@ class PostWithoutFfsIntuitiveRecord:
     """One Intuitive run on one K-Prototypes without-FFS feature set."""
 
     job_index: int
+    protocol_id: str | None
     without_ffs_job_index: int
     strategy: str
     n_bins: int
@@ -686,6 +762,12 @@ class PostWithoutFfsIntuitiveRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -705,6 +787,13 @@ class PostWithoutFfsIntuitiveContext:
     n_selected_features: int
     n_clusters: int
     random_state: int
+    protocol_id: str | None = None
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE
 
 
 @dataclass(frozen=True)
@@ -732,6 +821,12 @@ class PostFfsIntuitiveBestRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -759,6 +854,12 @@ class PostWithoutFfsIntuitiveBestRecord:
     silhouette_sample_std: float = np.nan
     silhouette_negative_fraction: float = np.nan
     cluster_assignments: str = ""
+    final_numeric_phi: str = ""
+    final_categorical_phi: str = ""
+    final_numeric_weights: str = ""
+    final_categorical_weights: str = ""
+    final_numeric_weights_scaled: str = ""
+    final_categorical_weights_scaled: str = ""
 
 
 @dataclass(frozen=True)
@@ -770,8 +871,12 @@ class NativeIntuitiveContext:
     distance_matrix: np.ndarray
     n_clusters: int
     random_state: int
-    init_strategy: str = "farthest_first"
-    strict_init: bool = False
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE
     view_weighted_distance_matrices: dict[float, np.ndarray] | None = None
 
 
@@ -841,6 +946,10 @@ class NativeIntuitiveCandidateContext:
     two_stage: bool
     init_strategy: str
     strict_init: bool
+    non_membership: NonMembershipStrategy
+    max_iter: int
+    empty_cluster_policy: str
+    min_cluster_size: int
 
 
 @dataclass(frozen=True)
@@ -873,6 +982,23 @@ def serialize_cluster_assignments(labels: np.ndarray | None) -> str:
         msg = "Cluster assignments must be a one-dimensional array."
         raise ValueError(msg)
     return json.dumps(labels_array.tolist(), separators=(",", ":"))
+
+
+def serialize_intuitive_model_audit(
+    clustering: IntuitiveClusteringResult | None,
+) -> dict[str, str]:
+    """Serialize final Intuitive phi and weights as valid compact JSON."""
+
+    if clustering is None:
+        return dict.fromkeys(INTUITIVE_MODEL_AUDIT_COLUMNS, "")
+    return {
+        column: json.dumps(
+            getattr(clustering, column),
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        for column in INTUITIVE_MODEL_AUDIT_COLUMNS
+    }
 
 
 ExperimentRecord = (
@@ -1377,6 +1503,7 @@ def make_post_ffs_intuitive_best_record(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -1426,6 +1553,7 @@ def make_post_without_ffs_intuitive_best_record(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -1818,6 +1946,13 @@ def run_post_ffs_intuitive(
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
+    protocol_id: str | None = None,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
     columns: list[str] | None = None,
     intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
     label: str = "post-FFS/intuitive",
@@ -1921,6 +2056,13 @@ def run_post_ffs_intuitive(
                 n_selected_features=len(selected_feature_names),
                 n_clusters=n_clusters,
                 random_state=random_state,
+                protocol_id=protocol_id,
+                init_strategy=init_strategy,
+                strict_init=strict_init,
+                non_membership=non_membership,
+                max_iter=max_iter,
+                empty_cluster_policy=empty_cluster_policy,
+                min_cluster_size=min_cluster_size,
             )
         except Exception:
             logger.exception(
@@ -1971,6 +2113,13 @@ def run_post_without_ffs_intuitive(
     random_state: int = RANDOM_STATE,
     resume: bool = True,
     param_workers: int = 1,
+    protocol_id: str | None = None,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
     columns: list[str] | None = None,
     intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
     label: str = "post-without-FFS/intuitive",
@@ -2076,6 +2225,13 @@ def run_post_without_ffs_intuitive(
                 n_selected_features=len(selected_feature_names),
                 n_clusters=n_clusters,
                 random_state=random_state,
+                protocol_id=protocol_id,
+                init_strategy=init_strategy,
+                strict_init=strict_init,
+                non_membership=non_membership,
+                max_iter=max_iter,
+                empty_cluster_policy=empty_cluster_policy,
+                min_cluster_size=min_cluster_size,
             )
         except Exception:
             logger.exception(
@@ -2233,6 +2389,14 @@ def run_without_ffs_intuitive_native(
     workers: int = 3,
     param_workers: int = 1,
     limit: int | None = None,
+    intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
+    two_stage: bool = True,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
 ) -> pd.DataFrame:
     """Run Intuitive directly on every without-FFS FP-Max configuration."""
 
@@ -2240,7 +2404,17 @@ def run_without_ffs_intuitive_native(
         h_fused_df=h_fused_df,
         save_path=save_path,
         columns=WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS,
-        job_runner=run_without_ffs_intuitive_native_job,
+        job_runner=partial(
+            run_without_ffs_intuitive_native_job,
+            intuitive_param_grid=intuitive_param_grid,
+            two_stage=two_stage,
+            init_strategy=init_strategy,
+            strict_init=strict_init,
+            non_membership=non_membership,
+            max_iter=max_iter,
+            empty_cluster_policy=empty_cluster_policy,
+            min_cluster_size=min_cluster_size,
+        ),
         strategies=strategies,
         n_bins_options=n_bins_options,
         supports=supports,
@@ -2419,6 +2593,15 @@ def run_ffs_intuitive_native(
     param_workers: int = 1,
     candidate_workers: int = 1,
     limit: int | None = None,
+    intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
+    two_stage: bool = True,
+    min_improvement: float = 1e-6,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
 ) -> pd.DataFrame:
     """Run forward feature selection with Intuitive as the native evaluator."""
 
@@ -2429,6 +2612,15 @@ def run_ffs_intuitive_native(
         job_runner=partial(
             run_ffs_intuitive_native_job,
             candidate_workers=candidate_workers,
+            intuitive_param_grid=intuitive_param_grid,
+            two_stage=two_stage,
+            min_improvement=min_improvement,
+            init_strategy=init_strategy,
+            strict_init=strict_init,
+            non_membership=non_membership,
+            max_iter=max_iter,
+            empty_cluster_policy=empty_cluster_policy,
+            min_cluster_size=min_cluster_size,
         ),
         strategies=strategies,
         n_bins_options=n_bins_options,
@@ -2911,6 +3103,7 @@ def make_without_ffs_intuitive_native_trial_records(
                 status=trial.status,
                 error_message=trial.error_message,
                 is_best=(trial is best_trial),
+                **serialize_intuitive_model_audit(clustering),
             )
         )
     return tuple(rows)
@@ -2957,6 +3150,7 @@ def make_ffs_intuitive_native_trial_records(
                     status=trial.status,
                     error_message=trial.error_message,
                     is_best=(trial is final_best_trial),
+                    **serialize_intuitive_model_audit(clustering),
                 )
             )
     return tuple(rows)
@@ -3532,6 +3726,10 @@ def run_native_intuitive_candidate(
         two_stage=context.two_stage,
         init_strategy=context.init_strategy,
         strict_init=context.strict_init,
+        non_membership=context.non_membership,
+        max_iter=context.max_iter,
+        empty_cluster_policy=context.empty_cluster_policy,
+        min_cluster_size=context.min_cluster_size,
     )
     trace = NativeIntuitiveCandidateTrace(
         selection_step=candidate.selection_step,
@@ -3559,8 +3757,12 @@ def run_native_intuitive_forward_selection(
     intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
     min_improvement: float = 1e-6,
     two_stage: bool = True,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
     candidate_workers: int = 1,
 ) -> NativeIntuitiveForwardSelectionResult:
     """Greedily keep features that improve Intuitive silhouette."""
@@ -3589,6 +3791,10 @@ def run_native_intuitive_forward_selection(
         two_stage=two_stage,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
+        max_iter=max_iter,
+        empty_cluster_policy=empty_cluster_policy,
+        min_cluster_size=min_cluster_size,
     )
 
     while remaining:
@@ -3754,6 +3960,10 @@ def run_native_intuitive_trial(job: ExperimentJob) -> NativeIntuitiveTrial:
             view_weighted_distance_matrix=view_weighted_distance_matrix,
             init_strategy=context.init_strategy,
             strict_init=context.strict_init,
+            non_membership=context.non_membership,
+            max_iter=context.max_iter,
+            empty_cluster_policy=context.empty_cluster_policy,
+            min_cluster_size=context.min_cluster_size,
             verbose=False,
         )
     except ValueError as error:
@@ -3838,8 +4048,12 @@ def select_native_intuitive_trials(
     param_workers: int,
     intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
     two_stage: bool = True,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
 ) -> NativeIntuitiveSelectionResult:
     """Evaluate Intuitive params and return the best valid native trial."""
 
@@ -3873,6 +4087,10 @@ def select_native_intuitive_trials(
         random_state=random_state,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
+        max_iter=max_iter,
+        empty_cluster_policy=empty_cluster_policy,
+        min_cluster_size=min_cluster_size,
         view_weighted_distance_matrices=view_weighted_distance_matrices,
     )
 
@@ -3964,8 +4182,12 @@ def select_best_native_intuitive_trial(
     param_workers: int,
     intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
     two_stage: bool = True,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
 ) -> NativeIntuitiveTrial:
     """Evaluate Intuitive params and return the best valid native trial."""
 
@@ -3979,6 +4201,10 @@ def select_best_native_intuitive_trial(
         two_stage=two_stage,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
+        max_iter=max_iter,
+        empty_cluster_policy=empty_cluster_policy,
+        min_cluster_size=min_cluster_size,
     ).best_trial
 
 
@@ -4015,6 +4241,7 @@ def make_post_ffs_intuitive_record(
     )
     return PostFfsIntuitiveRecord(
         job_index=job.job_index,
+        protocol_id=context.protocol_id,
         ffs_job_index=context.ffs_job_index,
         strategy=context.strategy,
         n_bins=context.n_bins,
@@ -4051,6 +4278,7 @@ def make_post_ffs_intuitive_record(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -4077,6 +4305,12 @@ def run_post_ffs_intuitive_job(job: ExperimentJob) -> PostFfsIntuitiveRecord:
             binary_df=context.binary_df,
             n_clusters=context.n_clusters,
             random_state=context.random_state,
+            max_iter=context.max_iter,
+            init_strategy=context.init_strategy,
+            strict_init=context.strict_init,
+            non_membership=context.non_membership,
+            empty_cluster_policy=context.empty_cluster_policy,
+            min_cluster_size=context.min_cluster_size,
             mu_param=job.intuitive_params.mu_param,
             gamma=job.intuitive_params.gamma,
             beta=job.intuitive_params.beta,
@@ -4167,6 +4401,7 @@ def make_post_without_ffs_intuitive_record(
     )
     return PostWithoutFfsIntuitiveRecord(
         job_index=job.job_index,
+        protocol_id=context.protocol_id,
         without_ffs_job_index=context.without_ffs_job_index,
         strategy=context.strategy,
         n_bins=context.n_bins,
@@ -4203,6 +4438,7 @@ def make_post_without_ffs_intuitive_record(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -4231,6 +4467,12 @@ def run_post_without_ffs_intuitive_job(
             binary_df=context.binary_df,
             n_clusters=context.n_clusters,
             random_state=context.random_state,
+            max_iter=context.max_iter,
+            init_strategy=context.init_strategy,
+            strict_init=context.strict_init,
+            non_membership=context.non_membership,
+            empty_cluster_policy=context.empty_cluster_policy,
+            min_cluster_size=context.min_cluster_size,
             mu_param=job.intuitive_params.mu_param,
             gamma=job.intuitive_params.gamma,
             beta=job.intuitive_params.beta,
@@ -4357,8 +4599,13 @@ def run_without_ffs_intuitive_native_job(
     baseline_score: float,
     param_workers: int,
     two_stage: bool = True,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
 ) -> WithoutFfsIntuitiveNativeRecord:
     """Run Intuitive directly on one without-FFS FP-Max support configuration."""
 
@@ -4389,9 +4636,14 @@ def run_without_ffs_intuitive_native_job(
         n_clusters=n_clusters,
         random_state=random_state,
         param_workers=param_workers,
+        intuitive_param_grid=intuitive_param_grid,
         two_stage=two_stage,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
+        max_iter=max_iter,
+        empty_cluster_policy=empty_cluster_policy,
+        min_cluster_size=min_cluster_size,
     )
     best_trial = selection.best_trial
     clustering = best_trial.clustering
@@ -4426,6 +4678,7 @@ def run_without_ffs_intuitive_native_job(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -4517,6 +4770,7 @@ def run_without_ffs_intuitive_view_weighted_native_job(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -4609,9 +4863,15 @@ def run_ffs_intuitive_native_job(
     baseline_score: float,
     param_workers: int,
     two_stage: bool = True,
-    init_strategy: str = "farthest_first",
-    strict_init: bool = False,
+    init_strategy: str = DEFAULT_INTUITIVE_INIT_STRATEGY,
+    strict_init: bool = DEFAULT_INTUITIVE_STRICT_INIT,
+    non_membership: NonMembershipStrategy = INTUITIVE_NON_MEMBERSHIP,
+    max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
+    empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
+    min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
     candidate_workers: int = 1,
+    intuitive_param_grid: tuple[IntuitiveParams, ...] | None = None,
+    min_improvement: float = 1e-6,
 ) -> FfsIntuitiveNativeRecord:
     """Run forward feature selection with Intuitive as the evaluator."""
 
@@ -4636,9 +4896,15 @@ def run_ffs_intuitive_native_job(
         random_state=random_state,
         baseline_score=baseline_score,
         param_workers=param_workers,
+        intuitive_param_grid=intuitive_param_grid,
+        min_improvement=min_improvement,
         two_stage=two_stage,
         init_strategy=init_strategy,
         strict_init=strict_init,
+        non_membership=non_membership,
+        max_iter=max_iter,
+        empty_cluster_policy=empty_cluster_policy,
+        min_cluster_size=min_cluster_size,
         candidate_workers=candidate_workers,
     )
     if not selected.selected_feature_names:
@@ -4703,6 +4969,7 @@ def run_ffs_intuitive_native_job(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 
@@ -4817,6 +5084,7 @@ def run_ffs_intuitive_view_weighted_native_job(
         cluster_assignments=serialize_cluster_assignments(
             clustering.labels if clustering else None
         ),
+        **serialize_intuitive_model_audit(clustering),
     )
 
 

@@ -370,17 +370,31 @@ uv run mvdec-fpmax ffs-intuitive-native
 uv run mvdec-fpmax ffs-intuitive-view-weighted-native
 ```
 
-For configured private artifacts, use the seed-aware runner. It reuses every
-usable source-grid row and evaluates the complete Intuitive parameter grid:
+For configured private artifacts, use the seed-aware native runner. It rebuilds
+the FP-Max candidate pool directly from `H_fused`; it does not reuse features
+selected by K-Prototypes:
 
 ```bash
-uv run mvdec-intuitive TIKI --seed 44 --source without-ffs --param-workers 4
-uv run mvdec-intuitive TIKI --seed 44 --source ffs --param-workers 4
+uv run mvdec-intuitive TIKI --seed 44 --source without-ffs --protocol mimvdec_intuitive_v1 --param-workers 4
+uv run mvdec-intuitive TIKI --seed 44 --source ffs --protocol mimvdec_intuitive_v1 --param-workers 4
 ```
 
-The default source is `ffs`. Existing Intuitive output is replaced unless
-`--resume` is supplied. Resume validates the artifact, seed, source-result hash,
-distance contract, initialization contract, and complete parameter grid.
+The default source is `ffs` and the default protocol is
+`mimvdec_intuitive_v1`. `without-ffs` clusters every FP-Max feature set directly
+with Intuitive. `ffs` runs Intuitive for every candidate feature set at every
+forward-selection step and selects by mixed asymmetric Gower Silhouette. Its
+numeric input is the unnormalized fused MvDEC latent representation; FP-Max
+features are categorical binary attributes. The protocol file
+`configs/intuitive_protocols.json` defines the FP-Max grid, strict FFS
+improvement tolerance, and the complete exhaustive `mu`, `gamma`, and `beta`
+grid.
+Results and the manifest are isolated under
+`<output_root>/seed_<seed>/<protocol_id>/`. Existing protocol output is
+replaced unless `--resume` is supplied. Resume validates the protocol config,
+artifact, seed, FP-Max grid, initialization, stopping settings, distance and
+selection metric contracts, and the complete parameter grid. The result CSV
+and trial-level sidecar are both hashed in the manifest. Use only one parallel
+axis above 1: `--workers`, `--param-workers`, or `--candidate-workers`.
 
 Run full grids with parallel worker processes:
 

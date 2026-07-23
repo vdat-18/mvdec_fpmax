@@ -663,14 +663,17 @@ def _inverse_phi_weights(phi: np.ndarray, beta: float) -> np.ndarray:
         raise ValueError(msg)
 
     phi = np.maximum(phi, 0.0)
-    zero = phi <= 1e-12
-    if np.any(zero):
-        weights = np.zeros_like(phi, dtype=float)
-        weights[zero] = 1.0 / zero.sum()
+    positive = phi > 0.0
+    weights = np.zeros_like(phi, dtype=float)
+    if not np.any(positive):
         return weights
 
-    scores = phi ** (-1.0 / (beta - 1.0))
-    return scores / scores.sum()
+    exponent = -1.0 / (beta - 1.0)
+    positive_phi = phi[positive]
+    log_scores = exponent * np.log(positive_phi)
+    scores = np.exp(log_scores - log_scores.max())
+    weights[positive] = scores / scores.sum()
+    return weights
 
 
 def numeric_weights(

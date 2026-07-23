@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "protocols": {
+    "mimvdec_intuitive_v1": {
+      "numeric_input": "h_fused",
+      "numeric_preprocessing": "none",
+      "categorical_input": "fpmax_binary_features",
+      "initialization_strategy": "farthest_first",
+      "strict_initialization": false,
+      "non_membership": "paper",
+      "zero_phi_policy": "paper_literal_zero_weight",
+      "distance_mode": "paper_scaled_attribute_weights",
+      "selection_metric": "silhouette_gower_numeric_asymmetric_binary_v1",
+      "stopping_mode": "exact_assignment",
+      "max_iter": 100,
+      "empty_cluster_policy": "raise",
+      "min_cluster_size": 1,
+      "without_ffs_mode": "intuitive_native_all_fpmax_features",
+      "ffs_mode": "intuitive_native_forward_selection",
+      "parameter_search": "exhaustive",
+      "ffs_min_improvement": 0.000001,
+      "fpmax_strategies": ["uniform", "quantile", "kmeans"],
+      "fpmax_n_bins": [3, 5, 7],
+      "fpmax_min_supports": [
+        1.0,
+        0.95,
+        0.9,
+        0.85,
+        0.8,
+        0.75,
+        0.7,
+        0.65,
+        0.6,
+        0.55,
+        0.5,
+        0.45,
+        0.4,
+        0.35,
+        0.3,
+        0.25,
+        0.2,
+        0.15,
+        0.1
+      ],
+      "mu_params": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+      "gammas": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+      "betas": [2.0, 3.0, 4.0, 5.0]
+    }
+  }
+}

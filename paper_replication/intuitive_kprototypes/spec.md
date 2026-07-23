@@ -314,11 +314,9 @@ Checks:
 - scaled numerical weights sum to `m_n`;
 - lower `Phi` should produce higher weight.
 
-Open implementation decision:
-
-- The paper's printed case for `Phi == 0` is unusual. For replication, record
-  the exact behavior selected and test it. A practical implementation may use
-  a small epsilon.
+The implementation follows the printed piecewise case exactly: `Phi == 0`
+receives weight `0`, while positive `Phi` values are normalized over the
+nonzero attributes.
 
 ## 6. Categorical Attribute Weights
 
