@@ -10,11 +10,7 @@ import pipeline.clustering as clustering
 from intuitive_kprototypes.model import _inverse_phi_weights
 from pipeline.experiments import (
     INTUITIVE_MODEL_AUDIT_COLUMNS,
-    POST_FFS_INTUITIVE_COLUMNS,
-    ExperimentJob,
-    IntuitiveParams,
-    PostFfsIntuitiveContext,
-    make_post_ffs_intuitive_record,
+    serialize_intuitive_model_audit,
 )
 
 
@@ -97,8 +93,8 @@ def test_intuitive_preserves_raw_latent_and_exposes_final_phi_weights(
     }
 
 
-def test_post_ffs_record_persists_final_phi_weights_as_json() -> None:
-    """Every post-FFS result row must retain interpretable model diagnostics."""
+def test_native_audit_serializer_persists_final_phi_weights_as_json() -> None:
+    """Native Intuitive result rows retain interpretable model diagnostics."""
 
     model_result = SimpleNamespace(
         score=0.4,
@@ -121,33 +117,8 @@ def test_post_ffs_record_persists_final_phi_weights_as_json() -> None:
         final_numeric_weights_scaled={"latent_view_1": 1.0},
         final_categorical_weights_scaled={"pattern_1": 1.0},
     )
-    context = PostFfsIntuitiveContext(
-        h_fused_df=pd.DataFrame({"latent_view_1": range(6)}),
-        binary_df=pd.DataFrame({"pattern_1": [0, 0, 0, 1, 1, 1]}),
-        distance_matrix=np.zeros((6, 6)),
-        view_weighted_distance_matrices=None,
-        ffs_job_index=7,
-        strategy="quantile",
-        n_bins=3,
-        min_support=0.1,
-        ffs_score=0.3,
-        selected_features="pattern_1",
-        n_selected_features=1,
-        n_clusters=2,
-        random_state=44,
-    )
-    record = make_post_ffs_intuitive_record(
-        job=ExperimentJob(
-            job_index=0,
-            min_support=0.1,
-            intuitive_params=IntuitiveParams(mu_param=0.5, gamma=0.5, beta=2.0),
-        ),
-        context=context,
-        clustering=model_result,
-        status="ok",
-        error_message=None,
-    )
+    audit = serialize_intuitive_model_audit(model_result)
 
-    assert set(INTUITIVE_MODEL_AUDIT_COLUMNS).issubset(POST_FFS_INTUITIVE_COLUMNS)
-    assert json.loads(record.final_numeric_phi) == {"latent_view_1": 0.25}
-    assert json.loads(record.final_categorical_weights) == {"pattern_1": 1.0}
+    assert set(audit) == set(INTUITIVE_MODEL_AUDIT_COLUMNS)
+    assert json.loads(audit["final_numeric_phi"]) == {"latent_view_1": 0.25}
+    assert json.loads(audit["final_categorical_weights"]) == {"pattern_1": 1.0}

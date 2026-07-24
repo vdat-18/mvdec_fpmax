@@ -19,15 +19,20 @@ from pipeline.data import file_sha256, load_mvdec_result
 from pipeline.experiment_context import build_experiment_context
 from pipeline.experiments import (
     FFS_INTUITIVE_NATIVE_COLUMNS,
+    FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS,
     INTUITIVE_MODEL_AUDIT_COLUMNS,
     WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS,
+    WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS,
     IntuitiveParams,
     native_trial_sidecar_for,
     run_ffs_intuitive_native,
+    run_ffs_intuitive_view_weighted_native,
     run_without_ffs_intuitive_native,
+    run_without_ffs_intuitive_view_weighted_native,
 )
 from pipeline.intuitive_protocol import (
     DEFAULT_PROTOCOL_CONFIG_PATH,
+    PARAMETER_SEARCH,
     PRIMARY_PROTOCOL_ID,
     IntuitiveProtocol,
     load_intuitive_protocol,
@@ -40,15 +45,22 @@ from pipeline.private_without_ffs import (
 )
 
 IntuitiveSource = Literal["without-ffs", "ffs"]
-MANIFEST_SCHEMA_VERSION = 4
+MANIFEST_SCHEMA_VERSION = 5
 
 
 def _parameter_grid(protocol: IntuitiveProtocol) -> tuple[IntuitiveParams, ...]:
     """Build the exact parameter grid declared by a versioned protocol."""
 
+    alphas: tuple[float | None, ...] = protocol.view_weight_alphas or (None,)
     return tuple(
-        IntuitiveParams(mu_param=mu_param, gamma=gamma, beta=beta)
-        for mu_param, gamma, beta in product(
+        IntuitiveParams(
+            mu_param=mu_param,
+            gamma=gamma,
+            beta=beta,
+            view_weight_alpha=alpha,
+        )
+        for alpha, mu_param, gamma, beta in product(
+            alphas,
             protocol.mu_params,
             protocol.gammas,
             protocol.betas,
@@ -83,23 +95,41 @@ def _csv_data_row_count(path: Path) -> int:
     return max(row_count - 1, 0)
 
 
-def _result_path(output_dir: Path, source: IntuitiveSource) -> Path:
+def _result_path(
+    output_dir: Path,
+    source: IntuitiveSource,
+    view_weighted: bool,
+) -> Path:
     """Return the protocol-scoped native Intuitive result CSV."""
 
-    filename = (
-        project_config.FFS_INTUITIVE_NATIVE_RESULTS_PATH.name
-        if source == "ffs"
-        else project_config.WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH.name
-    )
+    if source == "ffs":
+        configured_path = (
+            project_config.FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
+            if view_weighted
+            else project_config.FFS_INTUITIVE_NATIVE_RESULTS_PATH
+        )
+    else:
+        configured_path = (
+            project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
+            if view_weighted
+            else project_config.WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH
+        )
+    filename = configured_path.name
     return output_dir / filename
 
 
-def _result_columns(source: IntuitiveSource) -> list[str]:
+def _result_columns(source: IntuitiveSource, view_weighted: bool) -> list[str]:
     """Return the persisted schema for one native Intuitive workflow."""
 
+    if source == "ffs":
+        return (
+            FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS
+            if view_weighted
+            else FFS_INTUITIVE_NATIVE_COLUMNS
+        )
     return (
-        FFS_INTUITIVE_NATIVE_COLUMNS
-        if source == "ffs"
+        WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS
+        if view_weighted
         else WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS
     )
 
@@ -222,13 +252,14 @@ def run_configured_intuitive(
 
     protocol = load_intuitive_protocol(protocol_config_path, protocol_id)
     parameter_grid = _parameter_grid(protocol)
+    view_weighted = bool(protocol.view_weight_alphas)
     representation_path = resolve_seed_artifact(spec, seed)
     seed_output_dir = spec.output_root / f"seed_{seed}"
     output_dir = seed_output_dir / protocol.protocol_id
-    save_path = _result_path(output_dir, source)
+    save_path = _result_path(output_dir, source, view_weighted)
     trial_path, _trial_columns = native_trial_sidecar_for(
         save_path,
-        _result_columns(source),
+        _result_columns(source, view_weighted),
     )
     if not resume and trial_path is not None:
         trial_path.unlink(missing_ok=True)
@@ -256,15 +287,20 @@ def run_configured_intuitive(
         param_workers=param_workers,
         candidate_workers=candidate_workers,
     )
-    manifest_name = f"{source.replace('-', '_')}_intuitive_native_manifest.json"
+    workflow_name = (
+        f"{source.replace('-', '_')}_intuitive_view_weighted_native"
+        if view_weighted
+        else f"{source.replace('-', '_')}_intuitive_native"
+    )
+    manifest_name = f"{workflow_name}_manifest.json"
     manifest_path = output_dir / manifest_name
     manifest = _prepare_manifest(manifest_path, contract, save_path, resume)
 
     logger.info(
-        "start:dataset={}; workflow={}_intuitive_native; protocol={}; seed={}; "
+        "start:dataset={}; workflow={}; protocol={}; seed={}; "
         "workers={}; param_workers={}; candidate_workers={}",
         spec.dataset,
-        source.replace("-", "_"),
+        workflow_name,
         protocol.protocol_id,
         seed,
         selected_workers,
@@ -273,7 +309,31 @@ def run_configured_intuitive(
     )
     start = perf_counter()
     try:
-        if source == "ffs":
+        if source == "ffs" and view_weighted:
+            results = run_ffs_intuitive_view_weighted_native(
+                h_fused_df=mvdec_result.h_fused_df,
+                save_path=save_path,
+                strategies=protocol.fpmax_strategies,
+                n_bins_options=protocol.fpmax_n_bins,
+                supports=np.asarray(protocol.fpmax_min_supports),
+                n_clusters=experiment.n_clusters,
+                random_state=seed,
+                baseline_score=mvdec_result.evaluation_score,
+                resume=resume,
+                workers=selected_workers,
+                param_workers=param_workers,
+                candidate_workers=candidate_workers,
+                intuitive_param_grid=parameter_grid,
+                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
+                min_improvement=protocol.ffs_min_improvement,
+                init_strategy=protocol.initialization_strategy,
+                strict_init=protocol.strict_initialization,
+                non_membership=protocol.non_membership,
+                max_iter=protocol.max_iter,
+                empty_cluster_policy=protocol.empty_cluster_policy,
+                min_cluster_size=protocol.min_cluster_size,
+            )
+        elif source == "ffs":
             results = run_ffs_intuitive_native(
                 h_fused_df=mvdec_result.h_fused_df,
                 save_path=save_path,
@@ -288,8 +348,30 @@ def run_configured_intuitive(
                 param_workers=param_workers,
                 candidate_workers=candidate_workers,
                 intuitive_param_grid=parameter_grid,
-                two_stage=False,
+                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
                 min_improvement=protocol.ffs_min_improvement,
+                init_strategy=protocol.initialization_strategy,
+                strict_init=protocol.strict_initialization,
+                non_membership=protocol.non_membership,
+                max_iter=protocol.max_iter,
+                empty_cluster_policy=protocol.empty_cluster_policy,
+                min_cluster_size=protocol.min_cluster_size,
+            )
+        elif view_weighted:
+            results = run_without_ffs_intuitive_view_weighted_native(
+                h_fused_df=mvdec_result.h_fused_df,
+                save_path=save_path,
+                strategies=protocol.fpmax_strategies,
+                n_bins_options=protocol.fpmax_n_bins,
+                supports=np.asarray(protocol.fpmax_min_supports),
+                n_clusters=experiment.n_clusters,
+                random_state=seed,
+                baseline_score=mvdec_result.evaluation_score,
+                resume=resume,
+                workers=selected_workers,
+                param_workers=param_workers,
+                intuitive_param_grid=parameter_grid,
+                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
                 init_strategy=protocol.initialization_strategy,
                 strict_init=protocol.strict_initialization,
                 non_membership=protocol.non_membership,
@@ -311,7 +393,7 @@ def run_configured_intuitive(
                 workers=selected_workers,
                 param_workers=param_workers,
                 intuitive_param_grid=parameter_grid,
-                two_stage=False,
+                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
                 init_strategy=protocol.initialization_strategy,
                 strict_init=protocol.strict_initialization,
                 non_membership=protocol.non_membership,
@@ -362,10 +444,9 @@ def run_configured_intuitive(
     )
     _write_json_atomic(manifest_path, manifest)
     logger.info(
-        "complete:dataset={}; workflow={}_intuitive_native; protocol={}; seed={}; "
-        "rows={}",
+        "complete:dataset={}; workflow={}; protocol={}; seed={}; rows={}",
         spec.dataset,
-        source.replace("-", "_"),
+        workflow_name,
         protocol.protocol_id,
         seed,
         len(results),

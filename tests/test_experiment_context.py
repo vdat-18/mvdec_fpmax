@@ -187,6 +187,30 @@ def test_artifact_n_clusters_rejects_inconsistent_metadata() -> None:
         artifact_n_clusters(artifact)
 
 
+@pytest.mark.parametrize(
+    "removed_mode",
+    (
+        "without-ffs-intuitive-native",
+        "ffs-intuitive-native",
+        "without-ffs-intuitive-view-weighted-native",
+        "ffs-intuitive-view-weighted-native",
+    ),
+)
+def test_generic_cli_rejects_removed_intuitive_modes(
+    removed_mode: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Intuitive workflows are available only via mvdec-intuitive."""
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["mvdec-fpmax", removed_mode, "--representation-path", "artifact.pkl"],
+    )
+
+    with pytest.raises(SystemExit):
+        cli.parse_args()
+
+
 def test_cli_passes_artifact_cluster_count_and_scoped_output(
     tmp_path,
     monkeypatch,
@@ -196,7 +220,6 @@ def test_cli_passes_artifact_cluster_count_and_scoped_output(
     args = SimpleNamespace(
         mode="without-ffs-kprototypes",
         workers=1,
-        param_workers=1,
         candidate_workers=1,
         limit=1,
         no_resume=True,

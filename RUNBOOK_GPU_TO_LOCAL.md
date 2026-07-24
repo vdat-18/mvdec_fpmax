@@ -96,7 +96,7 @@ uv run mvdec-fpmax smoke `
   --representation-path $REP
 ```
 
-## 5. Run 6 Local Modes
+## 5. Run 2 Generic Local Modes
 
 Air pollution:
 
@@ -112,11 +112,7 @@ if (!(Test-Path $REP)) {
 }
 
 uv run mvdec-fpmax without-ffs-kprototypes --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --no-resume
-uv run mvdec-fpmax without-ffs-intuitive-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --param-workers 10 --no-resume
-uv run mvdec-fpmax without-ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --param-workers 10 --no-resume
 uv run mvdec-fpmax ffs-kprototypes --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 20 --candidate-workers 10 --no-resume
-uv run mvdec-fpmax ffs-intuitive-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
-uv run mvdec-fpmax ffs-intuitive-view-weighted-native --data-path $DATA --representation-path $REP --output-dir $OUTPUT --workers 5 --candidate-workers 10 --param-workers 5 --no-resume
 ```
 
 Tiki: use the same commands, but set:
@@ -152,6 +148,8 @@ with the same configured artifact seed:
 ```powershell
 uv run mvdec-intuitive TIKI --seed 44 --source without-ffs --param-workers 4
 uv run mvdec-intuitive TIKI --seed 44 --source ffs --param-workers 4
+uv run mvdec-intuitive TIKI --seed 44 --source without-ffs --protocol mimvdec_intuitive_view_weighted_v1 --param-workers 4
+uv run mvdec-intuitive TIKI --seed 44 --source ffs --protocol mimvdec_intuitive_view_weighted_v1 --param-workers 4
 ```
 
 These commands rerun the Intuitive outputs by default. Add `--resume` only to

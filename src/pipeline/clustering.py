@@ -85,6 +85,7 @@ INTUITIVE_CATEGORICAL_INPUT = "fpmax_binary_features"
 INTUITIVE_NON_MEMBERSHIP = "paper"
 INTUITIVE_ZERO_PHI_POLICY = "paper_literal_zero_weight"
 INTUITIVE_DISTANCE_MODE = "paper_scaled_attribute_weights"
+INTUITIVE_VIEW_WEIGHTED_DISTANCE_MODE = "view_weighted_attribute_weights_v1"
 INTUITIVE_STOPPING_MODE = "exact_assignment"
 
 

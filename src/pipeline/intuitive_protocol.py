@@ -17,6 +17,7 @@ from pipeline.clustering import (
     INTUITIVE_NUMERIC_PREPROCESSING,
     INTUITIVE_SELECTION_METRIC,
     INTUITIVE_STOPPING_MODE,
+    INTUITIVE_VIEW_WEIGHTED_DISTANCE_MODE,
     INTUITIVE_ZERO_PHI_POLICY,
 )
 from pipeline.fpmax import BIN_LABELS_BY_SIZE, DEFAULT_STRATEGIES
@@ -24,10 +25,13 @@ from pipeline.fpmax import BIN_LABELS_BY_SIZE, DEFAULT_STRATEGIES
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_PROTOCOL_CONFIG_PATH = PROJECT_DIR / "configs" / "intuitive_protocols.json"
 PRIMARY_PROTOCOL_ID = "mimvdec_intuitive_v1"
-PROTOCOL_CONFIG_SCHEMA_VERSION = 1
+VIEW_WEIGHTED_PROTOCOL_ID = "mimvdec_intuitive_view_weighted_v1"
+PROTOCOL_CONFIG_SCHEMA_VERSION = 2
 WITHOUT_FFS_MODE = "intuitive_native_all_fpmax_features"
 FFS_MODE = "intuitive_native_forward_selection"
-PARAMETER_SEARCH = "exhaustive"
+VIEW_WEIGHTED_WITHOUT_FFS_MODE = "intuitive_view_weighted_native_all_fpmax_features"
+VIEW_WEIGHTED_FFS_MODE = "intuitive_view_weighted_native_forward_selection"
+PARAMETER_SEARCH = "two_stage"
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class IntuitiveProtocol:
     mu_params: tuple[float, ...]
     gammas: tuple[float, ...]
     betas: tuple[float, ...]
+    view_weight_alphas: tuple[float, ...]
 
 
 def load_intuitive_protocol(
@@ -110,6 +115,7 @@ def load_intuitive_protocol(
         "mu_params",
         "gammas",
         "betas",
+        "view_weight_alphas",
     }
     if set(raw_protocol) != expected_fields:
         missing = sorted(expected_fields - set(raw_protocol))
@@ -131,6 +137,7 @@ def load_intuitive_protocol(
         "mu_params",
         "gammas",
         "betas",
+        "view_weight_alphas",
     }
     for field in string_fields:
         value = raw_protocol[field]
@@ -188,9 +195,17 @@ def load_intuitive_protocol(
         raise ValueError(msg)
 
     numeric_grids: dict[str, tuple[float, ...]] = {}
-    for field in ("fpmax_min_supports", "mu_params", "gammas", "betas"):
+    for field in (
+        "fpmax_min_supports",
+        "mu_params",
+        "gammas",
+        "betas",
+        "view_weight_alphas",
+    ):
         values = raw_protocol[field]
-        if not isinstance(values, list) or not values:
+        if not isinstance(values, list) or (
+            field != "view_weight_alphas" and not values
+        ):
             msg = f"Intuitive protocol field {field!r} must be a non-empty list."
             raise ValueError(msg)
         if any(
@@ -218,6 +233,9 @@ def load_intuitive_protocol(
     if any(value <= 1 for value in numeric_grids["betas"]):
         msg = "Intuitive betas must be greater than 1."
         raise ValueError(msg)
+    if any(not 0 <= value <= 1 for value in numeric_grids["view_weight_alphas"]):
+        msg = "Intuitive view_weight_alphas must satisfy 0 <= alpha <= 1."
+        raise ValueError(msg)
 
     protocol_values = dict(raw_protocol)
     protocol_values.update(numeric_grids)
@@ -229,6 +247,7 @@ def load_intuitive_protocol(
         }
     )
     protocol = IntuitiveProtocol(protocol_id=protocol_id, **protocol_values)
+    view_weighted = bool(protocol.view_weight_alphas)
     supported_values = {
         "numeric_input": INTUITIVE_NUMERIC_INPUT,
         "numeric_preprocessing": INTUITIVE_NUMERIC_PREPROCESSING,
@@ -237,13 +256,19 @@ def load_intuitive_protocol(
         "strict_initialization": DEFAULT_INTUITIVE_STRICT_INIT,
         "non_membership": INTUITIVE_NON_MEMBERSHIP,
         "zero_phi_policy": INTUITIVE_ZERO_PHI_POLICY,
-        "distance_mode": INTUITIVE_DISTANCE_MODE,
+        "distance_mode": (
+            INTUITIVE_VIEW_WEIGHTED_DISTANCE_MODE
+            if view_weighted
+            else INTUITIVE_DISTANCE_MODE
+        ),
         "selection_metric": INTUITIVE_SELECTION_METRIC,
         "stopping_mode": INTUITIVE_STOPPING_MODE,
         "empty_cluster_policy": DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
         "min_cluster_size": DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
-        "without_ffs_mode": WITHOUT_FFS_MODE,
-        "ffs_mode": FFS_MODE,
+        "without_ffs_mode": (
+            VIEW_WEIGHTED_WITHOUT_FFS_MODE if view_weighted else WITHOUT_FFS_MODE
+        ),
+        "ffs_mode": VIEW_WEIGHTED_FFS_MODE if view_weighted else FFS_MODE,
         "parameter_search": PARAMETER_SEARCH,
     }
     mismatches = {

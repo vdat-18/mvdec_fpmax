@@ -16,6 +16,8 @@ from pipeline.clustering import (
     make_mixed_features,
 )
 
+DEFAULT_FFS_MIN_IMPROVEMENT = 0.0
+
 
 @dataclass(frozen=True)
 class ForwardSelectionResult:
@@ -174,7 +176,7 @@ def run_forward_selection(
     baseline_score: float,
     init_methods: tuple[str, ...] = DEFAULT_INIT_METHODS,
     random_state: int = RANDOM_STATE,
-    min_improvement: float = 1e-6,
+    min_improvement: float = DEFAULT_FFS_MIN_IMPROVEMENT,
     verbose: bool = True,
     candidate_workers: int = 1,
 ) -> ForwardSelectionResult:
@@ -266,7 +268,11 @@ def run_forward_selection(
                     result.silhouette_negative_fraction,
                 )
 
-        if local_best is None or local_best_score < best_score + min_improvement:
+        if local_best is None or not improves_score(
+            local_best_score,
+            best_score,
+            min_improvement,
+        ):
             if verbose:
                 logger.info("Stop: no remaining feature improves enough.")
             break
@@ -304,3 +310,16 @@ def run_forward_selection(
         silhouette_sample_std=float(best_sample_std),
         silhouette_negative_fraction=float(best_negative_fraction),
     )
+
+
+def improves_score(
+    candidate_score: float,
+    current_score: float,
+    min_improvement: float = DEFAULT_FFS_MIN_IMPROVEMENT,
+) -> bool:
+    """Return whether a candidate strictly exceeds the current score threshold."""
+
+    if min_improvement < 0:
+        msg = "min_improvement must be non-negative."
+        raise ValueError(msg)
+    return candidate_score > current_score + min_improvement
