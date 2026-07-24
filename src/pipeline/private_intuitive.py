@@ -1,13 +1,11 @@
 """Run seed-isolated native Intuitive FP-Max experiments."""
 
 import argparse
-import csv
 import hashlib
 import json
 from dataclasses import asdict
 from itertools import product
 from pathlib import Path
-from time import perf_counter
 from typing import Literal
 
 import numpy as np
@@ -16,15 +14,10 @@ from loguru import logger
 
 import config as project_config
 from pipeline.data import file_sha256, load_mvdec_result
-from pipeline.experiment_context import build_experiment_context
+from pipeline.experiment_context import artifact_n_clusters, build_experiment_context
 from pipeline.experiments import (
-    FFS_INTUITIVE_NATIVE_COLUMNS,
-    FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS,
     INTUITIVE_MODEL_AUDIT_COLUMNS,
-    WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS,
-    WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS,
     IntuitiveParams,
-    native_trial_sidecar_for,
     run_ffs_intuitive_native,
     run_ffs_intuitive_view_weighted_native,
     run_without_ffs_intuitive_native,
@@ -37,7 +30,6 @@ from pipeline.intuitive_protocol import (
     IntuitiveProtocol,
     load_intuitive_protocol,
 )
-from pipeline.io import result_csv_path
 from pipeline.private_without_ffs import (
     DEFAULT_CONFIG_PATH,
     load_experiment_spec,
@@ -45,7 +37,6 @@ from pipeline.private_without_ffs import (
 )
 
 IntuitiveSource = Literal["without-ffs", "ffs"]
-MANIFEST_SCHEMA_VERSION = 5
 
 
 def _parameter_grid(protocol: IntuitiveProtocol) -> tuple[IntuitiveParams, ...]:
@@ -68,18 +59,6 @@ def _parameter_grid(protocol: IntuitiveProtocol) -> tuple[IntuitiveParams, ...]:
     )
 
 
-def _write_json_atomic(path: Path, payload: dict[str, object]) -> None:
-    """Write one JSON manifest without exposing a partial file."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_name(f"{path.name}.tmp")
-    temporary_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temporary_path.replace(path)
-
-
 def _contract_hash(contract: dict[str, object]) -> str:
     """Return a stable identifier for an Intuitive run contract."""
 
@@ -87,58 +66,24 @@ def _contract_hash(contract: dict[str, object]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _csv_data_row_count(path: Path) -> int:
-    """Count CSV data rows without loading a potentially large trial file."""
-
-    with path.open(encoding="utf-8", newline="") as file:
-        row_count = sum(1 for _row in csv.reader(file))
-    return max(row_count - 1, 0)
-
-
 def _result_path(
     output_dir: Path,
     source: IntuitiveSource,
-    view_weighted: bool,
 ) -> Path:
-    """Return the protocol-scoped native Intuitive result CSV."""
+    """Return the MiMvDEC-compatible result CSV for one source."""
 
     if source == "ffs":
-        configured_path = (
-            project_config.FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
-            if view_weighted
-            else project_config.FFS_INTUITIVE_NATIVE_RESULTS_PATH
-        )
+        configured_path = project_config.FFS_RESULTS_PATH
     else:
-        configured_path = (
-            project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
-            if view_weighted
-            else project_config.WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH
-        )
+        configured_path = project_config.WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH
     filename = configured_path.name
     return output_dir / filename
-
-
-def _result_columns(source: IntuitiveSource, view_weighted: bool) -> list[str]:
-    """Return the persisted schema for one native Intuitive workflow."""
-
-    if source == "ffs":
-        return (
-            FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS
-            if view_weighted
-            else FFS_INTUITIVE_NATIVE_COLUMNS
-        )
-    return (
-        WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_COLUMNS
-        if view_weighted
-        else WITHOUT_FFS_INTUITIVE_NATIVE_COLUMNS
-    )
 
 
 def _build_contract(
     *,
     dataset: str,
     seed: int,
-    source: IntuitiveSource,
     data_path: Path,
     representation_path: Path,
     n_clusters: int,
@@ -146,16 +91,12 @@ def _build_contract(
     protocol: IntuitiveProtocol,
     protocol_config_path: Path,
     parameter_grid: tuple[IntuitiveParams, ...],
-    workers: int,
-    param_workers: int,
-    candidate_workers: int,
 ) -> dict[str, object]:
-    """Build the immutable provenance contract for one Intuitive grid."""
+    """Build shared provenance for both Intuitive result sources."""
 
     return {
         "dataset": dataset,
         "seed": seed,
-        "source": source,
         "protocol_id": protocol.protocol_id,
         "protocol": asdict(protocol),
         "protocol_config_path": str(protocol_config_path.resolve()),
@@ -168,41 +109,7 @@ def _build_contract(
         "baseline_numeric_gower_silhouette": baseline_score,
         "model_audit_columns": INTUITIVE_MODEL_AUDIT_COLUMNS,
         "parameter_grid": [asdict(params) for params in parameter_grid],
-        "execution": {
-            "workers": workers,
-            "param_workers": param_workers,
-            "candidate_workers": candidate_workers,
-        },
     }
-
-
-def _prepare_manifest(
-    path: Path,
-    contract: dict[str, object],
-    output_path: Path,
-    resume: bool,
-) -> dict[str, object]:
-    """Validate resume provenance and mark the workflow as running."""
-
-    contract_hash = _contract_hash(contract)
-    if resume:
-        if not path.is_file():
-            msg = f"Cannot resume Intuitive output without its manifest: {path}."
-            raise FileNotFoundError(msg)
-        existing = json.loads(path.read_text(encoding="utf-8"))
-        if existing.get("contract_hash") != contract_hash:
-            msg = f"Intuitive manifest contract does not match: {path}."
-            raise ValueError(msg)
-
-    payload: dict[str, object] = {
-        "schema_version": MANIFEST_SCHEMA_VERSION,
-        "status": "running",
-        "contract_hash": contract_hash,
-        "contract": contract,
-        "output": {"results_path": str(output_path.resolve())},
-    }
-    _write_json_atomic(path, payload)
-    return payload
 
 
 def run_configured_intuitive(
@@ -256,46 +163,37 @@ def run_configured_intuitive(
     representation_path = resolve_seed_artifact(spec, seed)
     seed_output_dir = spec.output_root / f"seed_{seed}"
     output_dir = seed_output_dir / protocol.protocol_id
-    save_path = _result_path(output_dir, source, view_weighted)
-    trial_path, _trial_columns = native_trial_sidecar_for(
-        save_path,
-        _result_columns(source, view_weighted),
-    )
-    if not resume and trial_path is not None:
-        trial_path.unlink(missing_ok=True)
+    save_path = _result_path(output_dir, source)
 
     mvdec_result = load_mvdec_result(representation_path, spec.data_path)
+    n_clusters = artifact_n_clusters(mvdec_result.raw)
+    contract = _build_contract(
+        dataset=spec.dataset,
+        seed=seed,
+        data_path=spec.data_path,
+        representation_path=representation_path,
+        n_clusters=n_clusters,
+        baseline_score=mvdec_result.evaluation_score,
+        protocol=protocol,
+        protocol_config_path=protocol_config_path,
+        parameter_grid=parameter_grid,
+    )
     experiment = build_experiment_context(
         artifact=mvdec_result.raw,
         data_path=spec.data_path,
         representation_path=representation_path,
         requested_output_dir=output_dir,
         random_state=seed,
-    )
-    contract = _build_contract(
-        dataset=spec.dataset,
-        seed=seed,
-        source=source,
-        data_path=spec.data_path,
-        representation_path=representation_path,
-        n_clusters=experiment.n_clusters,
-        baseline_score=mvdec_result.evaluation_score,
-        protocol=protocol,
-        protocol_config_path=protocol_config_path,
-        parameter_grid=parameter_grid,
-        workers=selected_workers,
-        param_workers=param_workers,
-        candidate_workers=candidate_workers,
+        workflow_metadata={
+            "contract_hash": _contract_hash(contract),
+            "contract": contract,
+        },
     )
     workflow_name = (
         f"{source.replace('-', '_')}_intuitive_view_weighted_native"
         if view_weighted
         else f"{source.replace('-', '_')}_intuitive_native"
     )
-    manifest_name = f"{workflow_name}_manifest.json"
-    manifest_path = output_dir / manifest_name
-    manifest = _prepare_manifest(manifest_path, contract, save_path, resume)
-
     logger.info(
         "start:dataset={}; workflow={}; protocol={}; seed={}; "
         "workers={}; param_workers={}; candidate_workers={}",
@@ -307,142 +205,102 @@ def run_configured_intuitive(
         param_workers,
         candidate_workers,
     )
-    start = perf_counter()
-    try:
-        if source == "ffs" and view_weighted:
-            results = run_ffs_intuitive_view_weighted_native(
-                h_fused_df=mvdec_result.h_fused_df,
-                save_path=save_path,
-                strategies=protocol.fpmax_strategies,
-                n_bins_options=protocol.fpmax_n_bins,
-                supports=np.asarray(protocol.fpmax_min_supports),
-                n_clusters=experiment.n_clusters,
-                random_state=seed,
-                baseline_score=mvdec_result.evaluation_score,
-                resume=resume,
-                workers=selected_workers,
-                param_workers=param_workers,
-                candidate_workers=candidate_workers,
-                intuitive_param_grid=parameter_grid,
-                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
-                min_improvement=protocol.ffs_min_improvement,
-                init_strategy=protocol.initialization_strategy,
-                strict_init=protocol.strict_initialization,
-                non_membership=protocol.non_membership,
-                max_iter=protocol.max_iter,
-                empty_cluster_policy=protocol.empty_cluster_policy,
-                min_cluster_size=protocol.min_cluster_size,
-            )
-        elif source == "ffs":
-            results = run_ffs_intuitive_native(
-                h_fused_df=mvdec_result.h_fused_df,
-                save_path=save_path,
-                strategies=protocol.fpmax_strategies,
-                n_bins_options=protocol.fpmax_n_bins,
-                supports=np.asarray(protocol.fpmax_min_supports),
-                n_clusters=experiment.n_clusters,
-                random_state=seed,
-                baseline_score=mvdec_result.evaluation_score,
-                resume=resume,
-                workers=selected_workers,
-                param_workers=param_workers,
-                candidate_workers=candidate_workers,
-                intuitive_param_grid=parameter_grid,
-                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
-                min_improvement=protocol.ffs_min_improvement,
-                init_strategy=protocol.initialization_strategy,
-                strict_init=protocol.strict_initialization,
-                non_membership=protocol.non_membership,
-                max_iter=protocol.max_iter,
-                empty_cluster_policy=protocol.empty_cluster_policy,
-                min_cluster_size=protocol.min_cluster_size,
-            )
-        elif view_weighted:
-            results = run_without_ffs_intuitive_view_weighted_native(
-                h_fused_df=mvdec_result.h_fused_df,
-                save_path=save_path,
-                strategies=protocol.fpmax_strategies,
-                n_bins_options=protocol.fpmax_n_bins,
-                supports=np.asarray(protocol.fpmax_min_supports),
-                n_clusters=experiment.n_clusters,
-                random_state=seed,
-                baseline_score=mvdec_result.evaluation_score,
-                resume=resume,
-                workers=selected_workers,
-                param_workers=param_workers,
-                intuitive_param_grid=parameter_grid,
-                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
-                init_strategy=protocol.initialization_strategy,
-                strict_init=protocol.strict_initialization,
-                non_membership=protocol.non_membership,
-                max_iter=protocol.max_iter,
-                empty_cluster_policy=protocol.empty_cluster_policy,
-                min_cluster_size=protocol.min_cluster_size,
-            )
-        else:
-            results = run_without_ffs_intuitive_native(
-                h_fused_df=mvdec_result.h_fused_df,
-                save_path=save_path,
-                strategies=protocol.fpmax_strategies,
-                n_bins_options=protocol.fpmax_n_bins,
-                supports=np.asarray(protocol.fpmax_min_supports),
-                n_clusters=experiment.n_clusters,
-                random_state=seed,
-                baseline_score=mvdec_result.evaluation_score,
-                resume=resume,
-                workers=selected_workers,
-                param_workers=param_workers,
-                intuitive_param_grid=parameter_grid,
-                two_stage=protocol.parameter_search == PARAMETER_SEARCH,
-                init_strategy=protocol.initialization_strategy,
-                strict_init=protocol.strict_initialization,
-                non_membership=protocol.non_membership,
-                max_iter=protocol.max_iter,
-                empty_cluster_policy=protocol.empty_cluster_policy,
-                min_cluster_size=protocol.min_cluster_size,
-            )
-    except Exception as error:
-        manifest.update(
-            {
-                "status": "failed",
-                "runtime_seconds": perf_counter() - start,
-                "error": {
-                    "type": type(error).__name__,
-                    "message": str(error),
-                },
-            }
+    if source == "ffs" and view_weighted:
+        results = run_ffs_intuitive_view_weighted_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            save_path=save_path,
+            strategies=protocol.fpmax_strategies,
+            n_bins_options=protocol.fpmax_n_bins,
+            supports=np.asarray(protocol.fpmax_min_supports),
+            n_clusters=experiment.n_clusters,
+            random_state=seed,
+            baseline_score=mvdec_result.evaluation_score,
+            resume=resume,
+            workers=selected_workers,
+            param_workers=param_workers,
+            candidate_workers=candidate_workers,
+            intuitive_param_grid=parameter_grid,
+            two_stage=protocol.parameter_search == PARAMETER_SEARCH,
+            min_improvement=protocol.ffs_min_improvement,
+            init_strategy=protocol.initialization_strategy,
+            strict_init=protocol.strict_initialization,
+            non_membership=protocol.non_membership,
+            max_iter=protocol.max_iter,
+            empty_cluster_policy=protocol.empty_cluster_policy,
+            min_cluster_size=protocol.min_cluster_size,
+            persist_trials=False,
         )
-        _write_json_atomic(manifest_path, manifest)
-        raise
-
-    csv_path = result_csv_path(save_path)
-    status_counts = (
-        results["status"].value_counts(dropna=False).to_dict()
-        if "status" in results
-        else {}
-    )
-    output_metadata: dict[str, object] = {
-        "results_path": str(csv_path.resolve()),
-        "results_sha256": file_sha256(csv_path),
-        "row_count": len(results),
-        "status_counts": status_counts,
-    }
-    if trial_path is not None and trial_path.is_file():
-        output_metadata.update(
-            {
-                "trials_path": str(trial_path.resolve()),
-                "trials_sha256": file_sha256(trial_path),
-                "trial_row_count": _csv_data_row_count(trial_path),
-            }
+    elif source == "ffs":
+        results = run_ffs_intuitive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            save_path=save_path,
+            strategies=protocol.fpmax_strategies,
+            n_bins_options=protocol.fpmax_n_bins,
+            supports=np.asarray(protocol.fpmax_min_supports),
+            n_clusters=experiment.n_clusters,
+            random_state=seed,
+            baseline_score=mvdec_result.evaluation_score,
+            resume=resume,
+            workers=selected_workers,
+            param_workers=param_workers,
+            candidate_workers=candidate_workers,
+            intuitive_param_grid=parameter_grid,
+            two_stage=protocol.parameter_search == PARAMETER_SEARCH,
+            min_improvement=protocol.ffs_min_improvement,
+            init_strategy=protocol.initialization_strategy,
+            strict_init=protocol.strict_initialization,
+            non_membership=protocol.non_membership,
+            max_iter=protocol.max_iter,
+            empty_cluster_policy=protocol.empty_cluster_policy,
+            min_cluster_size=protocol.min_cluster_size,
+            persist_trials=False,
         )
-    manifest.update(
-        {
-            "status": "complete",
-            "runtime_seconds": perf_counter() - start,
-            "output": output_metadata,
-        }
-    )
-    _write_json_atomic(manifest_path, manifest)
+    elif view_weighted:
+        results = run_without_ffs_intuitive_view_weighted_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            save_path=save_path,
+            strategies=protocol.fpmax_strategies,
+            n_bins_options=protocol.fpmax_n_bins,
+            supports=np.asarray(protocol.fpmax_min_supports),
+            n_clusters=experiment.n_clusters,
+            random_state=seed,
+            baseline_score=mvdec_result.evaluation_score,
+            resume=resume,
+            workers=selected_workers,
+            param_workers=param_workers,
+            intuitive_param_grid=parameter_grid,
+            two_stage=protocol.parameter_search == PARAMETER_SEARCH,
+            init_strategy=protocol.initialization_strategy,
+            strict_init=protocol.strict_initialization,
+            non_membership=protocol.non_membership,
+            max_iter=protocol.max_iter,
+            empty_cluster_policy=protocol.empty_cluster_policy,
+            min_cluster_size=protocol.min_cluster_size,
+            persist_trials=False,
+        )
+    else:
+        results = run_without_ffs_intuitive_native(
+            h_fused_df=mvdec_result.h_fused_df,
+            save_path=save_path,
+            strategies=protocol.fpmax_strategies,
+            n_bins_options=protocol.fpmax_n_bins,
+            supports=np.asarray(protocol.fpmax_min_supports),
+            n_clusters=experiment.n_clusters,
+            random_state=seed,
+            baseline_score=mvdec_result.evaluation_score,
+            resume=resume,
+            workers=selected_workers,
+            param_workers=param_workers,
+            intuitive_param_grid=parameter_grid,
+            two_stage=protocol.parameter_search == PARAMETER_SEARCH,
+            init_strategy=protocol.initialization_strategy,
+            strict_init=protocol.strict_initialization,
+            non_membership=protocol.non_membership,
+            max_iter=protocol.max_iter,
+            empty_cluster_policy=protocol.empty_cluster_policy,
+            min_cluster_size=protocol.min_cluster_size,
+            persist_trials=False,
+        )
     logger.info(
         "complete:dataset={}; workflow={}; protocol={}; seed={}; rows={}",
         spec.dataset,

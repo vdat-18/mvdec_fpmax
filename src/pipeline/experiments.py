@@ -901,6 +901,7 @@ def run_without_ffs_intuitive_native(
     max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
     empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
     min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    persist_trials: bool = True,
 ) -> pd.DataFrame:
     """Run Intuitive directly on every without-FFS FP-Max configuration."""
 
@@ -930,6 +931,7 @@ def run_without_ffs_intuitive_native(
         param_workers=param_workers,
         limit=limit,
         label="without-FFS/intuitive-native",
+        persist_trials=persist_trials,
     )
 
 
@@ -955,6 +957,7 @@ def run_without_ffs_intuitive_view_weighted_native(
     max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
     empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
     min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    persist_trials: bool = True,
 ) -> pd.DataFrame:
     """Run native Intuitive with explicit MVDEC/FP-Max view weighting."""
 
@@ -984,6 +987,7 @@ def run_without_ffs_intuitive_view_weighted_native(
         param_workers=param_workers,
         limit=limit,
         label="without-FFS/intuitive-view-weighted-native",
+        persist_trials=persist_trials,
     )
 
 
@@ -1050,6 +1054,7 @@ def run_ffs_intuitive_native(
     max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
     empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
     min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    persist_trials: bool = True,
 ) -> pd.DataFrame:
     """Run forward feature selection with Intuitive as the native evaluator."""
 
@@ -1081,6 +1086,7 @@ def run_ffs_intuitive_native(
         param_workers=param_workers,
         limit=limit,
         label="FFS/intuitive-native",
+        persist_trials=persist_trials,
     )
 
 
@@ -1108,6 +1114,7 @@ def run_ffs_intuitive_view_weighted_native(
     max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
     empty_cluster_policy: str = DEFAULT_INTUITIVE_EMPTY_CLUSTER_POLICY,
     min_cluster_size: int = DEFAULT_INTUITIVE_MIN_CLUSTER_SIZE,
+    persist_trials: bool = True,
 ) -> pd.DataFrame:
     """Run FFS with view-weighted Intuitive as the native evaluator."""
 
@@ -1139,6 +1146,7 @@ def run_ffs_intuitive_view_weighted_native(
         param_workers=param_workers,
         limit=limit,
         label="FFS/intuitive-view-weighted-native",
+        persist_trials=persist_trials,
     )
 
 
@@ -1321,6 +1329,7 @@ def run_experiment_grid(
     limit: int | None,
     label: str,
     group_runner: GroupRunner | None = None,
+    persist_trials: bool = True,
 ) -> pd.DataFrame:
     """Run grouped sensitivity search and save CSV outputs."""
 
@@ -1329,7 +1338,9 @@ def run_experiment_grid(
         raise ValueError(msg)
     group_runner = group_runner or run_group_sequentially
     existing_df = load_results(save_path, columns) if resume else empty_results(columns)
-    trial_save_path, trial_columns = native_trial_sidecar_for(save_path, columns)
+    trial_save_path, trial_columns = (
+        native_trial_sidecar_for(save_path, columns) if persist_trials else (None, None)
+    )
     existing_trial_df = (
         load_results(trial_save_path, trial_columns)
         if resume and trial_save_path is not None and trial_columns is not None

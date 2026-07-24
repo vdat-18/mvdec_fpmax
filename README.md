@@ -385,8 +385,9 @@ Results and the manifest are isolated under
 `<output_root>/seed_<seed>/<protocol_id>/`. Existing protocol output is
 replaced unless `--resume` is supplied. Resume validates the protocol config,
 artifact, seed, FP-Max grid, initialization, stopping settings, distance and
-selection metric contracts, and the complete parameter grid. The result CSV
-and trial-level sidecar are both hashed in the manifest. Use only one parallel
+selection metric contracts, and the complete parameter grid. Intuitive uses
+the same output file layout as MiMvDEC: `without_ffs_results.csv`,
+`ffs_results.csv`, and `mvdec_experiment_manifest.json`. Use only one parallel
 axis above 1: `--workers`, `--param-workers`, or `--candidate-workers`.
 
 Run full grids with parallel worker processes:
@@ -605,9 +606,9 @@ ordered data for every method. It rejects ambiguous result grids containing
 more than one assignment for the same method and seed; select and validate one
 fixed configuration first with `mvdec-evaluate-best`.
 
-Native Intuitive modes also write `*_trials.csv` sidecar files for auditing all
-coarse/refine parameter trials. Summary CSV files keep only the best valid trial
-per grid row or FFS candidate selection result.
+Native Intuitive result CSV files keep the best valid two-stage trial per grid
+row or FFS candidate selection result, including the selected parameters,
+assignments, phi values, and final weights.
 
 Paper-ready MvDEC outputs are not bundled with the repository. Regenerate the
 required Air Pollution and Tiki runs under `output/mvdec_runs/` and audit them

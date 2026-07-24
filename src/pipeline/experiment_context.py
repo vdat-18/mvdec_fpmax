@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from config import KPROTOTYPES_N_INIT, OUTPUT_DIR, RANDOM_STATE
 from pipeline.clustering import MIXED_DISTANCE_CONTRACT
@@ -61,13 +62,14 @@ def _manifest_payload(
     representation_path: Path,
     n_clusters: int,
     random_state: int,
-) -> dict[str, int | str]:
+    workflow_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     dataset = artifact.get("dataset")
     if not isinstance(dataset, str) or not dataset.strip():
         msg = "MvDEC artifact is missing a dataset name."
         raise ValueError(msg)
 
-    return {
+    payload: dict[str, Any] = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "dataset": dataset,
         "data_sha256": file_sha256(data_path),
@@ -77,9 +79,12 @@ def _manifest_payload(
         "random_state": random_state,
         "distance_contract": MIXED_DISTANCE_CONTRACT,
     }
+    if workflow_metadata is not None:
+        payload["workflow"] = workflow_metadata
+    return payload
 
 
-def _ensure_manifest(output_dir: Path, payload: dict[str, int | str]) -> None:
+def _ensure_manifest(output_dir: Path, payload: dict[str, Any]) -> None:
     manifest_path = output_dir / MANIFEST_FILENAME
     if manifest_path.exists():
         try:
@@ -118,6 +123,7 @@ def build_experiment_context(
     representation_path: Path,
     requested_output_dir: Path | None = None,
     random_state: int = RANDOM_STATE,
+    workflow_metadata: dict[str, Any] | None = None,
 ) -> ExperimentContext:
     """Validate artifact settings and prepare an isolated output directory."""
 
@@ -135,6 +141,7 @@ def build_experiment_context(
         representation_path,
         n_clusters,
         random_state,
+        workflow_metadata,
     )
     _ensure_manifest(output_dir, payload)
     return ExperimentContext(

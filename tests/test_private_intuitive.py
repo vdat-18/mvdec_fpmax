@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 import pipeline.private_intuitive as private_intuitive
-from pipeline.experiment_context import ExperimentContext
 from pipeline.intuitive_protocol import (
     DEFAULT_PROTOCOL_CONFIG_PATH,
     PRIMARY_PROTOCOL_ID,
@@ -105,14 +104,11 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """The runner must propagate seed 44 and write an auditable manifest."""
+    """The runner must use the MiMvDEC file set and preserve provenance."""
 
     spec, _artifact_path = _fixture_spec(tmp_path)
     seed_output_dir = spec.output_root / "seed_44"
     protocol_output_dir = seed_output_dir / "mimvdec_intuitive_v1"
-    protocol_output_dir.mkdir(parents=True)
-    stale_trial_path = protocol_output_dir / "ffs_intuitive_native_trials.csv"
-    stale_trial_path.write_text("stale\n1\n", encoding="utf-8")
     mvdec_result = SimpleNamespace(
         raw={"dataset": "TIKI", "n_clusters": 5},
         h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
@@ -131,29 +127,14 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
         lambda _representation, _data: mvdec_result,
     )
 
-    def fake_context(**kwargs):
-        captured["context"] = kwargs
-        return ExperimentContext(
-            dataset="TIKI",
-            n_clusters=5,
-            output_dir=kwargs["requested_output_dir"],
-        )
-
     def fake_run(**kwargs):
         captured["run"] = kwargs
-        assert not stale_trial_path.exists()
         results = pd.DataFrame(
             [{"job_index": 0, "random_state": kwargs["random_state"]}]
         )
         results.to_csv(kwargs["save_path"], index=False)
-        trial_path = kwargs["save_path"].with_name("ffs_intuitive_native_trials.csv")
-        pd.DataFrame([{"trial_index": 0, "status": "ok"}]).to_csv(
-            trial_path,
-            index=False,
-        )
         return results
 
-    monkeypatch.setattr(private_intuitive, "build_experiment_context", fake_context)
     monkeypatch.setattr(private_intuitive, "run_ffs_intuitive_native", fake_run)
 
     results = private_intuitive.run_configured_intuitive(
@@ -164,13 +145,13 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     )
 
     assert len(results) == 1
-    assert captured["context"]["random_state"] == 44
     assert captured["run"]["random_state"] == 44
     assert captured["run"]["param_workers"] == 3
     assert captured["run"]["resume"] is False
     assert captured["run"]["baseline_score"] == 0.25
     assert captured["run"]["two_stage"] is True
     assert captured["run"]["candidate_workers"] == 1
+    assert captured["run"]["persist_trials"] is False
     assert len(captured["run"]["supports"]) == 19
     assert captured["run"]["init_strategy"] == "farthest_first"
     assert captured["run"]["non_membership"] == "paper"
@@ -178,29 +159,25 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     assert len(captured["run"]["intuitive_param_grid"]) == 324
 
     output_dir = protocol_output_dir
-    manifest_path = output_dir / "ffs_intuitive_native_manifest.json"
+    assert {path.name for path in output_dir.iterdir()} == {
+        "ffs_results.csv",
+        "mvdec_experiment_manifest.json",
+    }
+    manifest_path = output_dir / "mvdec_experiment_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 5
-    assert manifest["status"] == "complete"
-    assert manifest["contract"]["seed"] == 44
-    assert manifest["contract"]["source"] == "ffs"
-    assert manifest["contract"]["protocol_id"] == "mimvdec_intuitive_v1"
-    assert manifest["contract"]["protocol"]["numeric_preprocessing"] == "none"
-    assert manifest["contract"]["protocol"]["initialization_strategy"] == (
-        "farthest_first"
-    )
-    assert manifest["contract"]["protocol"]["strict_initialization"] is False
-    assert manifest["contract"]["protocol"]["ffs_mode"] == (
-        "intuitive_native_forward_selection"
-    )
-    assert manifest["contract"]["baseline_numeric_gower_silhouette"] == 0.25
-    assert "source_results_path" not in manifest["contract"]
-    assert manifest["contract"]["model_audit_columns"]
-    assert len(manifest["contract"]["parameter_grid"]) == 324
-    assert manifest["output"]["row_count"] == 1
-    assert manifest["output"]["results_sha256"]
-    assert manifest["output"]["trial_row_count"] == 1
-    assert manifest["output"]["trials_sha256"]
+    contract = manifest["workflow"]["contract"]
+    assert manifest["schema_version"] == 4
+    assert manifest["random_state"] == 44
+    assert contract["seed"] == 44
+    assert contract["protocol_id"] == "mimvdec_intuitive_v1"
+    assert contract["protocol"]["numeric_preprocessing"] == "none"
+    assert contract["protocol"]["initialization_strategy"] == ("farthest_first")
+    assert contract["protocol"]["strict_initialization"] is False
+    assert contract["protocol"]["ffs_mode"] == ("intuitive_native_forward_selection")
+    assert contract["baseline_numeric_gower_silhouette"] == 0.25
+    assert contract["model_audit_columns"]
+    assert len(contract["parameter_grid"]) == 324
+    assert manifest["workflow"]["contract_hash"]
 
 
 def test_configured_intuitive_resume_rejects_changed_artifact(
@@ -226,15 +203,6 @@ def test_configured_intuitive_resume_rejects_changed_artifact(
         "load_mvdec_result",
         lambda _representation, _data: mvdec_result,
     )
-    monkeypatch.setattr(
-        private_intuitive,
-        "build_experiment_context",
-        lambda **kwargs: ExperimentContext(
-            dataset="TIKI",
-            n_clusters=5,
-            output_dir=kwargs["requested_output_dir"],
-        ),
-    )
 
     def fake_run(**kwargs):
         results = pd.DataFrame([{"job_index": 0}])
@@ -245,7 +213,7 @@ def test_configured_intuitive_resume_rejects_changed_artifact(
     private_intuitive.run_configured_intuitive("TIKI", 44, "ffs")
 
     _artifact_path.write_bytes(b"changed artifact")
-    with pytest.raises(ValueError, match="contract does not match"):
+    with pytest.raises(ValueError, match="another dataset or artifact"):
         private_intuitive.run_configured_intuitive(
             "TIKI",
             44,
@@ -274,15 +242,6 @@ def test_without_ffs_runs_native_intuitive_without_kprototypes_source(
         "load_mvdec_result",
         lambda *_: mvdec_result,
     )
-    monkeypatch.setattr(
-        private_intuitive,
-        "build_experiment_context",
-        lambda **kwargs: ExperimentContext(
-            dataset="TIKI",
-            n_clusters=5,
-            output_dir=kwargs["requested_output_dir"],
-        ),
-    )
 
     def fake_run(**kwargs):
         captured.update(kwargs)
@@ -298,7 +257,8 @@ def test_without_ffs_runs_native_intuitive_without_kprototypes_source(
 
     private_intuitive.run_configured_intuitive("TIKI", 44, "without-ffs")
 
-    assert captured["save_path"].name == "without_ffs_intuitive_native_results.csv"
+    assert captured["save_path"].name == "without_ffs_results.csv"
+    assert captured["persist_trials"] is False
     assert captured["two_stage"] is True
     assert len(captured["intuitive_param_grid"]) == 324
 
@@ -319,15 +279,6 @@ def test_view_weighted_protocol_dispatches_to_isolated_runner(
 
     monkeypatch.setattr(private_intuitive, "load_experiment_spec", lambda *_: spec)
     monkeypatch.setattr(private_intuitive, "load_mvdec_result", lambda *_: mvdec_result)
-    monkeypatch.setattr(
-        private_intuitive,
-        "build_experiment_context",
-        lambda **kwargs: ExperimentContext(
-            dataset="TIKI",
-            n_clusters=5,
-            output_dir=kwargs["requested_output_dir"],
-        ),
-    )
 
     def fake_run(**kwargs):
         captured.update(kwargs)
@@ -348,9 +299,8 @@ def test_view_weighted_protocol_dispatches_to_isolated_runner(
         protocol_id=VIEW_WEIGHTED_PROTOCOL_ID,
     )
 
-    assert captured["save_path"].name == (
-        "without_ffs_intuitive_view_weighted_native_results.csv"
-    )
+    assert captured["save_path"].name == "without_ffs_results.csv"
+    assert captured["persist_trials"] is False
     assert captured["two_stage"] is True
     assert len(captured["intuitive_param_grid"]) == 2916
     assert {
@@ -360,11 +310,12 @@ def test_view_weighted_protocol_dispatches_to_isolated_runner(
         spec.output_root
         / "seed_44"
         / VIEW_WEIGHTED_PROTOCOL_ID
-        / "without_ffs_intuitive_view_weighted_native_manifest.json"
+        / "mvdec_experiment_manifest.json"
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["contract"]["protocol_id"] == VIEW_WEIGHTED_PROTOCOL_ID
-    assert manifest["contract"]["protocol"]["view_weight_alphas"]
+    contract = manifest["workflow"]["contract"]
+    assert contract["protocol_id"] == VIEW_WEIGHTED_PROTOCOL_ID
+    assert contract["protocol"]["view_weight_alphas"]
 
 
 def test_configured_intuitive_rejects_multiple_parallel_axes() -> None:
