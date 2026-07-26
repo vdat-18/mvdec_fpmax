@@ -53,6 +53,28 @@ def test_private_experiment_config_resolves_paths_and_seeds(tmp_path) -> None:
     assert spec.workers == 4
 
 
+def test_repository_config_defines_airpollution_contract() -> None:
+    """The checked-in private registry must expose the full Air experiment."""
+
+    spec = load_experiment_spec(
+        private_without_ffs.DEFAULT_CONFIG_PATH,
+        "AIRPOLLUTION",
+    )
+
+    assert spec.data_path == (
+        private_without_ffs.PROJECT_DIR / "data/preprocessed_data/data_demvk.csv"
+    )
+    assert spec.representation_root == (
+        private_without_ffs.PROJECT_DIR
+        / "output/mvdec_runs/airpollution/mvdec_dekm_consistent_v1"
+    )
+    assert spec.output_root == (
+        private_without_ffs.PROJECT_DIR / "output/airpollution/fpmax_without_ffs"
+    )
+    assert spec.seeds == (42, 43, 44)
+    assert spec.workers == 4
+
+
 def test_seed_artifact_requires_exactly_one_match(tmp_path) -> None:
     """Artifact discovery must fail instead of mixing seed outputs."""
 

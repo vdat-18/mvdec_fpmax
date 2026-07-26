@@ -69,13 +69,22 @@ def _contract_hash(contract: dict[str, object]) -> str:
 def _result_path(
     output_dir: Path,
     source: IntuitiveSource,
+    view_weighted: bool,
 ) -> Path:
-    """Return the MiMvDEC-compatible result CSV for one source."""
+    """Return the method-specific result CSV in the shared seed directory."""
 
     if source == "ffs":
-        configured_path = project_config.FFS_RESULTS_PATH
+        configured_path = (
+            project_config.FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
+            if view_weighted
+            else project_config.FFS_INTUITIVE_NATIVE_RESULTS_PATH
+        )
     else:
-        configured_path = project_config.WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH
+        configured_path = (
+            project_config.WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH
+            if view_weighted
+            else project_config.WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH
+        )
     filename = configured_path.name
     return output_dir / filename
 
@@ -162,8 +171,8 @@ def run_configured_intuitive(
     view_weighted = bool(protocol.view_weight_alphas)
     representation_path = resolve_seed_artifact(spec, seed)
     seed_output_dir = spec.output_root / f"seed_{seed}"
-    output_dir = seed_output_dir / protocol.protocol_id
-    save_path = _result_path(output_dir, source)
+    output_dir = seed_output_dir
+    save_path = _result_path(output_dir, source, view_weighted)
 
     mvdec_result = load_mvdec_result(representation_path, spec.data_path)
     n_clusters = artifact_n_clusters(mvdec_result.raw)
@@ -184,6 +193,7 @@ def run_configured_intuitive(
         representation_path=representation_path,
         requested_output_dir=output_dir,
         random_state=seed,
+        workflow_id=protocol.protocol_id,
         workflow_metadata={
             "contract_hash": _contract_hash(contract),
             "contract": contract,

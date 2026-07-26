@@ -22,8 +22,7 @@ data/
     seller_store_urls.csv        # seller storefront URLs used during collection
 output/
   mvdec_runs/                    # protocol/config/seed-isolated GPU outputs
-  without_ffs_results.csv
-  ffs_results.csv
+  tiki/fpmax_without_ffs/seed_44/ # six method-specific downstream CSV files
 src/
   data_preprocessing/            # raw-data preprocessing utilities
   representation_learning/       # MvDEC representation code
@@ -381,14 +380,13 @@ features are categorical binary attributes. The protocol file
 and the two-stage `mu`, `gamma`, and `beta` search space. Both K-Prototypes
 and Intuitive FFS retain a feature only when its Silhouette is strictly greater
 than the current score.
-Results and the manifest are isolated under
-`<output_root>/seed_<seed>/<protocol_id>/`. Existing protocol output is
-replaced unless `--resume` is supplied. Resume validates the protocol config,
+All six downstream results share `<output_root>/seed_<seed>/` and use distinct
+method-specific filenames. Existing method output is replaced unless `--resume`
+is supplied. Resume validates the protocol config,
 artifact, seed, FP-Max grid, initialization, stopping settings, distance and
-selection metric contracts, and the complete parameter grid. Intuitive uses
-the same output file layout as MiMvDEC: `without_ffs_results.csv`,
-`ffs_results.csv`, and `mvdec_experiment_manifest.json`. Use only one parallel
-axis above 1: `--workers`, `--param-workers`, or `--candidate-workers`.
+selection metric contracts, and the complete parameter grid through the shared
+`mvdec_experiment_manifest.json`. Use only one parallel axis above 1:
+`--workers`, `--param-workers`, or `--candidate-workers`.
 
 Run full grids with parallel worker processes:
 
@@ -474,23 +472,23 @@ full alpha   = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
 
 ## Outputs
 
-Generic K-Prototypes outputs remain under `output/<dataset>/`. Configured
-Intuitive outputs are isolated by seed and protocol under
-`<output_root>/seed_<seed>/<protocol_id>/`:
+Configured downstream outputs share one seed directory. Filenames identify the
+clustering backend, view-weighting ablation, and FFS setting:
 
 ```text
-output/<dataset>/without_ffs_results.csv
-output/<dataset>/ffs_results.csv
-output/<dataset>/mvdec_experiment_manifest.json
-
-<output_root>/seed_<seed>/mimvdec_intuitive_v1/
-<output_root>/seed_<seed>/mimvdec_intuitive_view_weighted_v1/
+<output_root>/seed_<seed>/
+  mimvdec_without_ffs_results.csv
+  mimvdec_with_ffs_results.csv
+  mimvdec_intuitive_without_ffs_results.csv
+  mimvdec_intuitive_with_ffs_results.csv
+  mimvdec_intuitive_view_weighted_without_ffs_results.csv
+  mimvdec_intuitive_view_weighted_with_ffs_results.csv
+  mvdec_experiment_manifest.json
 ```
 
 The manifest records the dataset, data hash, artifact hash, cluster count,
-random seed, and evaluation-distance contract. Resume is rejected if any of
-these differ. To run another artifact or distance contract, use its default
-dataset directory or provide a new `--output-dir`.
+random seed, evaluation-distance contract, and both versioned Intuitive
+contracts. Resume is rejected if any of these differ.
 
 Every summary result row produced by a clustering run also includes:
 
@@ -548,7 +546,7 @@ primary asymmetric contract and the symmetric-Gower ablation:
 
 ```bash
 uv run mvdec-evaluate-best \
-  --results-path output/tiki_v4/ffs_results.csv \
+  --results-path output/tiki_v4/mimvdec_with_ffs_results.csv \
   --backend kprototypes \
   --score-column final_score \
   --seeds 40 41 42 43 44 \

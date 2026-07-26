@@ -154,5 +154,6 @@ uv run mvdec-intuitive TIKI --seed 44 --source ffs --protocol mimvdec_intuitive_
 
 These commands rerun the Intuitive outputs by default. Add `--resume` only to
 continue an interrupted run with an unchanged provenance contract.
-Each protocol directory uses the MiMvDEC file layout: `without_ffs_results.csv`,
-`ffs_results.csv`, and `mvdec_experiment_manifest.json`.
+All six downstream CSV files share `<output_root>/seed_<seed>/`. Their filenames
+identify MiMvDEC versus Intuitive, Standard versus View-weighted, and with versus
+without FFS; the directory contains one shared `mvdec_experiment_manifest.json`.

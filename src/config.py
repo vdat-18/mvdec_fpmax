@@ -15,15 +15,17 @@ DEKM_DATASET_DIR = PROJECT_DIR / "external_repos" / "DEKM" / "datasets"
 PUBLIC_BENCHMARK_OUTPUT_DIR = OUTPUT_DIR / "public_benchmark"
 
 PREPROCESSED_DATA_PATH = PREPROCESSED_DATA_DIR / "tiki_preprocessed.csv"
-WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH = OUTPUT_DIR / "without_ffs_results.csv"
-FFS_RESULTS_PATH = OUTPUT_DIR / "ffs_results.csv"
+WITHOUT_FFS_KPROTOTYPES_RESULTS_PATH = OUTPUT_DIR / "mimvdec_without_ffs_results.csv"
+FFS_RESULTS_PATH = OUTPUT_DIR / "mimvdec_with_ffs_results.csv"
 WITHOUT_FFS_INTUITIVE_NATIVE_RESULTS_PATH = (
-    OUTPUT_DIR / "without_ffs_intuitive_native_results.csv"
+    OUTPUT_DIR / "mimvdec_intuitive_without_ffs_results.csv"
 )
 WITHOUT_FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH = (
-    OUTPUT_DIR / "without_ffs_intuitive_view_weighted_native_results.csv"
+    OUTPUT_DIR / "mimvdec_intuitive_view_weighted_without_ffs_results.csv"
 )
-FFS_INTUITIVE_NATIVE_RESULTS_PATH = OUTPUT_DIR / "ffs_intuitive_native_results.csv"
+FFS_INTUITIVE_NATIVE_RESULTS_PATH = (
+    OUTPUT_DIR / "mimvdec_intuitive_with_ffs_results.csv"
+)
 FFS_INTUITIVE_VIEW_WEIGHTED_NATIVE_RESULTS_PATH = (
-    OUTPUT_DIR / "ffs_intuitive_view_weighted_native_results.csv"
+    OUTPUT_DIR / "mimvdec_intuitive_view_weighted_with_ffs_results.csv"
 )

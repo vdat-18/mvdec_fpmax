@@ -108,7 +108,6 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
 
     spec, _artifact_path = _fixture_spec(tmp_path)
     seed_output_dir = spec.output_root / "seed_44"
-    protocol_output_dir = seed_output_dir / "mimvdec_intuitive_v1"
     mvdec_result = SimpleNamespace(
         raw={"dataset": "TIKI", "n_clusters": 5},
         h_fused_df=pd.DataFrame({"fused_1": [0.0, 1.0]}),
@@ -158,14 +157,15 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     assert captured["run"]["max_iter"] == 100
     assert len(captured["run"]["intuitive_param_grid"]) == 324
 
-    output_dir = protocol_output_dir
+    output_dir = seed_output_dir
     assert {path.name for path in output_dir.iterdir()} == {
-        "ffs_results.csv",
+        "mimvdec_intuitive_with_ffs_results.csv",
         "mvdec_experiment_manifest.json",
     }
     manifest_path = output_dir / "mvdec_experiment_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    contract = manifest["workflow"]["contract"]
+    workflow = manifest["workflows"]["mimvdec_intuitive_v1"]
+    contract = workflow["contract"]
     assert manifest["schema_version"] == 4
     assert manifest["random_state"] == 44
     assert contract["seed"] == 44
@@ -177,7 +177,7 @@ def test_configured_intuitive_uses_seed_and_persists_provenance(
     assert contract["baseline_numeric_gower_silhouette"] == 0.25
     assert contract["model_audit_columns"]
     assert len(contract["parameter_grid"]) == 324
-    assert manifest["workflow"]["contract_hash"]
+    assert workflow["contract_hash"]
 
 
 def test_configured_intuitive_resume_rejects_changed_artifact(
@@ -257,7 +257,7 @@ def test_without_ffs_runs_native_intuitive_without_kprototypes_source(
 
     private_intuitive.run_configured_intuitive("TIKI", 44, "without-ffs")
 
-    assert captured["save_path"].name == "without_ffs_results.csv"
+    assert captured["save_path"].name == ("mimvdec_intuitive_without_ffs_results.csv")
     assert captured["persist_trials"] is False
     assert captured["two_stage"] is True
     assert len(captured["intuitive_param_grid"]) == 324
@@ -299,21 +299,18 @@ def test_view_weighted_protocol_dispatches_to_isolated_runner(
         protocol_id=VIEW_WEIGHTED_PROTOCOL_ID,
     )
 
-    assert captured["save_path"].name == "without_ffs_results.csv"
+    assert captured["save_path"].name == (
+        "mimvdec_intuitive_view_weighted_without_ffs_results.csv"
+    )
     assert captured["persist_trials"] is False
     assert captured["two_stage"] is True
     assert len(captured["intuitive_param_grid"]) == 2916
     assert {
         params.view_weight_alpha for params in captured["intuitive_param_grid"]
     } == {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9}
-    manifest_path = (
-        spec.output_root
-        / "seed_44"
-        / VIEW_WEIGHTED_PROTOCOL_ID
-        / "mvdec_experiment_manifest.json"
-    )
+    manifest_path = spec.output_root / "seed_44" / "mvdec_experiment_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    contract = manifest["workflow"]["contract"]
+    contract = manifest["workflows"][VIEW_WEIGHTED_PROTOCOL_ID]["contract"]
     assert contract["protocol_id"] == VIEW_WEIGHTED_PROTOCOL_ID
     assert contract["protocol"]["view_weight_alphas"]
 

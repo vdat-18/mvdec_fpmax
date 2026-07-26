@@ -80,6 +80,66 @@ def test_experiment_context_records_requested_downstream_random_state(
     assert manifest["random_state"] == 44
 
 
+def test_experiment_context_merges_workflows_in_one_seed_directory(tmp_path) -> None:
+    """Distinct method contracts must share one manifest without collisions."""
+
+    data_path = tmp_path / "data.csv"
+    representation_path = tmp_path / "artifact.pkl"
+    output_dir = tmp_path / "results"
+    data_path.write_text("x\n1\n", encoding="utf-8")
+    representation_path.write_bytes(b"trusted artifact")
+
+    build_experiment_context(
+        _artifact(),
+        data_path,
+        representation_path,
+        output_dir,
+        random_state=44,
+        workflow_id="mimvdec_intuitive_v1",
+        workflow_metadata={
+            "contract_hash": "standard",
+            "contract": {"values": (0.1, 0.2)},
+        },
+    )
+    build_experiment_context(
+        _artifact(),
+        data_path,
+        representation_path,
+        output_dir,
+        random_state=44,
+        workflow_id="mimvdec_intuitive_view_weighted_v1",
+        workflow_metadata={"contract_hash": "view-weighted"},
+    )
+    build_experiment_context(
+        _artifact(),
+        data_path,
+        representation_path,
+        output_dir,
+        random_state=44,
+        workflow_id="mimvdec_intuitive_v1",
+        workflow_metadata={
+            "contract_hash": "standard",
+            "contract": {"values": (0.1, 0.2)},
+        },
+    )
+    build_experiment_context(
+        _artifact(),
+        data_path,
+        representation_path,
+        output_dir,
+        random_state=44,
+    )
+
+    manifest = json.loads((output_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert manifest["workflows"] == {
+        "mimvdec_intuitive_v1": {
+            "contract_hash": "standard",
+            "contract": {"values": [0.1, 0.2]},
+        },
+        "mimvdec_intuitive_view_weighted_v1": {"contract_hash": "view-weighted"},
+    }
+
+
 def test_default_output_directories_are_dataset_scoped(
     tmp_path,
     monkeypatch,
@@ -146,7 +206,10 @@ def test_experiment_context_rejects_legacy_csv_directory_without_manifest(
     output_dir.mkdir()
     data_path.write_text("x\n1\n", encoding="utf-8")
     representation_path.write_bytes(b"artifact")
-    (output_dir / "ffs_results.csv").write_text("job_index\n0\n", encoding="utf-8")
+    (output_dir / "mimvdec_with_ffs_results.csv").write_text(
+        "job_index\n0\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="without a manifest"):
         build_experiment_context(
@@ -255,4 +318,6 @@ def test_cli_passes_artifact_cluster_count_and_scoped_output(
 
     assert captured["n_clusters"] == 4
     assert captured["baseline_score"] == 0.4
-    assert captured["save_path"] == args.output_dir / "without_ffs_results.csv"
+    assert captured["save_path"] == (
+        args.output_dir / "mimvdec_without_ffs_results.csv"
+    )

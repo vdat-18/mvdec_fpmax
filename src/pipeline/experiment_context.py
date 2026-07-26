@@ -62,6 +62,7 @@ def _manifest_payload(
     representation_path: Path,
     n_clusters: int,
     random_state: int,
+    workflow_id: str | None = None,
     workflow_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     dataset = artifact.get("dataset")
@@ -79,8 +80,15 @@ def _manifest_payload(
         "random_state": random_state,
         "distance_contract": MIXED_DISTANCE_CONTRACT,
     }
-    if workflow_metadata is not None:
-        payload["workflow"] = workflow_metadata
+    if (workflow_id is None) != (workflow_metadata is None):
+        msg = "workflow_id and workflow_metadata must be provided together."
+        raise ValueError(msg)
+    if workflow_id is not None:
+        if not workflow_id.strip():
+            msg = "workflow_id must be a non-empty string."
+            raise ValueError(msg)
+        normalized_metadata = json.loads(json.dumps(workflow_metadata, sort_keys=True))
+        payload["workflows"] = {workflow_id: normalized_metadata}
     return payload
 
 
@@ -95,12 +103,41 @@ def _ensure_manifest(output_dir: Path, payload: dict[str, Any]) -> None:
                 "Use a new --output-dir or repair the manifest."
             )
             raise ValueError(msg) from exc
-        if existing != payload:
+        existing_base = {
+            key: value for key, value in existing.items() if key != "workflows"
+        }
+        requested_base = {
+            key: value for key, value in payload.items() if key != "workflows"
+        }
+        if existing_base != requested_base:
             msg = (
                 f"Experiment output directory belongs to another dataset or "
                 f"artifact: {output_dir}. Use a separate --output-dir."
             )
             raise ValueError(msg)
+
+        existing_workflows = existing.get("workflows", {})
+        requested_workflows = payload.get("workflows", {})
+        if not isinstance(existing_workflows, dict):
+            msg = f"Experiment manifest workflows must be an object: {manifest_path}."
+            raise ValueError(msg)
+        for workflow_id, metadata in requested_workflows.items():
+            if (
+                workflow_id in existing_workflows
+                and existing_workflows[workflow_id] != metadata
+            ):
+                msg = (
+                    f"Experiment workflow contract does not match for "
+                    f"{workflow_id!r}: {manifest_path}."
+                )
+                raise ValueError(msg)
+        merged_workflows = {**existing_workflows, **requested_workflows}
+        if merged_workflows != existing_workflows:
+            existing["workflows"] = merged_workflows
+            manifest_path.write_text(
+                json.dumps(existing, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         return
 
     existing_results = list(output_dir.glob("*.csv"))
@@ -123,6 +160,7 @@ def build_experiment_context(
     representation_path: Path,
     requested_output_dir: Path | None = None,
     random_state: int = RANDOM_STATE,
+    workflow_id: str | None = None,
     workflow_metadata: dict[str, Any] | None = None,
 ) -> ExperimentContext:
     """Validate artifact settings and prepare an isolated output directory."""
@@ -141,6 +179,7 @@ def build_experiment_context(
         representation_path,
         n_clusters,
         random_state,
+        workflow_id,
         workflow_metadata,
     )
     _ensure_manifest(output_dir, payload)
