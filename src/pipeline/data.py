@@ -203,35 +203,63 @@ def _validate_airpollution_preprocessing(
     if not isinstance(preprocessing, dict):
         msg = (
             "Air Pollution MvDEC artifact is missing preprocessing metadata; "
-            "regenerate it with column-wise Min-Max scaling."
+            "regenerate it with an explicit preprocessing method."
         )
         raise ValueError(msg)
-    if preprocessing.get("method") != "minmax":
+    preprocessing_method = preprocessing.get("method")
+    expected_feature_ranges = {
+        "minmax": [0.0, 1.0],
+        "standard": None,
+        "none": None,
+    }
+    if preprocessing_method not in expected_feature_ranges:
         msg = (
-            "Air Pollution MvDEC artifact must use column-wise Min-Max scaling; "
-            f"got {preprocessing.get('method')!r}."
+            "Unsupported Air Pollution preprocessing method: "
+            f"{preprocessing_method!r}."
         )
         raise ValueError(msg)
-    if preprocessing.get("feature_range") != [0.0, 1.0]:
-        msg = "Air Pollution Min-Max feature_range must be [0.0, 1.0]."
+    expected_feature_range = expected_feature_ranges[preprocessing_method]
+    if preprocessing.get("feature_range") != expected_feature_range:
+        msg = (
+            "Air Pollution preprocessing feature_range does not match method "
+            f"{preprocessing_method!r}."
+        )
         raise ValueError(msg)
 
     columns = list(preprocessed_df.columns)
     if preprocessing.get("feature_columns") != columns:
-        msg = "Air Pollution scaler feature columns do not match the source CSV."
+        msg = "Air Pollution preprocessing columns do not match the source CSV."
         raise ValueError(msg)
     data_min = np.asarray(preprocessing.get("data_min", []), dtype=float)
     data_max = np.asarray(preprocessing.get("data_max", []), dtype=float)
     if len(data_min) != len(columns) or len(data_max) != len(columns):
-        msg = "Air Pollution scaler min/max metadata does not match the input width."
+        msg = "Air Pollution preprocessing min/max metadata has the wrong width."
         raise ValueError(msg)
     source_values = preprocessed_df.to_numpy(dtype=float)
     if not np.allclose(data_min, source_values.min(axis=0)) or not np.allclose(
         data_max,
         source_values.max(axis=0),
     ):
-        msg = "Air Pollution scaler min/max metadata does not match the source CSV."
+        msg = (
+            "Air Pollution preprocessing min/max metadata does not match the "
+            "source CSV."
+        )
         raise ValueError(msg)
+    if preprocessing_method == "standard":
+        data_mean = np.asarray(preprocessing.get("data_mean", []), dtype=float)
+        data_std = np.asarray(preprocessing.get("data_std", []), dtype=float)
+        if len(data_mean) != len(columns) or len(data_std) != len(columns):
+            msg = "Air Pollution standard-scaling metadata has the wrong width."
+            raise ValueError(msg)
+        if not np.allclose(data_mean, source_values.mean(axis=0)) or not np.allclose(
+            data_std,
+            source_values.std(axis=0),
+        ):
+            msg = (
+                "Air Pollution standard-scaling mean/std metadata does not match "
+                "the source CSV."
+            )
+            raise ValueError(msg)
 
 
 def _protocol_contract_sha256(contract: dict[str, object]) -> str:

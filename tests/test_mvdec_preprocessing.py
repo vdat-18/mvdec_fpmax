@@ -65,7 +65,7 @@ def test_airpollution_minmax_scales_each_column_before_shuffle(tmp_path, monkeyp
     assert len(metadata["source_sha256"]) == 64
 
 
-def test_tiki_none_policy_preserves_input_values(tmp_path, monkeypatch):
+def test_none_preprocessing_preserves_input_values(tmp_path, monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     data_path = tmp_path / "tiki.csv"
     source = pd.DataFrame({"feature_a": [-2.0, 5.0], "feature_b": [10.0, 20.0]})
@@ -88,11 +88,56 @@ def test_tiki_none_policy_preserves_input_values(tmp_path, monkeypatch):
     assert metadata["feature_range"] is None
 
 
+def test_standard_preprocessing_scales_columns_before_shuffle(tmp_path, monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    data_path = tmp_path / "airpollution.csv"
+    source = pd.DataFrame(
+        {
+            "distance": [10.0, 20.0, 30.0],
+            "pollution": [0.1, 0.2, 0.3],
+            "constant": [7.0, 7.0, 7.0],
+        }
+    )
+    source.to_csv(data_path, index=False)
+
+    scaled, indices, _, _, metadata = mvdec.get_x_unlabeled_csv(
+        data_path,
+        log_print=False,
+        shuffle_seed=42,
+        scaling_method="standard",
+        include_preprocessing=True,
+    )
+    restored = _restore_original_order(scaled, indices)
+
+    np.testing.assert_allclose(restored[:, :2].mean(axis=0), 0.0, atol=1e-6)
+    np.testing.assert_allclose(restored[:, :2].std(axis=0), 1.0, atol=1e-6)
+    np.testing.assert_allclose(restored[:, 2], 0.0)
+    np.testing.assert_allclose(metadata["data_mean"], [20.0, 0.2, 7.0])
+    np.testing.assert_allclose(
+        metadata["data_std"],
+        source.to_numpy(dtype=float).std(axis=0),
+    )
+    assert metadata["method"] == "standard"
+    assert metadata["feature_range"] is None
+
+
 def test_dataset_registry_scales_only_airpollution(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
     assert mvdec.UNLABELED_DATASETS["AIRPOLLUTION"]["scaling_method"] == "minmax"
     assert mvdec.UNLABELED_DATASETS["TIKI"]["scaling_method"] == "none"
+    assert mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION") == "minmax"
+    assert mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION", "none") == "none"
+    assert (
+        mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION", "standard")
+        == "standard"
+    )
+    assert mvdec._preprocessing_input_space(None) == "x"
+    assert mvdec._preprocessing_input_space({"method": "minmax"}) == "x_minmax"
+    assert mvdec._preprocessing_input_space({"method": "standard"}) == "x_standard"
+    assert mvdec._preprocessing_input_space({"method": "none"}) == "x_raw"
+    with pytest.raises(ValueError, match="Unsupported preprocessing metadata"):
+        mvdec._preprocessing_input_space({"method": "unknown"})
     assert mvdec.KMEANS_N_INIT == 100
     assert mvdec.assignment_change_tolerance == 0.01
     assert mvdec.resolve_assignment_change_tolerance("AIRPOLLUTION") == 0.01
@@ -435,13 +480,13 @@ def test_custom_protocol_cannot_claim_primary_objective(monkeypatch):
     )
 
 
-def test_airpollution_artifact_requires_scaler_metadata(tmp_path, monkeypatch):
+def test_airpollution_artifact_requires_preprocessing_metadata(tmp_path, monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     monkeypatch.setattr(mvdec, "ds_name", "AIRPOLLUTION")
     h_view1 = np.zeros((2, 2), dtype=np.float32)
     h_view2 = np.ones((2, 2), dtype=np.float32)
 
-    with pytest.raises(ValueError, match="require Min-Max preprocessing metadata"):
+    with pytest.raises(ValueError, match="require preprocessing metadata"):
         mvdec.save_airpollution_mvdec_artifact(
             artifact_path=tmp_path / "artifact.pkl",
             h_view1=h_view1,

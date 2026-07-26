@@ -7,7 +7,7 @@ import pytest
 
 from config import H_FUSED_COLUMNS
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
-from pipeline.data import load_mvdec_result
+from pipeline.data import _validate_airpollution_preprocessing, load_mvdec_result
 
 
 def _normalized_file_sha256(path) -> str:
@@ -248,6 +248,78 @@ def test_load_mvdec_result_validates_tiki_source_order_across_line_endings(
     source_df.iloc[::-1].to_csv(data_path, index=False, lineterminator="\n")
     with pytest.raises(ValueError, match="source CSV hash"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+@pytest.mark.parametrize(
+    ("method", "fitted_metadata"),
+    [
+        ("none", {}),
+        (
+            "standard",
+            {
+                "data_mean": [1.5, 25.0],
+                "data_std": [1.118033988749895, 11.180339887498949],
+            },
+        ),
+    ],
+)
+def test_airpollution_preprocessing_accepts_supported_scaling(
+    tmp_path,
+    method,
+    fitted_metadata,
+):
+    """Air Pollution sensitivity artifacts retain auditable scaler metadata."""
+
+    data_path = tmp_path / "airpollution.csv"
+    source_df = pd.DataFrame(
+        {
+            "distance": [0.0, 1.0, 2.0, 3.0],
+            "pollution": [10.0, 20.0, 30.0, 40.0],
+        }
+    )
+    source_df.to_csv(data_path, index=False)
+    artifact = {
+        "dataset": "AIRPOLLUTION",
+        "eigenvalue_order": "ascending",
+        "greedy_eigen_direction": "largest",
+        "greedy_eigen_index": 1,
+        "greedy_target_mode": "frozen_snapshot",
+        "fusion_dim": 2,
+        "kmeans_refresh_policy": "one_epoch",
+        "batches_per_epoch": 2,
+        "stop_reason": "converged_assignment",
+        "refinement_epochs_completed": 3,
+        "preprocessing": {
+            "method": method,
+            "feature_range": None,
+            "feature_columns": list(source_df.columns),
+            "data_min": [0.0, 10.0],
+            "data_max": [3.0, 40.0],
+            "source_sha256": _normalized_file_sha256(data_path),
+            **fitted_metadata,
+        },
+        "config": {
+            "eigenvalue_order": "ascending",
+            "greedy_eigen_direction": "largest",
+            "greedy_eigen_index": 1,
+            "greedy_target_mode": "frozen_snapshot",
+            "kmeans_n_init": 100,
+            "batch_size": 2,
+            "kmeans_refresh_policy": "one_epoch",
+            "batches_per_epoch": 2,
+            "update_interval": 2,
+            "max_refinement_epochs": 5,
+            "max_training_steps": 10,
+            "stop_reason": "converged_assignment",
+            "refinement_epochs_completed": 3,
+        },
+    }
+
+    _validate_airpollution_preprocessing(artifact, data_path, source_df)
+    if method == "standard":
+        artifact["preprocessing"]["data_mean"][0] = 999.0
+        with pytest.raises(ValueError, match="mean/std metadata"):
+            _validate_airpollution_preprocessing(artifact, data_path, source_df)
 
 
 def test_load_mvdec_result_rejects_legacy_full_view_average(tmp_path):

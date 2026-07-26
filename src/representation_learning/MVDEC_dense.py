@@ -72,6 +72,7 @@ DETERMINISTIC_RUNTIME_POLICY = 'keras_seeded_tf_deterministic_v1'
 MAX_REFINEMENT_EPOCHS = 1400
 DEFAULT_PROGRESS_INTERVAL = 25
 TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
+UNLABELED_SCALING_METHODS = ('minmax', 'standard', 'none')
 UNLABELED_DATASETS = {
     'AIRPOLLUTION': {
         'csv_path': 'data/preprocessed_data/data_demvk.csv',
@@ -552,6 +553,17 @@ def preprocess_unlabeled_features(df, source_path, scaling_method='none'):
             'the MvDEC 2025 paper presents the 13 air-pollution features on a '
             '[0, 1] scale but does not publish the fitted scaler.'
         )
+    elif scaling_method == 'standard':
+        data_mean = raw_x.mean(axis=0)
+        data_std = raw_x.std(axis=0)
+        safe_std = np.where(constant_mask, 1.0, data_std)
+        x = (raw_x - data_mean) / safe_std
+        x[:, constant_mask] = 0.0
+        feature_range = None
+        assumption = (
+            'Column-wise standard scaling is applied as a sensitivity '
+            'experiment using population mean and standard deviation.'
+        )
     elif scaling_method == 'none':
         x = raw_x.copy()
         feature_range = None
@@ -574,19 +586,53 @@ def preprocess_unlabeled_features(df, source_path, scaling_method='none'):
         'source_sha256': _file_sha256(source_path),
         'assumption': assumption,
     }
+    if scaling_method == 'standard':
+        metadata['data_mean'] = data_mean.tolist()
+        metadata['data_std'] = data_std.tolist()
     return raw_x.astype(np.float32), x.astype(np.float32), metadata
+
+
+def resolve_unlabeled_scaling_method(dataset_name, override=None):
+    """Return the configured or explicitly requested scaling method."""
+
+    if dataset_name not in UNLABELED_DATASETS:
+        raise ValueError(f'Unsupported unlabeled dataset: {dataset_name!r}.')
+    scaling_method = (
+        UNLABELED_DATASETS[dataset_name]['scaling_method']
+        if override is None
+        else override
+    )
+    if scaling_method not in UNLABELED_SCALING_METHODS:
+        raise ValueError(f'Unsupported scaling method: {scaling_method!r}.')
+    return scaling_method
+
+
+def _preprocessing_input_space(
+    preprocessing_metadata: dict[str, object] | None,
+) -> str:
+    """Return the auditable input-space label for training logs."""
+
+    if preprocessing_metadata is None:
+        return 'x'
+    scaling_method = preprocessing_metadata.get('method')
+    if scaling_method == 'none':
+        return 'x_raw'
+    if scaling_method in UNLABELED_SCALING_METHODS:
+        return f'x_{scaling_method}'
+    raise ValueError(f'Unsupported preprocessing metadata: {scaling_method!r}.')
 
 
 def get_x_airpollution(
     dir_path=r'data/preprocessed_data/',
     log_print=True,
     shuffle_seed=None,
+    scaling_method='minmax',
 ):
     return get_x_unlabeled_csv(
         Path(dir_path) / 'data_demvk.csv',
         log_print=log_print,
         shuffle_seed=shuffle_seed,
-        scaling_method='minmax',
+        scaling_method=scaling_method,
     )
 
 
@@ -675,14 +721,23 @@ def save_airpollution_mvdec_artifact(
     method_name = protocol_method_name(protocol)
     if ds_name == 'AIRPOLLUTION':
         if not isinstance(preprocessing_metadata, dict):
+            raise ValueError('Air Pollution artifacts require preprocessing metadata.')
+        preprocessing_method = preprocessing_metadata.get('method')
+        if preprocessing_method not in UNLABELED_SCALING_METHODS:
             raise ValueError(
-                'Air Pollution artifacts require Min-Max preprocessing metadata.'
+                'Air Pollution artifact has an unsupported preprocessing method: '
+                f'{preprocessing_method!r}.'
             )
-        if preprocessing_metadata.get('method') != 'minmax':
-            raise ValueError('Air Pollution artifacts require Min-Max scaled input.')
+        expected_range = [0.0, 1.0] if preprocessing_method == 'minmax' else None
+        if preprocessing_metadata.get('feature_range') != expected_range:
+            raise ValueError(
+                'Air Pollution preprocessing feature_range does not match method '
+                f'{preprocessing_method!r}.'
+            )
         if preprocessing_metadata.get('feature_columns') != feature_columns:
             raise ValueError(
-                'Air Pollution scaler columns must match artifact feature columns.'
+                'Air Pollution preprocessing columns must match artifact '
+                'feature columns.'
             )
 
     h_view1 = _restore_original_order(np.asarray(h_view1), orig_idx)
@@ -1217,7 +1272,7 @@ def train(
     input_kmeans = make_kmeans(random_seed).fit(x)
     input_metric_str, _ = _metric_for_labels(x, input_kmeans.labels_, y=y)
     input_phase = 'baseline_scaled_input' if raw_x is not None else 'baseline_raw_input'
-    input_space = 'x_minmax' if raw_x is not None else 'x'
+    input_space = _preprocessing_input_space(preprocessing_metadata)
     _log_training_phase(
         phase=input_phase,
         space=input_space,
@@ -1694,6 +1749,15 @@ if __name__ == '__main__':
         help='Print one compact progress heartbeat every N epochs.',
     )
     parser.add_argument(
+        '--preprocessing',
+        choices=UNLABELED_SCALING_METHODS,
+        default=None,
+        help=(
+            'Override preprocessing for AIRPOLLUTION or TIKI. Defaults to the '
+            'dataset contract (AIRPOLLUTION=minmax, TIKI=none).'
+        ),
+    )
+    parser.add_argument(
         '--assignment-change-tolerance',
         type=float,
         default=None,
@@ -1829,11 +1893,15 @@ if __name__ == '__main__':
         source_sha256 = None
         if ds_name in UNLABELED_DATASETS:
             dataset_config = UNLABELED_DATASETS[ds_name]
+            scaling_method = resolve_unlabeled_scaling_method(
+                ds_name,
+                args.preprocessing,
+            )
             x, orig_idx, feature_columns, source_x, preprocessing_metadata = (
                 get_x_unlabeled_csv(
                     dataset_config['csv_path'],
                     shuffle_seed=run_seed,
-                    scaling_method=dataset_config['scaling_method'],
+                    scaling_method=scaling_method,
                     include_preprocessing=True,
                 )
             )

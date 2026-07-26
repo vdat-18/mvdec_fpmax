@@ -293,6 +293,29 @@ minimum/maximum values, feature order, and SHA-256 of the source CSV. Min-Max is
 an explicit reproduction assumption based on Table 4 of the 2025 paper; the
 paper does not publish its fitted scaler.
 
+Use the following sensitivity run to preserve the 13 source columns exactly as
+stored. This does not change the primary Min-Max default, and `preprocessing`
+remains part of the config hash so the artifacts cannot collide:
+
+```bash
+uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
+  --runs 3 --seed 42 \
+  --protocol mvdec_dekm_consistent_v1 \
+  --preprocessing none \
+  --output-dir output/mvdec_runs_no_scaling
+```
+
+The StandardScaler sensitivity mode uses the fitted population mean and
+standard deviation for each column and stores both arrays in the artifact:
+
+```bash
+uv run python src/representation_learning/MVDEC_dense.py AIRPOLLUTION \
+  --runs 3 --seed 42 \
+  --protocol mvdec_dekm_consistent_v1 \
+  --preprocessing standard \
+  --output-dir output/mvdec_runs_standard_scaling
+```
+
 Step 9 logs split `L4_greedy` into `L4_selected_direction` and
 `L4_nonselected_snapshot_anchor`, plus their fractions of total L4. Their sum
 equals `L4_greedy`. The primary `frozen_snapshot` mode reproduces the target
