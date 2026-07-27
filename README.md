@@ -243,7 +243,9 @@ This immutable protocol keeps the MvDEC architecture and encoder-average
 fusion, but uses the historical/released optimization behavior: pretraining
 MSE averaged over dimensions, sequential batches, K-Means refresh every 10
 updates, 14,000 maximum updates, dynamic `n_init = 2 * previous_n_iter`, frozen
-greedy targets, and the last/largest eigen direction. It is a documented
+greedy targets, and the last/largest eigen direction. Refinement optimizes MvDEC
+L1 reconstruction plus release-scaled DEKM L4 greedy loss; L2 K-Means and L3
+scatter trace remain disabled. It is a documented
 reproduction contract, not a claim that the internally inconsistent 2025 paper
 specifies every optimization detail. Ground-truth labels are deferred until the
 final independent View1/View2/fused evaluation. Do not start seeds 43/44 until

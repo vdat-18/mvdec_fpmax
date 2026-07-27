@@ -73,6 +73,43 @@ def test_release_losses_average_transformed_dimensions(monkeypatch):
     assert float(selected + nonselected) == pytest.approx(7.5)
 
 
+def test_release_refinement_optimizes_both_reconstructions_and_greedy(monkeypatch):
+    tensorflow, mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 2)
+    monkeypatch.setattr(mvdec, "hidden_units", 1)
+    x_batch = tensorflow.zeros((2, 2))
+    y_pred1 = tensorflow.Variable([[10.0, 1.0, 2.0], [20.0, 3.0, 4.0]])
+    y_pred2 = tensorflow.Variable([[30.0, 2.0, 1.0], [40.0, 4.0, 3.0]])
+    y_true_cluster = tensorflow.zeros((2, 1))
+    y_pred_cluster = tensorflow.Variable([[1.0], [2.0]])
+
+    with tensorflow.GradientTape() as tape:
+        total_loss, reconstruction_loss, greedy_loss = (
+            mvdec.release_reconstruction_greedy_losses(
+                x_batch,
+                y_pred1,
+                y_pred2,
+                y_true_cluster,
+                y_pred_cluster,
+                reconstruction_weight=1.0,
+                greedy_weight=1.0,
+            )
+        )
+    view1_gradient, view2_gradient, greedy_gradient = tape.gradient(
+        total_loss,
+        [y_pred1, y_pred2, y_pred_cluster],
+    )
+
+    np.testing.assert_allclose(reconstruction_loss.numpy(), [5.0, 25.0])
+    np.testing.assert_allclose(greedy_loss.numpy(), [1.0, 4.0])
+    np.testing.assert_allclose(total_loss.numpy(), [6.0, 29.0])
+    np.testing.assert_allclose(view1_gradient[:, :1].numpy(), 0.0)
+    np.testing.assert_allclose(view2_gradient[:, :1].numpy(), 0.0)
+    assert np.all(view1_gradient[:, 1:].numpy() != 0.0)
+    assert np.all(view2_gradient[:, 1:].numpy() != 0.0)
+    assert np.all(greedy_gradient.numpy() != 0.0)
+
+
 def test_orthonormal_loss_keeps_the_same_squared_distance(monkeypatch):
     tensorflow, mvdec = _load_mvdec(monkeypatch)
     residual = tensorflow.constant([[2.0, 1.0], [-3.0, 4.0]])

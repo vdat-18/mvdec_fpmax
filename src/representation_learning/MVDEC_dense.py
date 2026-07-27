@@ -83,7 +83,7 @@ RELEASE_PRETRAIN_SHUFFLE_BUFFER = 8_000
 RELEASE_KMEANS_REFRESH_POLICY = "fixed_10_updates"
 RELEASE_REFINEMENT_BATCHING_POLICY = "sequential_release_order"
 JOINT_REFINEMENT_OBJECTIVE = "joint_reconstruction_plus_greedy"
-RELEASE_REFINEMENT_OBJECTIVE = "release_greedy_mse_only"
+RELEASE_REFINEMENT_OBJECTIVE = "release_reconstruction_plus_greedy_mse"
 SUM_SQUARED_PRETRAIN_REDUCTION = "sum_squared_dimensions_per_sample"
 RELEASE_PRETRAIN_REDUCTION = "mean_squared_dimensions_per_sample"
 DETERMINISTIC_RUNTIME_POLICY = "keras_seeded_tf_deterministic_v1"
@@ -251,14 +251,15 @@ PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
 PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
     protocol_id=PUBLIC_REPRODUCTION_PROTOCOL_ID,
     claim_scope=(
-        "MvDEC 2025 public architecture with historical released "
-        "DEKM-style optimization; reproduction contract, not an exact-paper claim"
+        "MvDEC 2025 public architecture with MvDEC L1 reconstruction and "
+        "historical released DEKM-style L4 optimization; reproduction contract, "
+        "not an exact-paper claim"
     ),
     architecture_source="MvDEC 2025 multi-view encoder-latent fusion",
     refinement_source=(
-        "Historical MvDEC implementation and released DEKM training behavior"
+        "MvDEC L1 reconstruction with released DEKM L4 training behavior"
     ),
-    reconstruction_weight=0.0,
+    reconstruction_weight=1.0,
     kmeans_weight=0.0,
     scatter_trace_weight=0.0,
     greedy_weight=1.0,
@@ -367,7 +368,10 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
-        return "mvdec_2025_public_reproduction_release_greedy_mse"
+        return (
+            "mvdec_2025_public_reproduction_release_"
+            "l1_reconstruction_plus_l4_greedy_mse"
+        )
     parts = ["reconstruction"]
     if protocol.kmeans_weight > 0:
         parts.append('kmeans')
@@ -1305,6 +1309,28 @@ def release_loss_train_base(y_true, y_pred):
     return tf.keras.losses.mse(y_true, y_pred)
 
 
+def release_reconstruction_greedy_losses(
+    x_batch,
+    y_pred1,
+    y_pred2,
+    y_true,
+    y_pred_cluster,
+    reconstruction_weight,
+    greedy_weight,
+):
+    """Return release-scaled L1, L4, and their weighted refinement objective."""
+
+    reconstruction_loss = release_loss_train_base(
+        x_batch,
+        y_pred1,
+    ) + release_loss_train_base(x_batch, y_pred2)
+    greedy_loss = tf.keras.losses.mse(y_true, y_pred_cluster)
+    total_loss = (
+        reconstruction_weight * reconstruction_loss + greedy_weight * greedy_loss
+    )
+    return total_loss, reconstruction_loss, greedy_loss
+
+
 def pretraining_loss(protocol: MvdecProtocol):
     """Return the loss function fixed by one MvDEC protocol."""
 
@@ -1890,7 +1916,6 @@ def train(
                     + lambda_greedy * greedy_loss_value
                 )
             elif protocol.refinement_objective == RELEASE_REFINEMENT_OBJECTIVE:
-                reconstruction_loss_value = tf.constant(0.0)
                 kmeans_loss_value = tf.constant(0.0)
                 orthonormal_loss_value = tf.constant(0.0)
                 (
@@ -1901,11 +1926,19 @@ def train(
                     y_pred_cluster,
                     greedy_index,
                 )
-                greedy_loss_value = tf.keras.losses.mse(
+                (
+                    loss_value,
+                    reconstruction_loss_value,
+                    greedy_loss_value,
+                ) = release_reconstruction_greedy_losses(
+                    x_batch,
+                    y_pred1,
+                    y_pred2,
                     y_true_tensor,
                     y_pred_cluster,
+                    lambda_reconstruction,
+                    lambda_greedy,
                 )
-                loss_value = lambda_greedy * greedy_loss_value
             else:
                 raise ValueError(
                     "Unsupported refinement objective: "

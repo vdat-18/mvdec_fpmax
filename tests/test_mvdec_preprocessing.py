@@ -489,6 +489,14 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
     )
 
     assert protocol == mvdec.PUBLIC_REPRODUCTION_PROTOCOL
+    assert protocol.reconstruction_weight == 1.0
+    assert protocol.kmeans_weight == 0.0
+    assert protocol.scatter_trace_weight == 0.0
+    assert protocol.greedy_weight == 1.0
+    assert mvdec.final_training_objective(protocol) == (
+        "mvdec_2025_public_reproduction_release_"
+        "l1_reconstruction_plus_l4_greedy_mse"
+    )
     assert schedule.batches_per_epoch == 40
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
@@ -496,7 +504,7 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
         "view2": mvdec.VIEW2_ARCHITECTURE_ID,
     }
     assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
-        "objective": "release_greedy_mse_only",
+        "objective": "release_reconstruction_plus_greedy_mse",
         "batch_size": 256,
         "batching_policy": "sequential_release_order",
         "kmeans_refresh_policy": "fixed_10_updates",

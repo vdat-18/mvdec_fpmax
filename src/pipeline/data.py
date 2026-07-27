@@ -24,7 +24,10 @@ PRIMARY_MVDEC_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
 PRIMARY_MVDEC_OBJECTIVE = "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
 PRIMARY_MVDEC_METHOD = "MvDEC-DEKM-consistent"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
-PUBLIC_REPRODUCTION_OBJECTIVE = "mvdec_2025_public_reproduction_release_greedy_mse"
+PUBLIC_REPRODUCTION_OBJECTIVE = (
+    "mvdec_2025_public_reproduction_release_"
+    "l1_reconstruction_plus_l4_greedy_mse"
+)
 PUBLIC_REPRODUCTION_METHOD = "MvDEC-2025-public-reproduction"
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -284,7 +287,7 @@ def _validate_public_reproduction_contract(
     stopping = contract["stopping"]
     schedule = contract.get("schedule")
     expected_loss_terms = {
-        "L1_reconstruction": {"weight": 0.0, "optimized": False},
+        "L1_reconstruction": {"weight": 1.0, "optimized": True},
         "L2_kmeans": {"weight": 0.0, "optimized": False},
         "L3_scatter_trace": {
             "weight": 0.0,
@@ -306,7 +309,7 @@ def _validate_public_reproduction_contract(
             "shuffle_buffer": 8000,
         },
         "refinement": {
-            "objective": "release_greedy_mse_only",
+            "objective": "release_reconstruction_plus_greedy_mse",
             "batch_size": 256,
             "batching_policy": "sequential_release_order",
             "kmeans_refresh_policy": "fixed_10_updates",
@@ -322,7 +325,7 @@ def _validate_public_reproduction_contract(
         },
     }
     expected_loss_weights = {
-        "reconstruction": 0.0,
+        "reconstruction": 1.0,
         "kmeans": 0.0,
         "scatter_trace_diagnostic": 0.0,
         "greedy": 1.0,
@@ -363,7 +366,8 @@ def _validate_public_reproduction_contract(
             config.get("pretrain_loss_reduction")
             != "mean_squared_dimensions_per_sample",
             config.get("pretrain_shuffle_buffer") != 8000,
-            config.get("refinement_objective") != "release_greedy_mse_only",
+            config.get("refinement_objective")
+            != "release_reconstruction_plus_greedy_mse",
             best_result.get("kmeans_refresh_policy") != "fixed_10_updates",
             best_result.get("refinement_batching_policy") != "sequential_release_order",
             best_result.get("kmeans_n_init_policy")
