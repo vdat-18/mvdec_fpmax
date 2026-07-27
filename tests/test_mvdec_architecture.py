@@ -7,8 +7,9 @@ import pytest
 @pytest.mark.parametrize(
     ("input_dim", "latent_dim", "base_units", "expected_concats"),
     [
-        (13, 10, 64, [768, 384, 192, 96, 23]),
-        (7, 5, 32, [384, 192, 96, 48, 12]),
+        (2000, 10, 64, [768, 384, 192, 96]),
+        (13, 10, 64, [768, 384, 192, 96]),
+        (7, 5, 32, [384, 192, 96, 48]),
     ],
 )
 def test_view2_matches_paper_skip_dimensions(
@@ -50,7 +51,6 @@ def test_view2_matches_paper_skip_dimensions(
         8 * base_units,
         8 * base_units,
         16 * base_units,
-        latent_dim,
         8 * base_units,
         4 * base_units,
         8 * base_units,
@@ -63,7 +63,9 @@ def test_view2_matches_paper_skip_dimensions(
         base_units,
         base_units // 2,
         base_units,
-        input_dim,
+        latent_dim + input_dim,
     ]
     assert concat_widths == expected_concats
     assert model.output_shape == (None, latent_dim + input_dim)
+    assert isinstance(model.layers[-1], tensorflow.keras.layers.Dense)
+    assert model.layers[-1].units == latent_dim + input_dim

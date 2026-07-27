@@ -248,6 +248,9 @@ reproduction contract, not a claim that the internally inconsistent 2025 paper
 specifies every optimization detail. Ground-truth labels are deferred until the
 final independent View1/View2/fused evaluation. Do not start seeds 43/44 until
 the seed-42 artifact has passed `mvdec-audit-runs` and its metrics are reviewed.
+View2 follows Fig. 2 with its joint linear `latent + reconstruction` output head
+after the complete skip decoder; the architecture identifier is persisted in the
+protocol contract so artifacts from the former pre-decoder bottleneck cannot mix.
 
 The isolated output directory is
 `output/public_benchmark/mvdec/reuters/mvdec_2025_public_reproduction_v1/<config_hash_12>/seed_42/`.

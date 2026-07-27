@@ -13,6 +13,7 @@ from sklearn.metrics import silhouette_score
 
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
+from pipeline.mvdec_contract import VIEW2_ARCHITECTURE_ID
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
@@ -427,14 +428,28 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
         raise ValueError(msg)
 
     objective = contract.get("objective")
+    architecture = contract.get("architecture")
     eigen = contract.get("eigen")
     greedy_target = contract.get("greedy_target")
     stopping = contract.get("stopping")
     if not all(
         isinstance(section, dict)
-        for section in (objective, eigen, greedy_target, stopping)
+        for section in (objective, architecture, eigen, greedy_target, stopping)
     ):
-        msg = "MvDEC protocol contract is missing objective/eigen/target/stopping."
+        msg = (
+            "MvDEC protocol contract is missing "
+            "architecture/objective/eigen/target/stopping."
+        )
+        raise ValueError(msg)
+    view2_architecture_id = architecture.get("view2")
+    if any(
+        (
+            view2_architecture_id != VIEW2_ARCHITECTURE_ID,
+            best_result.get("view2_architecture_id") != view2_architecture_id,
+            config.get("view2_architecture_id") != view2_architecture_id,
+        )
+    ):
+        msg = "MvDEC View2 architecture identity is missing or inconsistent."
         raise ValueError(msg)
     if objective.get("name") != best_result.get("final_training_objective"):
         msg = "MvDEC objective name does not match its protocol contract."

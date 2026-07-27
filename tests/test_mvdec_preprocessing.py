@@ -492,6 +492,9 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
     assert schedule.batches_per_epoch == 40
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
+    assert protocol.manifest_contract(0.001)["architecture"] == {
+        "view2": mvdec.VIEW2_ARCHITECTURE_ID,
+    }
     assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
         "objective": "release_greedy_mse_only",
         "batch_size": 256,
@@ -725,6 +728,10 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     assert artifact["algorithm"] == "MvDEC-DEKM-consistent"
     assert artifact["method_name"] == "MvDEC-DEKM-consistent"
     assert artifact["claim_scope"] == mvdec.PRIMARY_MVDEC_PROTOCOL.claim_scope
+    assert artifact["view2_architecture_id"] == mvdec.VIEW2_ARCHITECTURE_ID
+    assert artifact["config"]["view2_architecture_id"] == (
+        mvdec.VIEW2_ARCHITECTURE_ID
+    )
     assert artifact["protocol_contract"]["eigen"]["direction"] == "largest"
     assert artifact["protocol_contract"]["greedy_target"]["mode"] == ("frozen_snapshot")
     assert len(artifact["protocol_contract_sha256"]) == 64
@@ -732,6 +739,25 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     loaded = load_mvdec_result(result_path=artifact_path, data_path=data_path)
     assert loaded.raw["method_name"] == "MvDEC-DEKM-consistent"
 
+    artifact["view2_architecture_id"] = "legacy_pre_decoder_bottleneck"
+    artifact["config"]["view2_architecture_id"] = "legacy_pre_decoder_bottleneck"
+    artifact["protocol_contract"]["architecture"]["view2"] = (
+        "legacy_pre_decoder_bottleneck"
+    )
+    tampered_hash = mvdec.protocol_contract_sha256(artifact["protocol_contract"])
+    artifact["protocol_contract_sha256"] = tampered_hash
+    artifact["config"]["protocol_contract"] = artifact["protocol_contract"]
+    artifact["config"]["protocol_contract_sha256"] = tampered_hash
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+    with pytest.raises(ValueError, match="architecture identity"):
+        load_mvdec_result(result_path=artifact_path, data_path=data_path)
+
+    artifact["view2_architecture_id"] = mvdec.VIEW2_ARCHITECTURE_ID
+    artifact["config"]["view2_architecture_id"] = mvdec.VIEW2_ARCHITECTURE_ID
+    artifact["protocol_contract"]["architecture"]["view2"] = (
+        mvdec.VIEW2_ARCHITECTURE_ID
+    )
     artifact["protocol_contract"]["eigen"]["direction"] = "smallest"
     with artifact_path.open("wb") as file:
         pickle.dump(artifact, file)

@@ -18,6 +18,7 @@ from utils import log_csv
 
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
+from pipeline.mvdec_contract import VIEW2_ARCHITECTURE_ID
 from pipeline.mvdec_runs import (
     append_run_log,
     build_summary_frames,
@@ -145,6 +146,9 @@ class MvdecProtocol:
             "protocol_id": self.protocol_id,
             "claim_scope": self.claim_scope,
             "architecture_source": self.architecture_source,
+            "architecture": {
+                "view2": VIEW2_ARCHITECTURE_ID,
+            },
             "refinement_source": self.refinement_source,
             "objective": {
                 "name": final_training_objective(self),
@@ -483,6 +487,7 @@ def resolved_run_config(
         "hidden_units": int(hidden_units),
         "view1_filters": list(view1_filters),
         "view2_base_units": int(view2_base_units),
+        "view2_architecture_id": VIEW2_ARCHITECTURE_ID,
         "pretrain_epochs": int(pretrain_epochs),
         "batch_size": int(batch_size),
         "kmeans_n_init": int(KMEANS_N_INIT),
@@ -1020,6 +1025,7 @@ def save_airpollution_mvdec_artifact(
         'protocol_contract_sha256': protocol_sha256,
         'claim_scope': protocol.claim_scope,
         'architecture_source': protocol.architecture_source,
+        'view2_architecture_id': VIEW2_ARCHITECTURE_ID,
         'refinement_source': protocol.refinement_source,
         'dataset': ds_name,
         'paper_basis': [
@@ -1077,6 +1083,7 @@ def save_airpollution_mvdec_artifact(
             "view2_latent_dim": int(hidden_units),
             "view1_filters": list(view1_filters),
             "view2_base_units": int(view2_base_units),
+            "view2_architecture_id": VIEW2_ARCHITECTURE_ID,
             "view1_embedding_dim": int(h_view1.shape[1]),
             "view2_embedding_dim": int(h_view2.shape[1]),
             "fusion_dim": int(h_fused.shape[1]),
@@ -1181,6 +1188,8 @@ def model_view1(load_weights=True, weights_path=None):
 
 
 def model_view2(load_weights=True, weights_path=None):
+    """Build the Fig. 2 dense U-Net view with a post-skip joint output head."""
+
     init = 'glorot_uniform'
     activation = 'relu'
     output_activation = 'linear'
@@ -1201,13 +1210,9 @@ def model_view2(load_weights=True, weights_path=None):
         kernel_initializer=init,
     )(e4)
 
-    h = layers.Dense(
-        hidden_units,
-        activation=output_activation,
-        kernel_initializer=init,
-    )(bottleneck)
-
-    x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(h)
+    x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(
+        bottleneck
+    )
     x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e4])
     x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(x)
@@ -1223,13 +1228,11 @@ def model_view2(load_weights=True, weights_path=None):
     x = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e1])
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
-    y = layers.Dense(
-        input_shape,
+    output = layers.Dense(
+        view_output_width(),
         activation=output_activation,
         kernel_initializer=init,
     )(x)
-
-    output = layers.Concatenate()([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
         path = (
