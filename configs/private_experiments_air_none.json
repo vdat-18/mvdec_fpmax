@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "datasets": {
+    "AIRPOLLUTION": {
+      "data_path": "data/preprocessed_data/data_demvk.csv",
+      "representation_root": "output/mvdec_runs_no_scaling/airpollution/mvdec_dekm_consistent_v1",
+      "output_root": "output/airpollution_none/fpmax_without_ffs",
+      "seeds": [43],
+      "workers": 4
+    }
+  }
+}

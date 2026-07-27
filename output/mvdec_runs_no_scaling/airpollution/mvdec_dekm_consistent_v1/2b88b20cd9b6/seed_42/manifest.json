@@ -1,0 +1,178 @@
+{
+  "config": {
+    "assignment_change_tolerance": 0.01,
+    "batch_size": 256,
+    "dataset": "AIRPOLLUTION",
+    "deterministic_runtime_policy": "keras_seeded_tf_deterministic_v1",
+    "feature_columns": [
+      "satellite_no2",
+      "highway_primary",
+      "high_traffic",
+      "medium_traffic",
+      "low_traffic",
+      "landuse_industrial_variance",
+      "landuse_industrial_distance_mean",
+      "landuse_industrial_b5",
+      "landuse_residential_b5",
+      "landuse_forest_b5",
+      "neighbours_no2_variance",
+      "neighbours_no2_distance_mean",
+      "neighbours_no2_distance_max"
+    ],
+    "hidden_units": 10,
+    "input_shape": 13,
+    "kmeans_n_init": 100,
+    "kmeans_refresh_policy": "one_epoch",
+    "l4_reduction": "sum_squared_dimensions_then_mean_batch",
+    "max_refinement_epochs": 1400,
+    "method": "MvDEC-DEKM-consistent",
+    "n_clusters": 4,
+    "preprocessing": {
+      "assumption": "No feature scaling is applied for this dataset.",
+      "constant_features": [],
+      "data_max": [
+        8.31e-05,
+        49882.71745,
+        1.0,
+        1.0,
+        1.0,
+        0.181405896,
+        0.952380952,
+        0.25,
+        0.375,
+        1.0,
+        6.19e-11,
+        9.02e-06,
+        2.02e-05
+      ],
+      "data_min": [
+        3.36e-05,
+        9.348482366,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        2.13e-13,
+        1.64e-10,
+        -1.38e-05
+      ],
+      "feature_columns": [
+        "satellite_no2",
+        "highway_primary",
+        "high_traffic",
+        "medium_traffic",
+        "low_traffic",
+        "landuse_industrial_variance",
+        "landuse_industrial_distance_mean",
+        "landuse_industrial_b5",
+        "landuse_residential_b5",
+        "landuse_forest_b5",
+        "neighbours_no2_variance",
+        "neighbours_no2_distance_mean",
+        "neighbours_no2_distance_max"
+      ],
+      "feature_range": null,
+      "method": "none",
+      "source_path": "data/preprocessed_data/data_demvk.csv",
+      "source_sha256": "979c645ef1d38e7288774ed90e5cb7be4d3ff5b3fda95be4c6db9d4a106aa1f8"
+    },
+    "pretrain_epochs": 200,
+    "protocol_contract": {
+      "architecture_source": "MvDEC 2025 multi-view encoder-latent fusion",
+      "claim_scope": "MvDEC architecture with DEKM-2021-consistent greedy refinement",
+      "eigen": {
+        "direction": "largest",
+        "order": "ascending",
+        "rationale": "DEKM 2021 sorts ascending and uses the largest/last least-informative direction."
+      },
+      "greedy_target": {
+        "mode": "frozen_snapshot",
+        "rationale": "Frozen transformed-embedding target used by the released DEKM 2021 implementation."
+      },
+      "objective": {
+        "loss_terms": {
+          "L1_reconstruction": {
+            "optimized": true,
+            "weight": 1.0
+          },
+          "L2_kmeans": {
+            "optimized": false,
+            "weight": 0.0
+          },
+          "L3_scatter_trace": {
+            "mathematically_equivalent_to_L2": true,
+            "optimized": false,
+            "weight": 0.0
+          },
+          "L4_greedy": {
+            "optimized": true,
+            "reduction": "sum_squared_dimensions_then_mean_batch",
+            "weight": 1.0
+          }
+        },
+        "name": "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+      },
+      "protocol_id": "mvdec_dekm_consistent_v1",
+      "refinement_source": "DEKM 2021 Algorithm 1 and released implementation",
+      "stopping": {
+        "assignment_change_tolerance": 0.01,
+        "policy": "0.001 for public DEKM benchmarks; 0.01 by design for unlabeled private case studies."
+      }
+    },
+    "refinement_batching_policy": "balanced_shuffled_each_epoch",
+    "source_sha256": "979c645ef1d38e7288774ed90e5cb7be4d3ff5b3fda95be4c6db9d4a106aa1f8",
+    "view1_filters": [
+      500,
+      500,
+      2000
+    ],
+    "view2_base_units": 64
+  },
+  "config_hash": "2b88b20cd9b6ab9268889294ab249f6a1e5fb71b3e5ee88d2e8fde10ebe63a10",
+  "dataset": "AIRPOLLUTION",
+  "error": null,
+  "finished_at_utc": "2026-07-26T15:06:41.851750+00:00",
+  "method": "MvDEC-DEKM-consistent",
+  "metrics": {
+    "silhouette": 0.6492021083831787
+  },
+  "output_sha256": {
+    "artifact": "1fac254e4210e9f207341a508dc70411c8a46976762e7df0ebf7b11cf7b685ca",
+    "assignments": "075e9fd6cf0fe8f2ca9f6a3ea8167b8dc0b3148b86139516c57e24836e6fd0aa",
+    "final_view1": "94cd2dbdac49732c2d4f2846488ba0c32864db08ce88071127967d13d3b3cf81",
+    "final_view2": "c81cf0861b9e09ecf3b3384256c1ec35c49311a38a8a807bbdbd7b6e58adb98e",
+    "pretrain_view1": "db3f221a21a727fc78f74235cd7415bdde3dd0e297a4d61cef2ff16b3871ab62",
+    "pretrain_view2": "f93569c3870b4ac3ab6b2bc7439bdfd610b16c6c3b7d0078d90e4f620606647f",
+    "training_log": "b2fdaced3ec2dede4623777547dd05b19ccd28c41e4c71316e29bd9fe83cc9df"
+  },
+  "paths": {
+    "artifact": "artifact.pkl",
+    "assignments": "assignments.csv",
+    "final_view1": "final_view1.weights.h5",
+    "final_view2": "final_view2.weights.h5",
+    "pretrain_view1": "pretrain_view1.weights.h5",
+    "pretrain_view2": "pretrain_view2.weights.h5",
+    "training_log": "training_log.csv"
+  },
+  "protocol_id": "mvdec_dekm_consistent_v1",
+  "run_id": "airpollution_mvdec_dekm_consistent_v1_2b88b20cd9b6_seed_42",
+  "run_index": 1,
+  "runtime": {
+    "keras_session_reset": true,
+    "numpy_version": "2.0.2",
+    "policy": "keras_seeded_tf_deterministic_v1",
+    "seed": 42,
+    "tensorflow_op_determinism": true,
+    "tensorflow_version": "2.18.0",
+    "tf_data_deterministic": true
+  },
+  "runtime_seconds": 68.34506869316101,
+  "schema_version": 1,
+  "seed": 42,
+  "started_at_utc": "2026-07-26T15:05:33.705875+00:00",
+  "status": "complete"
+}
