@@ -72,14 +72,21 @@ không còn artifact cũ để vô tình dùng làm bảng paper trong thời gi
 
 ## REUTERS View2 architecture ablation - DIAGNOSTIC COMPLETE
 
-Kết quả seed 42 của protocol `mvdec_2025_view2_encoder_bottleneck_v1` đã được
-audit và đối chiếu với reproduction baseline. Fused ACC gần như không đổi
-(`0.7636 -> 0.7643`), fused NMI tăng (`0.5221 -> 0.6033`), nhưng View2 standalone
-giảm mạnh (`ACC 0.4643 -> 0.3843`, `NMI 0.2298 -> 0.0944`). Vì vậy encoder
-bottleneck không được chọn làm kiến trúc chính. Fig. 2 của MvDEC 2025 còn mâu
-thuẫn với Eq. (3)-(5) về terminal head và với Eq. (4) về fusion. Toàn bộ
-provenance, bảng đối chiếu paper và protocol chẩn đoán kế tiếp được ghi tại
-`MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`.
+Hai protocol chẩn đoán View2 trên REUTERS seed 42 đã được audit. Encoder
+bottleneck cho fused `ACC=0.7643`, `NMI=0.6033`, nhưng View2 standalone giảm còn
+`ACC=0.3843`, `NMI=0.0944`. Direct joint head gần Fig. 2 tiếp tục giảm View2 còn
+`ACC=0.3701`, `NMI=0.0943`, với fused `ACC=0.7621`, `NMI=0.6002`. Cả hai là
+negative ablations, không được chọn làm kiến trúc chính và không mở rộng thêm
+seed. Fig. 2 của MvDEC 2025 vẫn mâu thuẫn với Eq. (3)-(5) về terminal head và
+với Eq. (4) về fusion. Toàn bộ provenance, checksum và bảng đối chiếu paper được
+ghi tại `MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`.
+
+Fusion-sensitivity protocol
+`mvdec_2025_view2_direct_23_split_concat_v1` đã được implement để giữ nguyên
+direct View2 head nhưng thay Eq. (4) average 10D bằng latent concatenation 20D.
+Protocol, config hash, artifact fusion contract và output directory độc lập;
+loader kiểm tra trực tiếp `h_fused = concatenate(h_view1, h_view2)`. Đây chỉ là
+diagnostic arm seed 42, không phải phương pháp được chọn bằng ground truth.
 
 ## Findings - Critical
 

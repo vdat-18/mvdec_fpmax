@@ -331,6 +331,57 @@ def test_final_clustering_is_recomputed_from_current_model_outputs(monkeypatch):
     assert labels[0] != labels[2]
 
 
+def test_final_clustering_supports_concatenated_latent_fusion(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    monkeypatch.setattr(mvdec, "n_clusters", 2)
+
+    class FakeModel:
+        def __init__(self, output):
+            self.output = mvdec.tf.constant(output, dtype=mvdec.tf.float32)
+
+        def __call__(self, _):
+            return self.output
+
+    view1 = FakeModel([[0.0, 0.0], [0.0, 0.2], [5.0, 5.0], [5.0, 5.2]])
+    view2 = FakeModel([[0.0, 0.2], [0.0, 0.0], [5.0, 5.2], [5.0, 5.0]])
+
+    h1, h2, h_fused, labels = mvdec.recompute_final_clustering(
+        view1,
+        view2,
+        np.zeros((4, 1), dtype=np.float32),
+        random_seed=42,
+        fusion_contract=mvdec.FUSION_ENCODER_CONCATENATE,
+    )
+
+    np.testing.assert_allclose(h_fused, np.concatenate([h1, h2], axis=1))
+    assert h_fused.shape == (4, 4)
+    assert labels[0] == labels[1]
+    assert labels[2] == labels[3]
+    assert labels[0] != labels[2]
+
+
+def test_concatenated_latent_fusion_preserves_tensor_gradients(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    view1 = mvdec.tf.Variable([[1.0, 2.0]], dtype=mvdec.tf.float32)
+    view2 = mvdec.tf.Variable([[3.0, 4.0]], dtype=mvdec.tf.float32)
+
+    with mvdec.tf.GradientTape() as tape:
+        fused = mvdec.fused_latent_embedding(
+            view1,
+            view2,
+            fusion_contract=mvdec.FUSION_ENCODER_CONCATENATE,
+        )
+        loss = mvdec.tf.reduce_sum(fused)
+
+    gradients = tape.gradient(loss, [view1, view2])
+
+    np.testing.assert_allclose(fused.numpy(), [[1.0, 2.0, 3.0, 4.0]])
+    np.testing.assert_allclose(gradients[0].numpy(), np.ones((1, 2)))
+    np.testing.assert_allclose(gradients[1].numpy(), np.ones((1, 2)))
+
+
 def test_epoch_losses_are_averaged_across_all_batches(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -576,6 +627,38 @@ def test_direct_joint_head_protocol_changes_only_view2_architecture(monkeypatch)
     assert protocol.manifest_contract(0.001)["architecture"] != (
         mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
     )
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+
+
+def test_direct_joint_head_concat_protocol_changes_only_fusion(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+
+    assert protocol == mvdec.PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL
+    assert protocol.view2_architecture_id == (
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.view2_architecture_id
+    )
+    assert protocol.fusion_contract == mvdec.FUSION_ENCODER_CONCATENATE
+    assert mvdec.protocol_method_name(protocol) == (
+        "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
+    )
+    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
+    )
+    assert protocol.manifest_contract(0.001)["schedule"] == (
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
+    )
+    assert protocol.manifest_contract(0.001)["architecture"] == {
+        "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+        "fusion": mvdec.FUSION_ENCODER_CONCATENATE,
+    }
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
 
@@ -843,25 +926,41 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize(
-    ("protocol_attribute", "protocol_id", "expected_architecture", "expected_method"),
+    (
+        "protocol_attribute",
+        "protocol_id",
+        "expected_architecture",
+        "expected_method",
+        "expected_fusion",
+    ),
     (
         (
             "PUBLIC_REPRODUCTION_PROTOCOL",
             "mvdec_2025_public_reproduction_v1",
             "mvdec2025_post_skip_latent_bottleneck_v2",
             "MvDEC-2025-public-reproduction",
+            "mvdec2025_encoder_average",
         ),
         (
             "PUBLIC_ENCODER_BOTTLENECK_PROTOCOL",
             "mvdec_2025_view2_encoder_bottleneck_v1",
             "mvdec2025_encoder_bottleneck_skip_decoder_v1",
             "MvDEC-2025-View2-encoder-bottleneck-ablation",
+            "mvdec2025_encoder_average",
         ),
         (
             "PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL",
             "mvdec_2025_view2_direct_23_split_v1",
             "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
             "MvDEC-2025-View2-direct-joint-head-ablation",
+            "mvdec2025_encoder_average",
+        ),
+        (
+            "PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL",
+            "mvdec_2025_view2_direct_23_split_concat_v1",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation",
+            "mvdec2025_encoder_concatenate",
         ),
     ),
 )
@@ -872,6 +971,7 @@ def test_public_reproduction_artifact_persists_view_metrics(
     protocol_id,
     expected_architecture,
     expected_method,
+    expected_fusion,
 ):
     mvdec = _load_mvdec(monkeypatch)
     protocol = getattr(mvdec, protocol_attribute)
@@ -907,11 +1007,16 @@ def test_public_reproduction_artifact_persists_view_metrics(
         run_index=1,
     )
 
+    h_fused = mvdec.fused_latent_embedding(
+        h_view1,
+        h_view2,
+        fusion_contract=protocol.fusion_contract,
+    )
     mvdec.save_airpollution_mvdec_artifact(
         artifact_path=artifact_path,
         h_view1=h_view1,
         h_view2=h_view2,
-        h_fused=(h_view1 + h_view2) / 2,
+        h_fused=h_fused,
         labels=labels,
         score=0.5,
         iteration=30,
@@ -955,6 +1060,7 @@ def test_public_reproduction_artifact_persists_view_metrics(
     assert loaded.raw["training_steps_completed"] == 30
     assert loaded.raw["view2_architecture_id"] == expected_architecture
     assert loaded.raw["method_name"] == expected_method
+    assert loaded.raw["fusion_contract"] == expected_fusion
 
     with artifact_path.open("rb") as file:
         artifact = pickle.load(file)

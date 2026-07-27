@@ -19,6 +19,8 @@ from utils import log_csv
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
+    FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_CONCATENATE,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -71,11 +73,15 @@ PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
     "mvdec_2025_view2_encoder_bottleneck_v1"
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
+PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID = (
+    "mvdec_2025_view2_direct_23_split_concat_v1"
+)
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
     }
 )
 CUSTOM_PROTOCOL_ID = "custom"
@@ -84,6 +90,7 @@ PROTOCOL_IDS = (
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -139,6 +146,7 @@ class MvdecProtocol:
     claim_scope: str
     architecture_source: str
     view2_architecture_id: str
+    fusion_contract: str
     refinement_source: str
     reconstruction_weight: float
     kmeans_weight: float
@@ -214,6 +222,8 @@ class MvdecProtocol:
                 ),
             },
         }
+        if self.fusion_contract != FUSION_ENCODER_AVERAGE:
+            contract["architecture"]["fusion"] = self.fusion_contract
         if self.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
             contract["schedule"] = {
                 "scope": "public_datasets_only",
@@ -247,6 +257,7 @@ PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
     claim_scope='MvDEC architecture with DEKM-2021-consistent greedy refinement',
     architecture_source='MvDEC 2025 multi-view encoder-latent fusion',
     view2_architecture_id=VIEW2_ARCHITECTURE_ID,
+    fusion_contract=FUSION_ENCODER_AVERAGE,
     refinement_source='DEKM 2021 Algorithm 1 and released implementation',
     reconstruction_weight=1.0,
     kmeans_weight=DEFAULT_LAMBDA_KMEANS,
@@ -276,6 +287,7 @@ PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
     ),
     architecture_source="MvDEC 2025 multi-view encoder-latent fusion",
     view2_architecture_id=VIEW2_ARCHITECTURE_ID,
+    fusion_contract=FUSION_ENCODER_AVERAGE,
     refinement_source=(
         "MvDEC L1 reconstruction with released DEKM L4 training behavior"
     ),
@@ -324,10 +336,27 @@ PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL = replace(
     view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
 )
 
+PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL = replace(
+    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+    protocol_id=PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC 2025 public-reproduction fusion diagnostic using concatenated "
+        "View1/View2 latents with the Fig. 2 direct joint View2 head; ablation, "
+        "not an exact-paper claim"
+    ),
+    architecture_source=(
+        "MvDEC 2025 dense U-Net direct joint head with latent concatenation"
+    ),
+    fusion_contract=FUSION_ENCODER_CONCATENATE,
+)
+
 PUBLIC_REPRODUCTION_PROTOCOLS = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
+        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL
+    ),
 }
 
 
@@ -476,6 +505,7 @@ def resolve_mvdec_protocol(
         ),
         architecture_source=PRIMARY_MVDEC_PROTOCOL.architecture_source,
         view2_architecture_id=PRIMARY_MVDEC_PROTOCOL.view2_architecture_id,
+        fusion_contract=PRIMARY_MVDEC_PROTOCOL.fusion_contract,
         refinement_source=(
             PRIMARY_MVDEC_PROTOCOL.refinement_source
             if protocol_id == PRIMARY_PROTOCOL_ID
@@ -522,6 +552,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return "MvDEC-2025-View2-encoder-bottleneck-ablation"
     if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID:
         return "MvDEC-2025-View2-direct-joint-head-ablation"
+    if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID:
+        return "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
@@ -572,6 +604,8 @@ def resolved_run_config(
                 "kmeans_n_init_policy": protocol.kmeans_n_init_policy,
             }
         )
+    if protocol.fusion_contract != FUSION_ENCODER_AVERAGE:
+        config["fusion_contract"] = protocol.fusion_contract
     return config
 
 
@@ -583,8 +617,22 @@ def reconstruction_output(view_output):
     return view_output[:, -input_shape:]
 
 
-def fused_latent_embedding(view1_output, view2_output):
-    return (latent_embedding(view1_output) + latent_embedding(view2_output)) / 2
+def fused_latent_embedding(
+    view1_output,
+    view2_output,
+    fusion_contract=FUSION_ENCODER_AVERAGE,
+):
+    """Fuse two latent tensors according to the immutable protocol contract."""
+
+    h_view1 = latent_embedding(view1_output)
+    h_view2 = latent_embedding(view2_output)
+    if fusion_contract == FUSION_ENCODER_AVERAGE:
+        return (h_view1 + h_view2) / 2
+    if fusion_contract == FUSION_ENCODER_CONCATENATE:
+        if isinstance(h_view1, np.ndarray):
+            return np.concatenate([h_view1, h_view2], axis=1)
+        return tf.concat([h_view1, h_view2], axis=1)
+    raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
 
 
 def greedy_eigen_index(direction):
@@ -1029,7 +1077,7 @@ def save_airpollution_mvdec_artifact(
     if stop_reason not in TRAINING_STOP_REASONS:
         raise ValueError(f'Unsupported training stop reason: {stop_reason!r}.')
     greedy_eigen_position = (
-        hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
+        h_fused.shape[1] - 1 if greedy_eigen_direction == 'largest' else 0
     )
     if any(
         (
@@ -1075,6 +1123,11 @@ def save_airpollution_mvdec_artifact(
         else None
     )
     view_concat_representation = np.concatenate([h_view1, h_view2], axis=1)
+    fusion_expression = (
+        "h_fused = (view1_latent + view2_latent) / 2"
+        if protocol.fusion_contract == FUSION_ENCODER_AVERAGE
+        else "h_fused = concatenate(view1_latent, view2_latent)"
+    )
 
     artifact = {
         'schema_version': PUBLIC_ARTIFACT_SCHEMA_VERSION,
@@ -1095,7 +1148,7 @@ def save_airpollution_mvdec_artifact(
             '2025_Multi-view Deep Embedded Clustering architecture',
             '2021_Deep Embedded K-Means Clustering refinement',
         ],
-        "fusion_contract": "mvdec2025_encoder_average",
+        "fusion_contract": protocol.fusion_contract,
         "view_output_layout": view_output_layout(),
         "final_training_objective": training_objective,
         "h_view1": h_view1,
@@ -1147,6 +1200,7 @@ def save_airpollution_mvdec_artifact(
             "view1_filters": list(view1_filters),
             "view2_base_units": int(view2_base_units),
             "view2_architecture_id": protocol.view2_architecture_id,
+            "fusion_contract": protocol.fusion_contract,
             "view1_embedding_dim": int(h_view1.shape[1]),
             "view2_embedding_dim": int(h_view2.shape[1]),
             "fusion_dim": int(h_fused.shape[1]),
@@ -1168,7 +1222,7 @@ def save_airpollution_mvdec_artifact(
                 "scatter_trace_diagnostic": protocol.scatter_trace_weight,
                 "greedy": protocol.greedy_weight,
             },
-            'fusion': 'h_fused = (view1_latent + view2_latent) / 2',
+            "fusion": fusion_expression,
             'preprocessing': preprocessing_metadata,
         },
     }
@@ -1556,12 +1610,24 @@ def _training_metric_for_labels(
     return _metric_for_labels(features, labels, y=y)
 
 
-def recompute_final_clustering(model1, model2, x, random_seed):
+def recompute_final_clustering(
+    model1,
+    model2,
+    x,
+    random_seed,
+    fusion_contract=FUSION_ENCODER_AVERAGE,
+):
+    """Recompute final latents and K-Means labels for one fusion contract."""
+
     view1_output = model1(x).numpy()
     view2_output = model2(x).numpy()
     h1 = latent_embedding(view1_output)
     h2 = latent_embedding(view2_output)
-    h_fused = (h1 + h2) / 2
+    h_fused = fused_latent_embedding(
+        view1_output,
+        view2_output,
+        fusion_contract,
+    )
     labels = make_kmeans(random_seed).fit(h_fused).labels_
     return h1, h2, h_fused, labels
 
@@ -1824,7 +1890,11 @@ def train(
                 epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
             view1_output = model1(x).numpy()
             view2_output = model2(x).numpy()
-            H = fused_latent_embedding(view1_output, view2_output)
+            H = fused_latent_embedding(
+                view1_output,
+                view2_output,
+                protocol.fusion_contract,
+            )
             checkpoint_kmeans_n_init = kmeans_n_init
             ans_kmeans = make_kmeans(
                 random_seed,
@@ -1961,7 +2031,11 @@ def train(
         with tf.GradientTape() as tape:
             y_pred1 = model1(x_batch)
             y_pred2 = model2(x_batch)
-            h_pred = fused_latent_embedding(y_pred1, y_pred2)
+            h_pred = fused_latent_embedding(
+                y_pred1,
+                y_pred2,
+                protocol.fusion_contract,
+            )
             y_pred_cluster = tf.matmul(h_pred, V_tensor)
             if protocol.refinement_objective == JOINT_REFINEMENT_OBJECTIVE:
                 orthonormal_residual = tf.matmul(
@@ -2075,6 +2149,7 @@ def train(
             H_after_update = fused_latent_embedding(
                 view1_output_after_update,
                 view2_output_after_update,
+                protocol.fusion_contract,
             )
             after_update_metric_str, _ = _training_metric_for_labels(
                 H_after_update,
@@ -2173,7 +2248,11 @@ def train(
     view2_output = model2(x).numpy()
     h1 = latent_embedding(view1_output)
     h2 = latent_embedding(view2_output)
-    H = fused_latent_embedding(view1_output, view2_output)
+    H = fused_latent_embedding(
+        view1_output,
+        view2_output,
+        protocol.fusion_contract,
+    )
     representation_evaluations = None
     if y is not None and protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         representation_evaluations = evaluate_public_representations(
@@ -2221,7 +2300,7 @@ def train(
         "protocol_id": protocol.protocol_id,
         "greedy_eigen_direction": greedy_eigen_direction,
         "greedy_eigen_index": (
-            hidden_units - 1 if greedy_eigen_direction == "largest" else 0
+            H.shape[1] - 1 if greedy_eigen_direction == "largest" else 0
         ),
         "greedy_target_mode": greedy_target_mode,
         "lambda_kmeans": lambda_kmeans,

@@ -14,6 +14,8 @@ from sklearn.metrics import silhouette_score
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
+    FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_CONCATENATE,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -41,17 +43,35 @@ PUBLIC_ENCODER_BOTTLENECK_METHOD = (
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_DIRECT_JOINT_HEAD_METHOD = "MvDEC-2025-View2-direct-joint-head-ablation"
+PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID = (
+    "mvdec_2025_view2_direct_23_split_concat_v1"
+)
+PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD = (
+    "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
     ),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
+        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    ),
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_METHOD,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_METHOD,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_METHOD,
+    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
+        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD
+    ),
+}
+PUBLIC_PROTOCOL_FUSIONS = {
+    PUBLIC_REPRODUCTION_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
+    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
+    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: FUSION_ENCODER_CONCATENATE,
 }
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -496,6 +516,21 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
     }:
         msg = f"Unsupported MvDEC protocol_id: {protocol_id!r}."
         raise ValueError(msg)
+    expected_fusion_contract = PUBLIC_PROTOCOL_FUSIONS.get(
+        protocol_id,
+        FUSION_ENCODER_AVERAGE,
+    )
+    contract_fusion = architecture.get("fusion", FUSION_ENCODER_AVERAGE)
+    if any(
+        (
+            contract_fusion != expected_fusion_contract,
+            best_result.get("fusion_contract") != expected_fusion_contract,
+            config.get("fusion_contract", FUSION_ENCODER_AVERAGE)
+            != expected_fusion_contract,
+        )
+    ):
+        msg = "MvDEC fusion identity is missing or inconsistent."
+        raise ValueError(msg)
     if protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES:
         _validate_public_reproduction_contract(best_result, contract, config)
         return
@@ -618,11 +653,16 @@ def _validate_mvdec2025_contract(
 
     h_view1 = np.asarray(best_result.get("h_view1"))
     h_view2 = np.asarray(best_result.get("h_view2"))
-    if h_view1.shape != h_fused.shape or h_view2.shape != h_fused.shape:
+    if (
+        h_view1.ndim != 2
+        or h_view2.ndim != 2
+        or h_view1.shape[0] != h_fused.shape[0]
+        or h_view2.shape[0] != h_fused.shape[0]
+        or h_view1.shape != h_view2.shape
+    ):
         msg = (
-            "MvDEC 2025 artifact must store h_view1, h_view2, and h_fused "
-            f"with the same shape; got {h_view1.shape}, {h_view2.shape}, "
-            f"and {h_fused.shape}."
+            "MvDEC 2025 artifact must store compatible two-dimensional view "
+            f"latents; got {h_view1.shape}, {h_view2.shape}, and {h_fused.shape}."
         )
         raise ValueError(msg)
 
@@ -634,7 +674,8 @@ def _validate_mvdec2025_contract(
         )
         raise ValueError(msg)
 
-    if best_result.get("fusion_contract") == "mvdec2025_encoder_average":
+    fusion_contract = best_result.get("fusion_contract")
+    if fusion_contract == FUSION_ENCODER_AVERAGE:
         config = best_result.get("config", {})
         if not isinstance(config, dict):
             config = {}
@@ -645,10 +686,20 @@ def _validate_mvdec2025_contract(
                 f"encoder-average artifacts: {h_fused.shape[1]} != {latent_dim}."
             )
             raise ValueError(msg)
+        expected = (h_view1 + h_view2) / 2
+    elif fusion_contract == FUSION_ENCODER_CONCATENATE:
+        expected = np.concatenate([h_view1, h_view2], axis=1)
+    else:
+        msg = f"Unsupported MvDEC fusion contract: {fusion_contract!r}."
+        raise ValueError(msg)
 
-    expected = (h_view1 + h_view2) / 2
-    if not np.allclose(h_fused, expected, rtol=1e-5, atol=1e-6):
-        msg = "h_fused must equal (h_view1 + h_view2) / 2 for MvDEC 2025 artifacts."
+    if h_fused.shape != expected.shape or not np.allclose(
+        h_fused,
+        expected,
+        rtol=1e-5,
+        atol=1e-6,
+    ):
+        msg = "h_fused does not match the declared MvDEC fusion contract."
         raise ValueError(msg)
 
 
@@ -686,7 +737,7 @@ def load_mvdec_result(
         raise ValueError(msg)
 
     fusion_contract = best_result.get("fusion_contract")
-    if fusion_contract == "mvdec2025_encoder_average":
+    if fusion_contract in {FUSION_ENCODER_AVERAGE, FUSION_ENCODER_CONCATENATE}:
         _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif fusion_contract == "mvdec2025_figure_output_average":
         if not allow_legacy_concat:
