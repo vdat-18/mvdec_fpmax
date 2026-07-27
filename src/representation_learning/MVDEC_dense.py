@@ -1188,7 +1188,7 @@ def model_view1(load_weights=True, weights_path=None):
 
 
 def model_view2(load_weights=True, weights_path=None):
-    """Build the Fig. 2 dense U-Net view with a post-skip joint output head."""
+    """Build the dense U-Net view with a trainable post-skip latent bottleneck."""
 
     init = 'glorot_uniform'
     activation = 'relu'
@@ -1228,11 +1228,19 @@ def model_view2(load_weights=True, weights_path=None):
     x = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e1])
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
-    output = layers.Dense(
-        view_output_width(),
+    h = layers.Dense(
+        hidden_units,
         activation=output_activation,
         kernel_initializer=init,
+        name="view2_latent",
     )(x)
+    y = layers.Dense(
+        input_shape,
+        activation=output_activation,
+        kernel_initializer=init,
+        name="view2_reconstruction",
+    )(h)
+    output = layers.Concatenate(name="view2_output")([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
         path = (

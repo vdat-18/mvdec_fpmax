@@ -7,9 +7,9 @@ import pytest
 @pytest.mark.parametrize(
     ("input_dim", "latent_dim", "base_units", "expected_concats"),
     [
-        (2000, 10, 64, [768, 384, 192, 96]),
-        (13, 10, 64, [768, 384, 192, 96]),
-        (7, 5, 32, [384, 192, 96, 48]),
+        (2000, 10, 64, [768, 384, 192, 96, 2010]),
+        (13, 10, 64, [768, 384, 192, 96, 23]),
+        (7, 5, 32, [384, 192, 96, 48, 12]),
     ],
 )
 def test_view2_matches_paper_skip_dimensions(
@@ -63,9 +63,35 @@ def test_view2_matches_paper_skip_dimensions(
         base_units,
         base_units // 2,
         base_units,
-        latent_dim + input_dim,
+        latent_dim,
+        input_dim,
     ]
     assert concat_widths == expected_concats
     assert model.output_shape == (None, latent_dim + input_dim)
-    assert isinstance(model.layers[-1], tensorflow.keras.layers.Dense)
-    assert model.layers[-1].units == latent_dim + input_dim
+    assert model.get_layer("view2_latent").units == latent_dim
+    assert model.get_layer("view2_reconstruction").units == input_dim
+
+
+def test_view2_pretraining_updates_post_skip_latent(monkeypatch):
+    """Reconstruction pretraining must propagate through the View2 latent head."""
+
+    tensorflow = pytest.importorskip("tensorflow")
+    representation_dir = (
+        Path(__file__).resolve().parents[1] / "src" / "representation_learning"
+    )
+    monkeypatch.syspath_prepend(str(representation_dir))
+    mvdec = importlib.import_module("MVDEC_dense")
+    monkeypatch.setattr(mvdec, "input_shape", 13)
+    monkeypatch.setattr(mvdec, "hidden_units", 10)
+    monkeypatch.setattr(mvdec, "view2_base_units", 64)
+    tensorflow.keras.utils.set_random_seed(42)
+    model = mvdec.model_view2(load_weights=False)
+    inputs = tensorflow.ones((4, 13), dtype=tensorflow.float32)
+
+    with tensorflow.GradientTape() as tape:
+        outputs = model(inputs)
+        loss = tensorflow.reduce_mean(mvdec.release_loss_train_base(inputs, outputs))
+    gradient = tape.gradient(loss, model.get_layer("view2_latent").kernel)
+
+    assert gradient is not None
+    assert float(tensorflow.linalg.norm(gradient)) > 0.0
