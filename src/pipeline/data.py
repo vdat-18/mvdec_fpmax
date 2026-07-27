@@ -22,6 +22,10 @@ from pipeline.mvdec_runs import (
 PRIMARY_MVDEC_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
 PRIMARY_MVDEC_OBJECTIVE = "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
 PRIMARY_MVDEC_METHOD = "MvDEC-DEKM-consistent"
+PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
+PUBLIC_REPRODUCTION_OBJECTIVE = "mvdec_2025_public_reproduction_release_greedy_mse"
+PUBLIC_REPRODUCTION_METHOD = "MvDEC-2025-public-reproduction"
+PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
 
 
@@ -214,8 +218,7 @@ def _validate_airpollution_preprocessing(
     }
     if preprocessing_method not in expected_feature_ranges:
         msg = (
-            "Unsupported Air Pollution preprocessing method: "
-            f"{preprocessing_method!r}."
+            f"Unsupported Air Pollution preprocessing method: {preprocessing_method!r}."
         )
         raise ValueError(msg)
     expected_feature_range = expected_feature_ranges[preprocessing_method]
@@ -267,6 +270,134 @@ def _protocol_contract_sha256(contract: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _validate_public_reproduction_contract(
+    best_result: dict,
+    contract: dict,
+    config: dict,
+) -> None:
+    """Validate the immutable historical public-reproduction schedule."""
+
+    objective = contract["objective"]
+    eigen = contract["eigen"]
+    greedy_target = contract["greedy_target"]
+    stopping = contract["stopping"]
+    schedule = contract.get("schedule")
+    expected_loss_terms = {
+        "L1_reconstruction": {"weight": 0.0, "optimized": False},
+        "L2_kmeans": {"weight": 0.0, "optimized": False},
+        "L3_scatter_trace": {
+            "weight": 0.0,
+            "optimized": False,
+            "mathematically_equivalent_to_L2": True,
+        },
+        "L4_greedy": {
+            "weight": 1.0,
+            "optimized": True,
+            "reduction": ("mean_squared_dimensions_per_sample_sum_batch_gradient"),
+        },
+    }
+    expected_schedule = {
+        "scope": "public_datasets_only",
+        "pretraining": {
+            "epochs": 200,
+            "batch_size": 256,
+            "loss_reduction": "mean_squared_dimensions_per_sample",
+            "shuffle_buffer": 8000,
+        },
+        "refinement": {
+            "objective": "release_greedy_mse_only",
+            "batch_size": 256,
+            "batching_policy": "sequential_release_order",
+            "kmeans_refresh_policy": "fixed_10_updates",
+            "update_interval": 10,
+            "max_training_steps": 14000,
+            "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
+        },
+        "final_evaluation": {
+            "representations": ["view1", "view2", "fused"],
+            "clustering": "independent_kmeans_n_init_100",
+            "metrics": ["acc", "nmi"],
+            "ground_truth_usage": "final_evaluation_only",
+        },
+    }
+    expected_loss_weights = {
+        "reconstruction": 0.0,
+        "kmeans": 0.0,
+        "scatter_trace_diagnostic": 0.0,
+        "greedy": 1.0,
+    }
+    training_steps_completed = int(best_result.get("training_steps_completed", -1))
+    batches_per_epoch = int(best_result.get("batches_per_epoch", 0))
+    refinement_epochs_completed = int(
+        best_result.get("refinement_epochs_completed", -1)
+    )
+    stop_reason = best_result.get("stop_reason")
+    metric_names = (
+        "view1_acc",
+        "view1_nmi",
+        "view2_acc",
+        "view2_nmi",
+        "fused_acc",
+        "fused_nmi",
+    )
+    if any(
+        (
+            best_result.get("dataset") not in PUBLIC_MVDEC_DATASETS,
+            best_result.get("algorithm_family") != "MvDEC",
+            best_result.get("algorithm") != PUBLIC_REPRODUCTION_METHOD,
+            best_result.get("method_name") != PUBLIC_REPRODUCTION_METHOD,
+            objective.get("name") != PUBLIC_REPRODUCTION_OBJECTIVE,
+            objective.get("loss_terms") != expected_loss_terms,
+            eigen.get("order") != "ascending",
+            eigen.get("direction") != "largest",
+            greedy_target.get("mode") != "frozen_snapshot",
+            schedule != expected_schedule,
+            config.get("loss_weights") != expected_loss_weights,
+            config.get("kmeans_refresh_policy") != "fixed_10_updates",
+            config.get("refinement_batching_policy") != "sequential_release_order",
+            config.get("update_interval") != 10,
+            config.get("max_training_steps") != 14000,
+            config.get("kmeans_n_init_policy")
+            != "initial_100_then_twice_previous_n_iter",
+            config.get("pretrain_loss_reduction")
+            != "mean_squared_dimensions_per_sample",
+            config.get("pretrain_shuffle_buffer") != 8000,
+            config.get("refinement_objective") != "release_greedy_mse_only",
+            best_result.get("kmeans_refresh_policy") != "fixed_10_updates",
+            best_result.get("refinement_batching_policy") != "sequential_release_order",
+            best_result.get("kmeans_n_init_policy")
+            != "initial_100_then_twice_previous_n_iter",
+            best_result.get("iteration") != training_steps_completed,
+            config.get("training_steps_completed") != training_steps_completed,
+            batches_per_epoch < 1,
+            config.get("batches_per_epoch") != batches_per_epoch,
+            refinement_epochs_completed
+            != training_steps_completed // max(batches_per_epoch, 1),
+            config.get("refinement_epochs_completed")
+            != refinement_epochs_completed,
+            config.get("stop_reason") != stop_reason,
+            not 0 <= training_steps_completed <= 14000,
+            stop_reason not in {"converged_assignment", "max_epochs_reached"},
+            stop_reason == "max_epochs_reached" and training_steps_completed != 14000,
+            not np.isclose(
+                float(stopping.get("assignment_change_tolerance", np.nan)),
+                0.001,
+            ),
+            any(best_result.get(name) is None for name in metric_names),
+            not np.isclose(
+                float(best_result.get("acc", np.nan)),
+                float(best_result.get("fused_acc", np.nan)),
+            ),
+            not np.isclose(
+                float(best_result.get("nmi", np.nan)),
+                float(best_result.get("fused_nmi", np.nan)),
+            ),
+        )
+    ):
+        msg = "MvDEC public-reproduction artifact violates its immutable protocol."
+        raise ValueError(msg)
+
+
 def _validate_mvdec_protocol_contract(best_result: dict) -> None:
     """Validate the resolved protocol identity and detect artifact tampering."""
 
@@ -309,10 +440,17 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
         msg = "MvDEC objective name does not match its protocol contract."
         raise ValueError(msg)
 
-    if protocol_id not in {PRIMARY_MVDEC_PROTOCOL_ID, "custom"}:
+    if protocol_id not in {
+        PRIMARY_MVDEC_PROTOCOL_ID,
+        PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        "custom",
+    }:
         msg = f"Unsupported MvDEC protocol_id: {protocol_id!r}."
         raise ValueError(msg)
-    if protocol_id != PRIMARY_MVDEC_PROTOCOL_ID:
+    if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        _validate_public_reproduction_contract(best_result, contract, config)
+        return
+    if protocol_id == "custom":
         if not str(objective.get("name", "")).startswith("mvdec_custom_"):
             msg = "Custom MvDEC protocols must use an explicit custom objective name."
             raise ValueError(msg)

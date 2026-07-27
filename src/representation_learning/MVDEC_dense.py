@@ -17,7 +17,7 @@ from tensorflow.keras.models import Model
 from utils import log_csv
 
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
-from pipeline.external_metrics import compute_external_metrics
+from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_runs import (
     append_run_log,
     build_summary_frames,
@@ -56,23 +56,41 @@ lambda_reconstruction = 1.0
 lambda_kmeans = DEFAULT_LAMBDA_KMEANS
 lambda_orthonormal = 0.0
 lambda_greedy = DEFAULT_LAMBDA_GREEDY
-GREEDY_EIGEN_DIRECTIONS = ('largest', 'smallest')
-GREEDY_TARGET_MODES = ('selected_dimension_only', 'frozen_snapshot')
-DEFAULT_GREEDY_EIGEN_DIRECTION = 'largest'
-DEFAULT_GREEDY_TARGET_MODE = 'frozen_snapshot'
-PRIMARY_PROTOCOL_ID = 'mvdec_dekm_consistent_v1'
-CUSTOM_PROTOCOL_ID = 'custom'
-PROTOCOL_IDS = (PRIMARY_PROTOCOL_ID, CUSTOM_PROTOCOL_ID)
-EIGENVALUE_ORDER = 'ascending'
-L4_REDUCTION = 'sum_squared_dimensions_then_mean_batch'
+GREEDY_EIGEN_DIRECTIONS = ("largest", "smallest")
+GREEDY_TARGET_MODES = ("selected_dimension_only", "frozen_snapshot")
+DEFAULT_GREEDY_EIGEN_DIRECTION = "largest"
+DEFAULT_GREEDY_TARGET_MODE = "frozen_snapshot"
+PRIMARY_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
+PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
+CUSTOM_PROTOCOL_ID = "custom"
+PROTOCOL_IDS = (
+    PRIMARY_PROTOCOL_ID,
+    PUBLIC_REPRODUCTION_PROTOCOL_ID,
+    CUSTOM_PROTOCOL_ID,
+)
+EIGENVALUE_ORDER = "ascending"
+L4_REDUCTION = "sum_squared_dimensions_then_mean_batch"
+RELEASE_L4_REDUCTION = "mean_squared_dimensions_per_sample_sum_batch_gradient"
 KMEANS_N_INIT = 100
-KMEANS_REFRESH_POLICY = 'one_epoch'
-REFINEMENT_BATCHING_POLICY = 'balanced_shuffled_each_epoch'
-DETERMINISTIC_RUNTIME_POLICY = 'keras_seeded_tf_deterministic_v1'
+KMEANS_REFRESH_POLICY = "one_epoch"
+REFINEMENT_BATCHING_POLICY = "balanced_shuffled_each_epoch"
+FIXED_KMEANS_N_INIT_POLICY = "fixed_100"
+RELEASE_KMEANS_N_INIT_POLICY = "initial_100_then_twice_previous_n_iter"
+RELEASE_KMEANS_REFRESH_INTERVAL = 10
+RELEASE_MAX_TRAINING_STEPS = 14_000
+RELEASE_PRETRAIN_SHUFFLE_BUFFER = 8_000
+RELEASE_KMEANS_REFRESH_POLICY = "fixed_10_updates"
+RELEASE_REFINEMENT_BATCHING_POLICY = "sequential_release_order"
+JOINT_REFINEMENT_OBJECTIVE = "joint_reconstruction_plus_greedy"
+RELEASE_REFINEMENT_OBJECTIVE = "release_greedy_mse_only"
+SUM_SQUARED_PRETRAIN_REDUCTION = "sum_squared_dimensions_per_sample"
+RELEASE_PRETRAIN_REDUCTION = "mean_squared_dimensions_per_sample"
+DETERMINISTIC_RUNTIME_POLICY = "keras_seeded_tf_deterministic_v1"
 MAX_REFINEMENT_EPOCHS = 1400
 DEFAULT_PROGRESS_INTERVAL = 25
-TRAINING_STOP_REASONS = ('converged_assignment', 'max_epochs_reached')
-UNLABELED_SCALING_METHODS = ('minmax', 'standard', 'none')
+TRAINING_STOP_REASONS = ("converged_assignment", "max_epochs_reached")
+PUBLIC_DATASETS = ("REUTERS", "20NEWS", "RCV1")
+UNLABELED_SCALING_METHODS = ("minmax", "standard", "none")
 UNLABELED_DATASETS = {
     'AIRPOLLUTION': {
         'csv_path': 'data/preprocessed_data/data_demvk.csv',
@@ -111,21 +129,29 @@ class MvdecProtocol:
     greedy_eigen_direction: str
     greedy_target_mode: str
     l4_reduction: str
+    refinement_objective: str
+    kmeans_refresh_policy: str
+    kmeans_refresh_interval: int | None
+    refinement_batching_policy: str
+    max_training_steps: int | None
+    kmeans_n_init_policy: str
+    pretrain_loss_reduction: str
+    pretrain_shuffle_buffer: int | None
 
     def manifest_contract(self, tolerance: float) -> dict[str, object]:
         """Return the explicit paper and optimization contract for artifacts."""
 
-        return {
-            'protocol_id': self.protocol_id,
-            'claim_scope': self.claim_scope,
-            'architecture_source': self.architecture_source,
-            'refinement_source': self.refinement_source,
-            'objective': {
-                'name': final_training_objective(self),
-                'loss_terms': {
-                    'L1_reconstruction': {
-                        'weight': self.reconstruction_weight,
-                        'optimized': self.reconstruction_weight > 0,
+        contract = {
+            "protocol_id": self.protocol_id,
+            "claim_scope": self.claim_scope,
+            "architecture_source": self.architecture_source,
+            "refinement_source": self.refinement_source,
+            "objective": {
+                "name": final_training_objective(self),
+                "loss_terms": {
+                    "L1_reconstruction": {
+                        "weight": self.reconstruction_weight,
+                        "optimized": self.reconstruction_weight > 0,
                     },
                     'L2_kmeans': {
                         'weight': self.kmeans_weight,
@@ -166,6 +192,32 @@ class MvdecProtocol:
                 ),
             },
         }
+        if self.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+            contract["schedule"] = {
+                "scope": "public_datasets_only",
+                "pretraining": {
+                    "epochs": 200,
+                    "batch_size": 256,
+                    "loss_reduction": self.pretrain_loss_reduction,
+                    "shuffle_buffer": self.pretrain_shuffle_buffer,
+                },
+                "refinement": {
+                    "objective": self.refinement_objective,
+                    "batch_size": 256,
+                    "batching_policy": self.refinement_batching_policy,
+                    "kmeans_refresh_policy": self.kmeans_refresh_policy,
+                    "update_interval": self.kmeans_refresh_interval,
+                    "max_training_steps": self.max_training_steps,
+                    "kmeans_n_init_policy": self.kmeans_n_init_policy,
+                },
+                "final_evaluation": {
+                    "representations": ["view1", "view2", "fused"],
+                    "clustering": "independent_kmeans_n_init_100",
+                    "metrics": ["acc", "nmi"],
+                    "ground_truth_usage": "final_evaluation_only",
+                },
+            }
+        return contract
 
 
 PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
@@ -181,6 +233,43 @@ PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
     greedy_eigen_direction=DEFAULT_GREEDY_EIGEN_DIRECTION,
     greedy_target_mode=DEFAULT_GREEDY_TARGET_MODE,
     l4_reduction=L4_REDUCTION,
+    refinement_objective=JOINT_REFINEMENT_OBJECTIVE,
+    kmeans_refresh_policy=KMEANS_REFRESH_POLICY,
+    kmeans_refresh_interval=None,
+    refinement_batching_policy=REFINEMENT_BATCHING_POLICY,
+    max_training_steps=None,
+    kmeans_n_init_policy=FIXED_KMEANS_N_INIT_POLICY,
+    pretrain_loss_reduction=SUM_SQUARED_PRETRAIN_REDUCTION,
+    pretrain_shuffle_buffer=None,
+)
+
+
+PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
+    protocol_id=PUBLIC_REPRODUCTION_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC 2025 public architecture with historical released "
+        "DEKM-style optimization; reproduction contract, not an exact-paper claim"
+    ),
+    architecture_source="MvDEC 2025 multi-view encoder-latent fusion",
+    refinement_source=(
+        "Historical MvDEC implementation and released DEKM training behavior"
+    ),
+    reconstruction_weight=0.0,
+    kmeans_weight=0.0,
+    scatter_trace_weight=0.0,
+    greedy_weight=1.0,
+    eigenvalue_order=EIGENVALUE_ORDER,
+    greedy_eigen_direction=DEFAULT_GREEDY_EIGEN_DIRECTION,
+    greedy_target_mode=DEFAULT_GREEDY_TARGET_MODE,
+    l4_reduction=RELEASE_L4_REDUCTION,
+    refinement_objective=RELEASE_REFINEMENT_OBJECTIVE,
+    kmeans_refresh_policy=RELEASE_KMEANS_REFRESH_POLICY,
+    kmeans_refresh_interval=RELEASE_KMEANS_REFRESH_INTERVAL,
+    refinement_batching_policy=RELEASE_REFINEMENT_BATCHING_POLICY,
+    max_training_steps=RELEASE_MAX_TRAINING_STEPS,
+    kmeans_n_init_policy=RELEASE_KMEANS_N_INIT_POLICY,
+    pretrain_loss_reduction=RELEASE_PRETRAIN_REDUCTION,
+    pretrain_shuffle_buffer=RELEASE_PRETRAIN_SHUFFLE_BUFFER,
 )
 
 
@@ -209,13 +298,55 @@ def validate_protocol_assignment_change_tolerance(
     """Require custom protocol identity for stopping-tolerance ablations."""
 
     expected = resolve_assignment_change_tolerance(dataset_name)
-    if protocol.protocol_id == PRIMARY_PROTOCOL_ID and tolerance != expected:
+    if (
+        protocol.protocol_id
+        in {
+            PRIMARY_PROTOCOL_ID,
+            PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        }
+        and tolerance != expected
+    ):
         raise ValueError(
-            f'{PRIMARY_PROTOCOL_ID} fixes assignment-change tolerance at '
-            f'{expected:g} for {dataset_name}. Use --protocol custom for '
-            'tolerance ablations.'
+            f"{protocol.protocol_id} fixes assignment-change tolerance at "
+            f"{expected:g} for {dataset_name}. Use --protocol custom for "
+            "tolerance ablations."
         )
     return tolerance
+
+
+def validate_protocol_dataset_scope(
+    protocol: MvdecProtocol,
+    dataset_name: str,
+) -> None:
+    """Reject use of the public reproduction contract on private datasets."""
+
+    if (
+        protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+        and dataset_name not in PUBLIC_DATASETS
+    ):
+        raise ValueError(
+            f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} supports only "
+            f"{', '.join(PUBLIC_DATASETS)}; got {dataset_name!r}."
+        )
+
+
+def validate_protocol_max_refinement_epochs(
+    protocol: MvdecProtocol,
+    max_refinement_epochs: int,
+) -> int:
+    """Reject an epoch override that cannot alter the fixed release budget."""
+
+    value = validate_max_refinement_epochs(max_refinement_epochs)
+    if (
+        protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+        and value != MAX_REFINEMENT_EPOCHS
+    ):
+        raise ValueError(
+            f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} fixes refinement at "
+            f"{RELEASE_MAX_TRAINING_STEPS} updates. "
+            "--max-refinement-epochs applies only to the primary/custom protocols."
+        )
+    return value
 
 
 def view_output_width():
@@ -230,8 +361,10 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
     """Return an objective name that does not overclaim paper fidelity."""
 
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
-        return 'mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy'
-    parts = ['reconstruction']
+        return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        return "mvdec_2025_public_reproduction_release_greedy_mse"
+    parts = ["reconstruction"]
     if protocol.kmeans_weight > 0:
         parts.append('kmeans')
     if protocol.scatter_trace_weight > 0:
@@ -256,6 +389,22 @@ def resolve_mvdec_protocol(
         raise ValueError('MvDEC loss weights must be non-negative.')
     greedy_eigen_index(eigen_direction)
     validate_greedy_target_mode(target_mode)
+    if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        if any(
+            (
+                kmeans_weight != PUBLIC_REPRODUCTION_PROTOCOL.kmeans_weight,
+                greedy_weight != PUBLIC_REPRODUCTION_PROTOCOL.greedy_weight,
+                eigen_direction != PUBLIC_REPRODUCTION_PROTOCOL.greedy_eigen_direction,
+                target_mode != PUBLIC_REPRODUCTION_PROTOCOL.greedy_target_mode,
+            )
+        ):
+            raise ValueError(
+                f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} is immutable. Use "
+                "--protocol custom for loss, eigen-direction, or target-mode "
+                "ablations."
+            )
+        return PUBLIC_REPRODUCTION_PROTOCOL
+
     resolved = MvdecProtocol(
         protocol_id=protocol_id,
         claim_scope=(
@@ -277,6 +426,14 @@ def resolve_mvdec_protocol(
         greedy_eigen_direction=eigen_direction,
         greedy_target_mode=target_mode,
         l4_reduction=L4_REDUCTION,
+        refinement_objective=JOINT_REFINEMENT_OBJECTIVE,
+        kmeans_refresh_policy=KMEANS_REFRESH_POLICY,
+        kmeans_refresh_interval=None,
+        refinement_batching_policy=REFINEMENT_BATCHING_POLICY,
+        max_training_steps=None,
+        kmeans_n_init_policy=FIXED_KMEANS_N_INIT_POLICY,
+        pretrain_loss_reduction=SUM_SQUARED_PRETRAIN_REDUCTION,
+        pretrain_shuffle_buffer=None,
     )
     if protocol_id == PRIMARY_PROTOCOL_ID and resolved != PRIMARY_MVDEC_PROTOCOL:
         raise ValueError(
@@ -297,8 +454,10 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
     """Return the human-readable method label for tables and artifacts."""
 
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
-        return 'MvDEC-DEKM-consistent'
-    return 'MvDEC custom ablation'
+        return "MvDEC-DEKM-consistent"
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        return "MvDEC-2025-public-reproduction"
+    return "MvDEC custom ablation"
 
 
 def resolved_run_config(
@@ -312,28 +471,40 @@ def resolved_run_config(
 ) -> dict[str, object]:
     """Return the full seed-independent configuration used for run identity."""
 
-    return {
-        'dataset': dataset_name,
-        'method': protocol_method_name(protocol),
-        'protocol_contract': protocol.manifest_contract(tolerance),
-        'source_sha256': source_sha256,
-        'feature_columns': list(feature_columns),
-        'preprocessing': preprocessing_metadata,
-        'n_clusters': int(n_clusters),
-        'input_shape': int(input_shape),
-        'hidden_units': int(hidden_units),
-        'view1_filters': list(view1_filters),
-        'view2_base_units': int(view2_base_units),
-        'pretrain_epochs': int(pretrain_epochs),
-        'batch_size': int(batch_size),
-        'kmeans_n_init': int(KMEANS_N_INIT),
-        'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
-        'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
-        'deterministic_runtime_policy': DETERMINISTIC_RUNTIME_POLICY,
-        'max_refinement_epochs': int(max_refinement_epochs),
-        'assignment_change_tolerance': float(tolerance),
-        'l4_reduction': protocol.l4_reduction,
+    config = {
+        "dataset": dataset_name,
+        "method": protocol_method_name(protocol),
+        "protocol_contract": protocol.manifest_contract(tolerance),
+        "source_sha256": source_sha256,
+        "feature_columns": list(feature_columns),
+        "preprocessing": preprocessing_metadata,
+        "n_clusters": int(n_clusters),
+        "input_shape": int(input_shape),
+        "hidden_units": int(hidden_units),
+        "view1_filters": list(view1_filters),
+        "view2_base_units": int(view2_base_units),
+        "pretrain_epochs": int(pretrain_epochs),
+        "batch_size": int(batch_size),
+        "kmeans_n_init": int(KMEANS_N_INIT),
+        "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
+        "refinement_batching_policy": protocol.refinement_batching_policy,
+        "deterministic_runtime_policy": DETERMINISTIC_RUNTIME_POLICY,
+        "max_refinement_epochs": int(max_refinement_epochs),
+        "assignment_change_tolerance": float(tolerance),
+        "l4_reduction": protocol.l4_reduction,
     }
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        config.update(
+            {
+                "pretrain_loss_reduction": protocol.pretrain_loss_reduction,
+                "pretrain_shuffle_buffer": protocol.pretrain_shuffle_buffer,
+                "refinement_objective": protocol.refinement_objective,
+                "update_interval": protocol.kmeans_refresh_interval,
+                "max_training_steps": protocol.max_training_steps,
+                "kmeans_n_init_policy": protocol.kmeans_n_init_policy,
+            }
+        )
+    return config
 
 
 def latent_embedding(view_output):
@@ -404,15 +575,17 @@ def configure_deterministic_runtime(seed: int | None) -> dict[str, object]:
 def make_pretraining_dataset(
     x: np.ndarray,
     random_seed: int,
+    protocol: MvdecProtocol = PRIMARY_MVDEC_PROTOCOL,
 ) -> tf.data.Dataset:
     """Build a reproducibly shuffled autoencoder pretraining dataset."""
 
     options = tf.data.Options()
     options.deterministic = True
+    shuffle_buffer = protocol.pretrain_shuffle_buffer or len(x)
     return (
         tf.data.Dataset.from_tensor_slices((x, x))
         .shuffle(
-            buffer_size=len(x),
+            buffer_size=min(shuffle_buffer, len(x)),
             seed=random_seed,
             reshuffle_each_iteration=True,
         )
@@ -421,11 +594,30 @@ def make_pretraining_dataset(
     )
 
 
-def make_kmeans(random_seed):
+def make_kmeans(random_seed, n_init=KMEANS_N_INIT):
+    """Build one seeded K-means estimator with an explicit restart count."""
+
+    if n_init < 1:
+        raise ValueError("K-Means n_init must be positive.")
     return KMeans(
         n_clusters=n_clusters,
-        n_init=KMEANS_N_INIT,
+        n_init=int(n_init),
         random_state=random_seed,
+    )
+
+
+def next_kmeans_n_init(
+    protocol: MvdecProtocol,
+    fitted_kmeans: KMeans,
+) -> int:
+    """Resolve the restart count for the next refinement checkpoint."""
+
+    if protocol.kmeans_n_init_policy == FIXED_KMEANS_N_INIT_POLICY:
+        return KMEANS_N_INIT
+    if protocol.kmeans_n_init_policy == RELEASE_KMEANS_N_INIT_POLICY:
+        return int(fitted_kmeans.n_iter_ * 2)
+    raise ValueError(
+        f"Unsupported K-Means n_init policy: {protocol.kmeans_n_init_policy!r}."
     )
 
 
@@ -461,6 +653,42 @@ def number_of_batches(n_samples: int, current_batch_size: int) -> int:
     if n_samples < 1 or current_batch_size < 1:
         raise ValueError('n_samples and batch_size must be positive.')
     return max(1, (n_samples + current_batch_size // 2) // current_batch_size)
+
+
+@dataclass(frozen=True)
+class RefinementSchedule:
+    """Resolved update budget and batching cadence for one protocol run."""
+
+    batches_per_epoch: int
+    kmeans_refresh_interval: int
+    max_training_steps: int
+
+
+def resolve_refinement_schedule(
+    protocol: MvdecProtocol,
+    n_samples: int,
+    current_batch_size: int,
+    max_refinement_epochs: int,
+) -> RefinementSchedule:
+    """Resolve the immutable protocol schedule without changing old behavior."""
+
+    max_refinement_epochs = validate_protocol_max_refinement_epochs(
+        protocol,
+        max_refinement_epochs,
+    )
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        batches_per_epoch = (n_samples + current_batch_size - 1) // current_batch_size
+        return RefinementSchedule(
+            batches_per_epoch=batches_per_epoch,
+            kmeans_refresh_interval=int(protocol.kmeans_refresh_interval),
+            max_training_steps=int(protocol.max_training_steps),
+        )
+    batches_per_epoch = number_of_batches(n_samples, current_batch_size)
+    return RefinementSchedule(
+        batches_per_epoch=batches_per_epoch,
+        kmeans_refresh_interval=batches_per_epoch,
+        max_training_steps=max_refinement_epochs * batches_per_epoch,
+    )
 
 
 def validate_max_refinement_epochs(max_refinement_epochs):
@@ -514,6 +742,22 @@ def epoch_batch_indices(
         shuffled[start:end]
         for start, end in epoch_batch_bounds(n_samples, current_batch_size)
     ]
+
+
+def sequential_release_batch_indices(
+    n_samples: int,
+    current_batch_size: int,
+    training_step: int,
+) -> np.ndarray:
+    """Return the historical contiguous batch, including the final remainder."""
+
+    if n_samples < 1 or current_batch_size < 1 or training_step < 0:
+        raise ValueError("Batch dimensions must be positive and step non-negative.")
+    batches_per_epoch = (n_samples + current_batch_size - 1) // current_batch_size
+    batch_index = training_step % batches_per_epoch
+    start = batch_index * current_batch_size
+    end = min(start + current_batch_size, n_samples)
+    return np.arange(start, end)
 
 
 def is_refinement_epoch_end(training_step, batches_per_epoch):
@@ -694,13 +938,26 @@ def save_airpollution_mvdec_artifact(
     true_labels=None,
     source_sha256=None,
     external_metrics=None,
+    representation_external_metrics=None,
+    training_steps_completed=None,
     protocol=PRIMARY_MVDEC_PROTOCOL,
     run_id=None,
     config_hash=None,
 ):
     greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
-    validate_max_refinement_epochs(max_refinement_epochs)
+    max_refinement_epochs = validate_protocol_max_refinement_epochs(
+        protocol,
+        max_refinement_epochs,
+    )
+    schedule = resolve_refinement_schedule(
+        protocol,
+        len(h_fused),
+        batch_size,
+        max_refinement_epochs,
+    )
+    if batches_per_epoch != schedule.batches_per_epoch:
+        raise ValueError("MvDEC artifact batch count does not match its protocol.")
     if stop_reason not in TRAINING_STOP_REASONS:
         raise ValueError(f'Unsupported training stop reason: {stop_reason!r}.')
     greedy_eigen_position = (
@@ -769,85 +1026,118 @@ def save_airpollution_mvdec_artifact(
             '2025_Multi-view Deep Embedded Clustering architecture',
             '2021_Deep Embedded K-Means Clustering refinement',
         ],
-        'fusion_contract': 'mvdec2025_encoder_average',
-        'view_output_layout': view_output_layout(),
-        'final_training_objective': training_objective,
-        'h_view1': h_view1,
-        'h_view2': h_view2,
-        'h_fused': h_fused,
-        'view_concat_representation': view_concat_representation,
-        'labels': labels,
-        'true_labels': true_labels_ordered,
-        'row_indices': np.arange(len(labels), dtype=int),
-        'source_sha256': source_sha256,
-        'init': 'k-means',
-        'score': float(score),
-        'iteration': int(iteration),
-        'input_dim': int(input_shape),
-        'view1_latent_dim': int(hidden_units),
-        'view2_latent_dim': int(hidden_units),
-        'fusion_dim': int(h_fused.shape[1]),
-        'n_clusters': int(n_clusters),
-        'kmeans_n_init': int(KMEANS_N_INIT),
-        'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
-        'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
-        'batches_per_epoch': int(batches_per_epoch),
-        'stop_reason': stop_reason,
-        'refinement_epochs_completed': int(refinement_epochs_completed),
-        'n_samples': int(h_fused.shape[0]),
-        'feature_columns': feature_columns,
-        'eigenvalue_order': EIGENVALUE_ORDER,
-        'greedy_eigen_direction': greedy_eigen_direction,
-        'greedy_eigen_index': int(greedy_eigen_position),
-        'greedy_target_mode': greedy_target_mode,
-        'preprocessing': preprocessing_metadata,
-        'config': {
-            'seed': random_seed,
-            'n_clusters': int(n_clusters),
-            'kmeans_n_init': int(KMEANS_N_INIT),
-            'batch_size': int(batch_size),
-            'pretrain_epochs': int(pretrain_epochs),
-            'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
-            'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
-            'batches_per_epoch': int(batches_per_epoch),
-            'update_interval': int(batches_per_epoch),
-            'max_refinement_epochs': int(max_refinement_epochs),
-            'max_training_steps': int(max_refinement_epochs * batches_per_epoch),
-            'stop_reason': stop_reason,
-            'refinement_epochs_completed': int(refinement_epochs_completed),
-            'assignment_change_tolerance': float(assignment_change_tolerance),
-            'view1_latent_dim': int(hidden_units),
-            'view2_latent_dim': int(hidden_units),
-            'view1_filters': list(view1_filters),
-            'view2_base_units': int(view2_base_units),
-            'view1_embedding_dim': int(h_view1.shape[1]),
-            'view2_embedding_dim': int(h_view2.shape[1]),
-            'fusion_dim': int(h_fused.shape[1]),
-            'model_view_output_dim': int(view_output_width()),
-            'model_view_output_layout': view_output_layout(),
-            'final_training_objective': training_objective,
-            'protocol_id': protocol.protocol_id,
-            'run_id': run_id,
-            'config_hash': config_hash,
-            'protocol_contract': protocol_contract,
-            'protocol_contract_sha256': protocol_sha256,
-            'eigenvalue_order': EIGENVALUE_ORDER,
-            'greedy_eigen_direction': greedy_eigen_direction,
-            'greedy_eigen_index': int(greedy_eigen_position),
-            'greedy_target_mode': greedy_target_mode,
-            'loss_weights': {
-                'reconstruction': protocol.reconstruction_weight,
-                'kmeans': protocol.kmeans_weight,
-                'scatter_trace_diagnostic': protocol.scatter_trace_weight,
-                'greedy': protocol.greedy_weight,
+        "fusion_contract": "mvdec2025_encoder_average",
+        "view_output_layout": view_output_layout(),
+        "final_training_objective": training_objective,
+        "h_view1": h_view1,
+        "h_view2": h_view2,
+        "h_fused": h_fused,
+        "view_concat_representation": view_concat_representation,
+        "labels": labels,
+        "true_labels": true_labels_ordered,
+        "row_indices": np.arange(len(labels), dtype=int),
+        "source_sha256": source_sha256,
+        "init": "k-means",
+        "score": float(score),
+        "iteration": int(iteration),
+        "input_dim": int(input_shape),
+        "view1_latent_dim": int(hidden_units),
+        "view2_latent_dim": int(hidden_units),
+        "fusion_dim": int(h_fused.shape[1]),
+        "n_clusters": int(n_clusters),
+        "kmeans_n_init": int(KMEANS_N_INIT),
+        "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
+        "refinement_batching_policy": protocol.refinement_batching_policy,
+        "batches_per_epoch": int(batches_per_epoch),
+        "stop_reason": stop_reason,
+        "refinement_epochs_completed": int(refinement_epochs_completed),
+        "n_samples": int(h_fused.shape[0]),
+        "feature_columns": feature_columns,
+        "eigenvalue_order": EIGENVALUE_ORDER,
+        "greedy_eigen_direction": greedy_eigen_direction,
+        "greedy_eigen_index": int(greedy_eigen_position),
+        "greedy_target_mode": greedy_target_mode,
+        "preprocessing": preprocessing_metadata,
+        "config": {
+            "seed": random_seed,
+            "n_clusters": int(n_clusters),
+            "kmeans_n_init": int(KMEANS_N_INIT),
+            "batch_size": int(batch_size),
+            "pretrain_epochs": int(pretrain_epochs),
+            "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
+            "refinement_batching_policy": protocol.refinement_batching_policy,
+            "batches_per_epoch": int(batches_per_epoch),
+            "update_interval": int(schedule.kmeans_refresh_interval),
+            "max_refinement_epochs": int(max_refinement_epochs),
+            "max_training_steps": int(schedule.max_training_steps),
+            "stop_reason": stop_reason,
+            "refinement_epochs_completed": int(refinement_epochs_completed),
+            "assignment_change_tolerance": float(assignment_change_tolerance),
+            "view1_latent_dim": int(hidden_units),
+            "view2_latent_dim": int(hidden_units),
+            "view1_filters": list(view1_filters),
+            "view2_base_units": int(view2_base_units),
+            "view1_embedding_dim": int(h_view1.shape[1]),
+            "view2_embedding_dim": int(h_view2.shape[1]),
+            "fusion_dim": int(h_fused.shape[1]),
+            "model_view_output_dim": int(view_output_width()),
+            "model_view_output_layout": view_output_layout(),
+            "final_training_objective": training_objective,
+            "protocol_id": protocol.protocol_id,
+            "run_id": run_id,
+            "config_hash": config_hash,
+            "protocol_contract": protocol_contract,
+            "protocol_contract_sha256": protocol_sha256,
+            "eigenvalue_order": EIGENVALUE_ORDER,
+            "greedy_eigen_direction": greedy_eigen_direction,
+            "greedy_eigen_index": int(greedy_eigen_position),
+            "greedy_target_mode": greedy_target_mode,
+            "loss_weights": {
+                "reconstruction": protocol.reconstruction_weight,
+                "kmeans": protocol.kmeans_weight,
+                "scatter_trace_diagnostic": protocol.scatter_trace_weight,
+                "greedy": protocol.greedy_weight,
             },
             'fusion': 'h_fused = (view1_latent + view2_latent) / 2',
             'preprocessing': preprocessing_metadata,
         },
     }
     if external_metrics is not None:
-        artifact['acc'] = float(external_metrics.acc)
-        artifact['nmi'] = float(external_metrics.nmi)
+        artifact["acc"] = float(external_metrics.acc)
+        artifact["nmi"] = float(external_metrics.nmi)
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        if not isinstance(representation_external_metrics, dict) or set(
+            representation_external_metrics
+        ) != {"view1", "view2", "fused"}:
+            raise ValueError(
+                "Public reproduction artifacts require View1, View2, and fused "
+                "external metrics."
+            )
+        if training_steps_completed is None:
+            raise ValueError(
+                "Public reproduction artifacts require completed training steps."
+            )
+        artifact["training_steps_completed"] = int(training_steps_completed)
+        artifact["kmeans_n_init_policy"] = protocol.kmeans_n_init_policy
+        artifact["config"].update(
+            {
+                "training_steps_completed": int(training_steps_completed),
+                "kmeans_n_init_policy": protocol.kmeans_n_init_policy,
+                "pretrain_loss_reduction": protocol.pretrain_loss_reduction,
+                "pretrain_shuffle_buffer": protocol.pretrain_shuffle_buffer,
+                "refinement_objective": protocol.refinement_objective,
+            }
+        )
+        for representation_name, metrics in representation_external_metrics.items():
+            artifact[f"{representation_name}_acc"] = float(metrics.acc)
+            artifact[f"{representation_name}_nmi"] = float(metrics.nmi)
+        if any(
+            (
+                not np.isclose(artifact["acc"], artifact["fused_acc"]),
+                not np.isclose(artifact["nmi"], artifact["fused_nmi"]),
+            )
+        ):
+            raise ValueError("Fused metrics must remain the canonical ACC/NMI aliases.")
 
     write_public_artifact(artifact, Path(artifact_path))
     print(f'MvDEC artifact was saved to {artifact_path}')
@@ -965,6 +1255,18 @@ def greedy_loss_components(y_true, y_pred, eigen_index):
     return selected_loss, nonselected_loss
 
 
+def release_greedy_loss_components(y_true, y_pred, eigen_index):
+    """Partition released MSE while preserving its mean-over-dimensions scale."""
+
+    selected_loss, nonselected_loss = greedy_loss_components(
+        y_true,
+        y_pred,
+        eigen_index,
+    )
+    latent_width = tf.cast(tf.shape(y_pred)[-1], y_pred.dtype)
+    return selected_loss / latent_width, nonselected_loss / latent_width
+
+
 def selected_direction_greedy_loss(
     transformed_embeddings,
     transformed_centroids,
@@ -982,6 +1284,26 @@ def loss_train_base(y_true, y_pred):
     y_true = layers.Flatten()(y_true)
     y_pred = reconstruction_output(y_pred)
     return squared_euclidean_per_sample(y_true, y_pred)
+
+
+def release_loss_train_base(y_true, y_pred):
+    """Match the released autoencoder MSE reduction over input dimensions."""
+
+    y_true = layers.Flatten()(y_true)
+    y_pred = reconstruction_output(y_pred)
+    return tf.keras.losses.mse(y_true, y_pred)
+
+
+def pretraining_loss(protocol: MvdecProtocol):
+    """Return the loss function fixed by one MvDEC protocol."""
+
+    if protocol.pretrain_loss_reduction == SUM_SQUARED_PRETRAIN_REDUCTION:
+        return loss_train_base
+    if protocol.pretrain_loss_reduction == RELEASE_PRETRAIN_REDUCTION:
+        return release_loss_train_base
+    raise ValueError(
+        f"Unsupported pretraining loss reduction: {protocol.pretrain_loss_reduction!r}."
+    )
 
 
 class PretrainProgressCallback(tf.keras.callbacks.Callback):
@@ -1015,9 +1337,10 @@ def train_base_view1(
     ds_xx,
     progress_interval=DEFAULT_PROGRESS_INTERVAL,
     weights_path=None,
+    protocol=PRIMARY_MVDEC_PROTOCOL,
 ):
     model = model_view1(load_weights=False)
-    model.compile(optimizer='adam', loss=loss_train_base)
+    model.compile(optimizer="adam", loss=pretraining_loss(protocol))
     history = model.fit(
         ds_xx,
         epochs=pretrain_epochs,
@@ -1044,9 +1367,10 @@ def train_base_view2(
     ds_xx,
     progress_interval=DEFAULT_PROGRESS_INTERVAL,
     weights_path=None,
+    protocol=PRIMARY_MVDEC_PROTOCOL,
 ):
     model = model_view2(load_weights=False)
-    model.compile(optimizer='adam', loss=loss_train_base)
+    model.compile(optimizer="adam", loss=pretraining_loss(protocol))
     history = model.fit(
         ds_xx,
         epochs=pretrain_epochs,
@@ -1086,6 +1410,19 @@ def _metric_for_labels(features, labels, y=None):
     return f'silhouette = {silhouette}', silhouette
 
 
+def _training_metric_for_labels(
+    features,
+    labels,
+    y,
+    protocol: MvdecProtocol,
+):
+    """Defer public-reproduction ground-truth metrics until final evaluation."""
+
+    if y is not None and protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        return 'external_metrics = deferred_to_final', None
+    return _metric_for_labels(features, labels, y=y)
+
+
 def recompute_final_clustering(model1, model2, x, random_seed):
     view1_output = model1(x).numpy()
     view2_output = model2(x).numpy()
@@ -1094,6 +1431,40 @@ def recompute_final_clustering(model1, model2, x, random_seed):
     h_fused = (h1 + h2) / 2
     labels = make_kmeans(random_seed).fit(h_fused).labels_
     return h1, h2, h_fused, labels
+
+
+@dataclass(frozen=True)
+class PublicRepresentationEvaluation:
+    """Independent K-means assignment and external metrics for one latent space."""
+
+    labels: np.ndarray
+    metrics: ExternalMetrics
+
+
+def evaluate_public_representations(
+    h_view1: np.ndarray,
+    h_view2: np.ndarray,
+    h_fused: np.ndarray,
+    true_labels: np.ndarray,
+    random_seed: int,
+) -> dict[str, PublicRepresentationEvaluation]:
+    """Evaluate View1, View2, and fused embeddings without sharing assignments."""
+
+    representations = {
+        "view1": np.asarray(h_view1),
+        "view2": np.asarray(h_view2),
+        "fused": np.asarray(h_fused),
+    }
+    evaluations = {}
+    for name, representation in representations.items():
+        labels = make_kmeans(random_seed).fit(representation).labels_
+        metrics = compute_external_metrics(
+            true_labels,
+            labels,
+            n_clusters=n_clusters,
+        )
+        evaluations[name] = PublicRepresentationEvaluation(labels, metrics)
+    return evaluations
 
 
 def _cluster_sizes(labels):
@@ -1192,6 +1563,7 @@ def train(
     final_view1_path=None,
     final_view2_path=None,
     assignments_path=None,
+    return_run_metrics=False,
 ):
     train_start_time = time.time() if time_start is None else time_start
     if any(
@@ -1205,13 +1577,20 @@ def train(
         raise ValueError('MvDEC training settings do not match its protocol contract.')
     greedy_index = greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
-    max_refinement_epochs = validate_max_refinement_epochs(
-        max_refinement_epochs
+    max_refinement_epochs = validate_protocol_max_refinement_epochs(
+        protocol,
+        max_refinement_epochs,
     )
     progress_interval = validate_progress_interval(progress_interval)
-    batches_per_epoch = number_of_batches(len(x), batch_size)
-    kmeans_refresh_interval = batches_per_epoch
-    max_training_steps = max_refinement_epochs * batches_per_epoch
+    schedule = resolve_refinement_schedule(
+        protocol,
+        len(x),
+        batch_size,
+        max_refinement_epochs,
+    )
+    batches_per_epoch = schedule.batches_per_epoch
+    kmeans_refresh_interval = schedule.kmeans_refresh_interval
+    max_training_steps = schedule.max_training_steps
     batch_rng = np.random.default_rng(random_seed)
     experiment_tag = (
         f'{protocol.protocol_id}_{greedy_eigen_direction}_eigen_{greedy_target_mode}'
@@ -1244,8 +1623,10 @@ def train(
     acc = np.nan
     nmi = np.nan
     index = 0
-    stop_reason = 'max_epochs_reached'
+    kmeans_n_init = KMEANS_N_INIT
+    stop_reason = "max_epochs_reached"
     refinement_epochs_completed = 0
+    training_steps_completed = 0
     epoch_batch_losses = []
     last_epoch_loss_means = None
     assignment = np.array([-1] * len(x))
@@ -1255,7 +1636,12 @@ def train(
 
     if raw_x is not None:
         raw_kmeans = make_kmeans(random_seed).fit(raw_x)
-        raw_metric_str, _ = _metric_for_labels(raw_x, raw_kmeans.labels_, y=y)
+        raw_metric_str, _ = _training_metric_for_labels(
+            raw_x,
+            raw_kmeans.labels_,
+            y,
+            protocol,
+        )
         _log_training_phase(
             phase='baseline_raw_input',
             space='x_raw',
@@ -1270,7 +1656,12 @@ def train(
         )
 
     input_kmeans = make_kmeans(random_seed).fit(x)
-    input_metric_str, _ = _metric_for_labels(x, input_kmeans.labels_, y=y)
+    input_metric_str, _ = _training_metric_for_labels(
+        x,
+        input_kmeans.labels_,
+        y,
+        protocol,
+    )
     input_phase = 'baseline_scaled_input' if raw_x is not None else 'baseline_raw_input'
     input_space = _preprocessing_input_space(preprocessing_metadata)
     _log_training_phase(
@@ -1293,11 +1684,17 @@ def train(
         )
         if log_paper_step_checkpoint:
             epoch_batch_losses = []
-            epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
+            if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
+                epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
             view1_output = model1(x).numpy()
             view2_output = model2(x).numpy()
             H = fused_latent_embedding(view1_output, view2_output)
-            ans_kmeans = make_kmeans(random_seed).fit(H)
+            checkpoint_kmeans_n_init = kmeans_n_init
+            ans_kmeans = make_kmeans(
+                random_seed,
+                n_init=checkpoint_kmeans_n_init,
+            ).fit(H)
+            kmeans_n_init = next_kmeans_n_init(protocol, ans_kmeans)
 
             U = ans_kmeans.cluster_centers_
             assignment_new = ans_kmeans.labels_
@@ -1326,27 +1723,38 @@ def train(
                 greedy_index,
             )
             eigen_log_fields = {
-                'greedy_eigen_direction': greedy_eigen_direction,
-                'greedy_eigen_index': selected_eigen_position,
-                'greedy_eigenvalue': selected_eigenvalue,
-                'greedy_target_mode': greedy_target_mode,
-                'kmeans_n_init': KMEANS_N_INIT,
-                'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
-                'refinement_batching_policy': REFINEMENT_BATCHING_POLICY,
-                'batches_per_epoch': batches_per_epoch,
-                'lambda_kmeans': lambda_kmeans,
-                'lambda_greedy': lambda_greedy,
+                "greedy_eigen_direction": greedy_eigen_direction,
+                "greedy_eigen_index": selected_eigen_position,
+                "greedy_eigenvalue": selected_eigenvalue,
+                "greedy_target_mode": greedy_target_mode,
+                "kmeans_n_init": checkpoint_kmeans_n_init,
+                "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
+                "refinement_batching_policy": (protocol.refinement_batching_policy),
+                "batches_per_epoch": batches_per_epoch,
+                "lambda_kmeans": lambda_kmeans,
+                "lambda_greedy": lambda_greedy,
             }
+            if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+                eigen_log_fields["next_kmeans_n_init"] = kmeans_n_init
             loss = np.round(_loss_scalar(loss_value), 5)
-            metric_str, metric_value = _metric_for_labels(H, assignment, y=y)
-            if y is not None:
+            metric_str, metric_value = _training_metric_for_labels(
+                H,
+                assignment,
+                y,
+                protocol,
+            )
+            if y is not None and metric_value is not None:
                 acc, nmi = metric_value
             else:
                 silhouette = metric_value
+            checkpoint = ite // kmeans_refresh_interval
+            checkpoint_unit = (
+                "epoch"
+                if protocol.kmeans_refresh_policy == KMEANS_REFRESH_POLICY
+                else "checkpoint"
+            )
             paper_step_suffix = (
-                'pre_refine'
-                if ite == 0
-                else f'refine_epoch_{ite // kmeans_refresh_interval}'
+                "pre_refine" if ite == 0 else f"refine_{checkpoint_unit}_{checkpoint}"
             )
             _log_training_phase(
                 phase=f'paper_step4_to_7_common_{paper_step_suffix}',
@@ -1362,19 +1770,20 @@ def train(
                 log_path=training_log_path,
                 print_console=False,
             )
-            refinement_epoch = ite // kmeans_refresh_interval
-            if refinement_epoch == 0 or refinement_epoch % progress_interval == 0:
+            if checkpoint == 0 or checkpoint % progress_interval == 0:
                 print(
-                    f'progress:refinement; dataset:{ds_name}; '
-                    f'epoch:{refinement_epoch}/{max_refinement_epochs}; '
-                    f'{metric_str}; changed:{n_change_assignment}/{len(x)}; '
-                    f'elapsed:{time.time() - train_start_time:.1f}s',
+                    f"progress:refinement; dataset:{ds_name}; "
+                    f"{checkpoint_unit}:{checkpoint}/"
+                    f"{max_training_steps // kmeans_refresh_interval}; "
+                    f"{metric_str}; changed:{n_change_assignment}/{len(x)}; "
+                    f"elapsed:{time.time() - train_start_time:.1f}s",
                     flush=True,
                 )
-            greedy_metric_str, _ = _metric_for_labels(
+            greedy_metric_str, _ = _training_metric_for_labels(
                 H_vt_greedy_target,
                 assignment,
-                y=y,
+                y,
+                protocol,
             )
             _log_training_phase(
                 phase=f'paper_step8_greedy_target_Yprime_{paper_step_suffix}',
@@ -1392,9 +1801,17 @@ def train(
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
             stop_reason = 'converged_assignment'
-            refinement_epochs_completed = ite // kmeans_refresh_interval
+            refinement_epochs_completed = (
+                ite // batches_per_epoch
+                if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+                else ite // kmeans_refresh_interval
+            )
+            training_steps_completed = ite
             break
-        idx = epoch_batches[index]
+        if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
+            idx = epoch_batches[index]
+        else:
+            idx = sequential_release_batch_indices(len(x), batch_size, ite)
         temp = assignment[idx]
         x_batch = tf.convert_to_tensor(x[idx], dtype=tf.float32)
         y_true_tensor = None
@@ -1410,53 +1827,79 @@ def train(
             y_pred2 = model2(x_batch)
             h_pred = fused_latent_embedding(y_pred1, y_pred2)
             y_pred_cluster = tf.matmul(h_pred, V_tensor)
-            orthonormal_residual = tf.matmul(h_pred - U_batch_tensor, V_tensor)
-            reconstruction_loss_value = tf.reduce_mean(
-                squared_euclidean_per_sample(
-                    x_batch,
-                    reconstruction_output(y_pred1),
+            if protocol.refinement_objective == JOINT_REFINEMENT_OBJECTIVE:
+                orthonormal_residual = tf.matmul(
+                    h_pred - U_batch_tensor,
+                    V_tensor,
                 )
-                + squared_euclidean_per_sample(
-                    x_batch,
-                    reconstruction_output(y_pred2),
+                reconstruction_loss_value = tf.reduce_mean(
+                    squared_euclidean_per_sample(
+                        x_batch,
+                        reconstruction_output(y_pred1),
+                    )
+                    + squared_euclidean_per_sample(
+                        x_batch,
+                        reconstruction_output(y_pred2),
+                    )
                 )
-            )
-            kmeans_loss_value = tf.reduce_mean(
-                squared_euclidean_per_sample(U_batch_tensor, h_pred)
-            )
-            orthonormal_loss_value = tf.reduce_mean(
-                squared_euclidean_per_sample(
-                    tf.zeros_like(orthonormal_residual),
-                    orthonormal_residual,
+                kmeans_loss_value = tf.reduce_mean(
+                    squared_euclidean_per_sample(U_batch_tensor, h_pred)
                 )
-            )
-            if greedy_target_mode == 'selected_dimension_only':
-                greedy_selected_loss_value = selected_direction_greedy_loss(
-                    y_pred_cluster,
-                    U_vt_batch_tensor,
-                    greedy_index,
+                orthonormal_loss_value = tf.reduce_mean(
+                    squared_euclidean_per_sample(
+                        tf.zeros_like(orthonormal_residual),
+                        orthonormal_residual,
+                    )
                 )
-                greedy_nonselected_loss_value = tf.zeros_like(
-                    greedy_selected_loss_value
+                if greedy_target_mode == "selected_dimension_only":
+                    greedy_selected_loss_value = selected_direction_greedy_loss(
+                        y_pred_cluster,
+                        U_vt_batch_tensor,
+                        greedy_index,
+                    )
+                    greedy_nonselected_loss_value = tf.zeros_like(
+                        greedy_selected_loss_value
+                    )
+                else:
+                    (
+                        greedy_selected_loss_value,
+                        greedy_nonselected_loss_value,
+                    ) = greedy_loss_components(
+                        y_true_tensor,
+                        y_pred_cluster,
+                        greedy_index,
+                    )
+                greedy_loss_value = (
+                    greedy_selected_loss_value + greedy_nonselected_loss_value
                 )
-            else:
+                loss_value = (
+                    lambda_reconstruction * reconstruction_loss_value
+                    + lambda_kmeans * kmeans_loss_value
+                    + lambda_orthonormal * orthonormal_loss_value
+                    + lambda_greedy * greedy_loss_value
+                )
+            elif protocol.refinement_objective == RELEASE_REFINEMENT_OBJECTIVE:
+                reconstruction_loss_value = tf.constant(0.0)
+                kmeans_loss_value = tf.constant(0.0)
+                orthonormal_loss_value = tf.constant(0.0)
                 (
                     greedy_selected_loss_value,
                     greedy_nonselected_loss_value,
-                ) = greedy_loss_components(
+                ) = release_greedy_loss_components(
                     y_true_tensor,
                     y_pred_cluster,
                     greedy_index,
                 )
-            greedy_loss_value = (
-                greedy_selected_loss_value + greedy_nonselected_loss_value
-            )
-            loss_value = (
-                lambda_reconstruction * reconstruction_loss_value
-                + lambda_kmeans * kmeans_loss_value
-                + lambda_orthonormal * orthonormal_loss_value
-                + lambda_greedy * greedy_loss_value
-            )
+                greedy_loss_value = tf.keras.losses.mse(
+                    y_true_tensor,
+                    y_pred_cluster,
+                )
+                loss_value = lambda_greedy * greedy_loss_value
+            else:
+                raise ValueError(
+                    "Unsupported refinement objective: "
+                    f"{protocol.refinement_objective!r}."
+                )
         trainable_variables = model1.trainable_variables + model2.trainable_variables
         grads = tape.gradient(loss_value, trainable_variables)
         optimizer.apply_gradients(zip(grads, trainable_variables, strict=False))
@@ -1474,6 +1917,7 @@ def train(
                 ),
             }
         )
+        training_steps_completed = ite + 1
         if log_step9_end_of_epoch:
             refinement_epoch = (ite + 1) // kmeans_refresh_interval
             last_epoch_loss_means = mean_epoch_losses(epoch_batch_losses)
@@ -1489,14 +1933,25 @@ def train(
                 view1_output_after_update,
                 view2_output_after_update,
             )
-            after_update_metric_str, _ = _metric_for_labels(
+            after_update_metric_str, _ = _training_metric_for_labels(
                 H_after_update,
                 assignment,
-                y=y,
+                y,
+                protocol,
             )
+            if protocol.kmeans_refresh_policy == KMEANS_REFRESH_POLICY:
+                phase_name = f"paper_step9_after_full_epoch_{refinement_epoch}"
+                metric_scope = "full_dataset_after_epoch"
+                loss_scope = "epoch_mean"
+            else:
+                phase_name = (
+                    f"paper_step9_after_release_update_window_{refinement_epoch}"
+                )
+                metric_scope = "full_dataset_after_release_update_window"
+                loss_scope = "release_update_window_mean"
             _log_training_phase(
-                phase=f'paper_step9_after_full_epoch_{refinement_epoch}',
-                space='H_fused_latent_same_labels',
+                phase=phase_name,
+                space="H_fused_latent_same_labels",
                 metric_str=after_update_metric_str,
                 loss=(
                     f'total:{last_epoch_loss_means["total"]:.5f}, '
@@ -1520,12 +1975,12 @@ def train(
                 train_start_time=train_start_time,
                 extra_fields={
                     **eigen_log_fields,
-                    'refinement_epoch': refinement_epoch,
-                    'step9_metric_scope': 'full_dataset_after_epoch',
-                    'step9_loss_scope': 'epoch_mean',
-                    'step9_loss_batches': len(epoch_batch_losses),
-                    'step9_loss_samples': sum(
-                        losses['sample_count'] for losses in epoch_batch_losses
+                    "refinement_epoch": refinement_epoch,
+                    "step9_metric_scope": metric_scope,
+                    "step9_loss_scope": loss_scope,
+                    "step9_loss_batches": len(epoch_batch_losses),
+                    "step9_loss_samples": sum(
+                        losses["sample_count"] for losses in epoch_batch_losses
                     ),
                 },
                 file_name=train_log_name,
@@ -1533,10 +1988,12 @@ def train(
                 print_console=False,
             )
 
-        index = (index + 1) % batches_per_epoch
+        if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
+            index = (index + 1) % batches_per_epoch
 
-    if stop_reason == 'max_epochs_reached':
-        refinement_epochs_completed = max_refinement_epochs
+    if stop_reason == "max_epochs_reached":
+        training_steps_completed = max_training_steps
+        refinement_epochs_completed = training_steps_completed // batches_per_epoch
     resolved_final_view1_path = (
         Path(final_view1_path)
         if final_view1_path is not None
@@ -1549,46 +2006,103 @@ def train(
     )
     model1.save_weights(resolved_final_view1_path)
     model2.save_weights(resolved_final_view2_path)
-    stop_log_str = (
-        f'phase:training_stop; stop_reason:{stop_reason}; '
-        f'refinement_epochs_completed:{refinement_epochs_completed}; '
-        f'max_refinement_epochs:{max_refinement_epochs}; '
-        f'time:{time.time() - train_start_time:.3f}'
-    )
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        stop_log_str = (
+            f"phase:training_stop; stop_reason:{stop_reason}; "
+            f"training_steps_completed:{training_steps_completed}; "
+            f"max_training_steps:{max_training_steps}; "
+            f"time:{time.time() - train_start_time:.3f}"
+        )
+    else:
+        stop_log_str = (
+            f"phase:training_stop; stop_reason:{stop_reason}; "
+            f"refinement_epochs_completed:{refinement_epochs_completed}; "
+            f"max_refinement_epochs:{max_refinement_epochs}; "
+            f"time:{time.time() - train_start_time:.3f}"
+        )
     print(stop_log_str)
     if training_log_path is not None:
         append_run_log(Path(training_log_path), stop_log_str.split(';'))
     else:
         log_csv(stop_log_str.split(';'), file_name=train_log_name)
 
-    h1, h2, H, final_assignment = recompute_final_clustering(
-        model1,
-        model2,
-        x,
-        random_seed,
-    )
+    view1_output = model1(x).numpy()
+    view2_output = model2(x).numpy()
+    h1 = latent_embedding(view1_output)
+    h2 = latent_embedding(view2_output)
+    H = fused_latent_embedding(view1_output, view2_output)
+    representation_evaluations = None
+    if y is not None and protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        representation_evaluations = evaluate_public_representations(
+            h1,
+            h2,
+            H,
+            y,
+            random_seed,
+        )
+        final_assignment = representation_evaluations["fused"].labels
+    else:
+        final_assignment = make_kmeans(random_seed).fit(H).labels_
     final_n_change_assignment = count_aligned_assignment_changes(
         assignment,
         final_assignment,
     )
     assignment = final_assignment
-    metric_str, final_metric = _metric_for_labels(H, assignment, y=y)
+    if representation_evaluations is not None:
+        fused_metrics = representation_evaluations["fused"].metrics
+        metric_str = f"acc, nmi = {fused_metrics.acc, fused_metrics.nmi}"
+        final_metric = (fused_metrics.acc, fused_metrics.nmi)
+    else:
+        metric_str, final_metric = _metric_for_labels(H, assignment, y=y)
     artifact_score = float(silhouette_score(H, assignment))
     external_metrics = None
     if y is None:
         silhouette = final_metric
     else:
         acc, nmi = final_metric
-        external_metrics = compute_external_metrics(
-            y,
-            assignment,
-            n_clusters=n_clusters,
+        external_metrics = (
+            representation_evaluations["fused"].metrics
+            if representation_evaluations is not None
+            else compute_external_metrics(
+                y,
+                assignment,
+                n_clusters=n_clusters,
+            )
         )
     final_phase = (
         'final_recomputed_artifact'
         if y is None and orig_idx is not None
         else 'final_recomputed_state'
     )
+    final_log_fields = {
+        "protocol_id": protocol.protocol_id,
+        "greedy_eigen_direction": greedy_eigen_direction,
+        "greedy_eigen_index": (
+            hidden_units - 1 if greedy_eigen_direction == "largest" else 0
+        ),
+        "greedy_target_mode": greedy_target_mode,
+        "lambda_kmeans": lambda_kmeans,
+        "lambda_greedy": lambda_greedy,
+        "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
+        "batches_per_epoch": batches_per_epoch,
+        "stop_reason": stop_reason,
+        "refinement_epochs_completed": refinement_epochs_completed,
+    }
+    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        final_log_fields.update(
+            {
+                "training_steps_completed": training_steps_completed,
+                "max_training_steps": max_training_steps,
+                "loss_scope": "last_completed_release_update_window_mean",
+            }
+        )
+    else:
+        final_log_fields.update(
+            {
+                "max_refinement_epochs": max_refinement_epochs,
+                "loss_scope": "last_completed_epoch_mean",
+            }
+        )
     _log_training_phase(
         phase=final_phase,
         space='H_fused_latent',
@@ -1598,22 +2112,7 @@ def train(
         labels=assignment,
         train_start_time=train_start_time,
         input_space_reference=x if y is None else None,
-        extra_fields={
-            'protocol_id': protocol.protocol_id,
-            'greedy_eigen_direction': greedy_eigen_direction,
-            'greedy_eigen_index': (
-                hidden_units - 1 if greedy_eigen_direction == 'largest' else 0
-            ),
-            'greedy_target_mode': greedy_target_mode,
-            'lambda_kmeans': lambda_kmeans,
-            'lambda_greedy': lambda_greedy,
-            'kmeans_refresh_policy': KMEANS_REFRESH_POLICY,
-            'batches_per_epoch': batches_per_epoch,
-            'stop_reason': stop_reason,
-            'refinement_epochs_completed': refinement_epochs_completed,
-            'max_refinement_epochs': max_refinement_epochs,
-            'loss_scope': 'last_completed_epoch_mean',
-        },
+        extra_fields=final_log_fields,
         file_name=train_log_name,
         log_path=training_log_path,
     )
@@ -1666,7 +2165,11 @@ def train(
             h_fused=H,
             labels=assignment,
             score=artifact_score,
-            iteration=refinement_epochs_completed,
+            iteration=(
+                training_steps_completed
+                if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+                else refinement_epochs_completed
+            ),
             orig_idx=orig_idx,
             feature_columns=feature_columns,
             random_seed=random_seed,
@@ -1680,14 +2183,29 @@ def train(
             true_labels=y,
             source_sha256=source_sha256,
             external_metrics=external_metrics,
+            representation_external_metrics=(
+                {
+                    name: evaluation.metrics
+                    for name, evaluation in representation_evaluations.items()
+                }
+                if representation_evaluations is not None
+                else None
+            ),
+            training_steps_completed=training_steps_completed,
             protocol=protocol,
             run_id=run_id,
             config_hash=config_hash,
         )
 
     if y is not None:
-        return acc, nmi
-    return silhouette
+        run_metrics = {"acc": float(acc), "nmi": float(nmi)}
+        if representation_evaluations is not None:
+            for name, evaluation in representation_evaluations.items():
+                run_metrics[f"{name}_acc"] = float(evaluation.metrics.acc)
+                run_metrics[f"{name}_nmi"] = float(evaluation.metrics.nmi)
+        return run_metrics if return_run_metrics else (acc, nmi)
+    run_metrics = {"silhouette": float(silhouette)}
+    return run_metrics if return_run_metrics else silhouette
 
 
 if __name__ == '__main__':
@@ -1707,8 +2225,8 @@ if __name__ == '__main__':
         choices=PROTOCOL_IDS,
         default=PRIMARY_PROTOCOL_ID,
         help=(
-            'Immutable primary DEKM-consistent protocol, or custom for an '
-            'explicit loss/eigen/target ablation.'
+            "Immutable DEKM-consistent protocol, separate public reproduction "
+            "contract, or custom for an explicit ablation."
         ),
     )
     parser.add_argument(
@@ -1740,13 +2258,16 @@ if __name__ == '__main__':
         '--max-refinement-epochs',
         type=int,
         default=MAX_REFINEMENT_EPOCHS,
-        help='Safety cap for full-epoch refinement cycles.',
+        help=(
+            "Safety cap for primary/custom full-epoch refinement. The public "
+            "reproduction protocol fixes 14,000 updates."
+        ),
     )
     parser.add_argument(
         '--progress-interval',
         type=int,
         default=DEFAULT_PROGRESS_INTERVAL,
-        help='Print one compact progress heartbeat every N epochs.',
+        help="Print one heartbeat every N epochs or release checkpoints.",
     )
     parser.add_argument(
         '--preprocessing',
@@ -1815,7 +2336,10 @@ if __name__ == '__main__':
     )
     lambda_kmeans = protocol.kmeans_weight
     lambda_greedy = protocol.greedy_weight
-    validate_max_refinement_epochs(args.max_refinement_epochs)
+    validate_protocol_max_refinement_epochs(
+        protocol,
+        args.max_refinement_epochs,
+    )
     validate_progress_interval(args.progress_interval)
     if args.ds_name is None or args.ds_name not in [
         'AIRPOLLUTION',
@@ -1827,6 +2351,7 @@ if __name__ == '__main__':
         ds_name = 'AIRPOLLUTION'
     else:
         ds_name = args.ds_name
+    validate_protocol_dataset_scope(protocol, ds_name)
 
     if ds_name in UNLABELED_DATASETS:
         input_shape = UNLABELED_DATASETS[ds_name]['input_shape']
@@ -1962,17 +2487,19 @@ if __name__ == '__main__':
             },
         }
         write_run_manifest(run_paths.manifest, manifest_base)
-        ds_xx = make_pretraining_dataset(x, run_seed)
+        ds_xx = make_pretraining_dataset(x, run_seed, protocol=protocol)
         try:
             train_base_view1(
                 ds_xx,
                 args.progress_interval,
                 weights_path=run_paths.pretrain_view1,
+                protocol=protocol,
             )
             train_base_view2(
                 ds_xx,
                 args.progress_interval,
                 weights_path=run_paths.pretrain_view2,
+                protocol=protocol,
             )
             metric = train(
                 x,
@@ -1998,6 +2525,7 @@ if __name__ == '__main__':
                 final_view1_path=run_paths.final_view1,
                 final_view2_path=run_paths.final_view2,
                 assignments_path=run_paths.assignments,
+                return_run_metrics=True,
             )
         except Exception as error:
             write_run_manifest(
@@ -2016,18 +2544,20 @@ if __name__ == '__main__':
             raise
         run_metrics.append(metric)
         if y is None:
-            metrics_payload = {'silhouette': float(metric)}
+            metrics_payload = metric
             run_str = (
-                f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
-                f'run_id:{run_paths.run_id}; '
-                f'protocol_id:{protocol.protocol_id}; '
-                f'greedy_eigen_direction:{args.greedy_eigen_direction}; '
-                f'greedy_target_mode:{args.greedy_target_mode}; '
-                f'silhouette:{metric}; time:{time.time() - time_start:.3f}'
+                f"run {run_index + 1}/{args.runs}; seed:{run_seed}; "
+                f"run_id:{run_paths.run_id}; "
+                f"protocol_id:{protocol.protocol_id}; "
+                f"greedy_eigen_direction:{args.greedy_eigen_direction}; "
+                f"greedy_target_mode:{args.greedy_target_mode}; "
+                f"silhouette:{metric['silhouette']}; "
+                f"time:{time.time() - time_start:.3f}"
             )
         else:
-            acc, nmi = metric
-            metrics_payload = {'acc': float(acc), 'nmi': float(nmi)}
+            metrics_payload = metric
+            acc = metric["acc"]
+            nmi = metric["nmi"]
             run_str = (
                 f'run {run_index + 1}/{args.runs}; seed:{run_seed}; '
                 f'run_id:{run_paths.run_id}; '
@@ -2036,6 +2566,13 @@ if __name__ == '__main__':
                 f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
             )
+            if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+                run_str += (
+                    f"; view1_acc:{metric['view1_acc']}; "
+                    f"view1_nmi:{metric['view1_nmi']}; "
+                    f"view2_acc:{metric['view2_acc']}; "
+                    f"view2_nmi:{metric['view2_nmi']}"
+                )
         print(run_str)
         append_run_log(run_paths.training_log, run_str.split(';'))
         output_hashes = {
@@ -2064,7 +2601,9 @@ if __name__ == '__main__':
         )
 
     if ds_name in UNLABELED_DATASETS:
-        avg_silhouette = float(np.nanmean(np.asarray(run_metrics, dtype=float)))
+        avg_silhouette = float(
+            np.nanmean([metrics["silhouette"] for metrics in run_metrics])
+        )
         avg_str = (
             f'average over {args.runs} runs; silhouette:{avg_silhouette:.5f}; '
             f'protocol_id:{protocol.protocol_id}; '
@@ -2073,9 +2612,8 @@ if __name__ == '__main__':
             f'time:{time.time() - time_all_start:.3f}'
         )
     else:
-        metrics = np.asarray(run_metrics, dtype=float)
-        avg_acc = float(np.nanmean(metrics[:, 0]))
-        avg_nmi = float(np.nanmean(metrics[:, 1]))
+        avg_acc = float(np.nanmean([metrics["acc"] for metrics in run_metrics]))
+        avg_nmi = float(np.nanmean([metrics["nmi"] for metrics in run_metrics]))
         avg_str = (
             f'average over {args.runs} runs; acc:{avg_acc:.5f}; nmi:{avg_nmi:.5f}; '
             f'protocol_id:{protocol.protocol_id}; '

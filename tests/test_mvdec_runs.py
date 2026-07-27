@@ -138,7 +138,16 @@ def test_summary_frames_exclude_failed_manifests(tmp_path):
                 "artifact": str(tmp_path / "42.pkl"),
                 "assignments": str(tmp_path / "42.csv"),
             },
-            "metrics": {"acc": 0.8, "nmi": 0.7},
+            "metrics": {
+                "acc": 0.8,
+                "nmi": 0.7,
+                "view1_acc": 0.75,
+                "view1_nmi": 0.65,
+                "view2_acc": 0.7,
+                "view2_nmi": 0.6,
+                "fused_acc": 0.8,
+                "fused_nmi": 0.7,
+            },
         },
         {
             **shared,
@@ -156,6 +165,9 @@ def test_summary_frames_exclude_failed_manifests(tmp_path):
     assert summary.loc[0, "completed_runs"] == 1
     assert summary.loc[0, "failed_runs"] == 1
     assert summary.loc[0, "acc_mean"] == pytest.approx(0.8)
+    assert summary.loc[0, "view1_acc_mean"] == pytest.approx(0.75)
+    assert summary.loc[0, "view2_nmi_mean"] == pytest.approx(0.6)
+    assert summary.loc[0, "fused_acc_mean"] == pytest.approx(0.8)
 
 
 def test_manifest_loader_rejects_tampered_config(tmp_path):

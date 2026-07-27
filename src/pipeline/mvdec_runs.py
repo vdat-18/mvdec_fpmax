@@ -263,7 +263,17 @@ def build_summary_frames(
             manifest.get("status") == "failed" for manifest in manifests
         ),
     }
-    for metric_name in ("silhouette", "acc", "nmi"):
+    for metric_name in (
+        "silhouette",
+        "acc",
+        "nmi",
+        "view1_acc",
+        "view1_nmi",
+        "view2_acc",
+        "view2_nmi",
+        "fused_acc",
+        "fused_nmi",
+    ):
         if metric_name in runs_frame:
             summary_record[f"{metric_name}_mean"] = runs_frame[metric_name].mean()
             summary_record[f"{metric_name}_std"] = (

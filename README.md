@@ -225,6 +225,35 @@ uv run python src/representation_learning/MVDEC_dense.py REUTERS \
   --public-output-dir output/public_benchmark/mvdec
 ```
 
+For the separate MvDEC 2025 public reproduction experiment, first validate
+seed 42 only:
+
+```bash
+PYTHONHASHSEED=42 uv run --no-sync python -u \
+  src/representation_learning/MVDEC_dense.py REUTERS \
+  --runs 1 \
+  --seed 42 \
+  --protocol mvdec_2025_public_reproduction_v1 \
+  --progress-interval 100 \
+  --dataset-root external_repos/DEKM/datasets \
+  --public-output-dir output/public_benchmark/mvdec
+```
+
+This immutable protocol keeps the MvDEC architecture and encoder-average
+fusion, but uses the historical/released optimization behavior: pretraining
+MSE averaged over dimensions, sequential batches, K-Means refresh every 10
+updates, 14,000 maximum updates, dynamic `n_init = 2 * previous_n_iter`, frozen
+greedy targets, and the last/largest eigen direction. It is a documented
+reproduction contract, not a claim that the internally inconsistent 2025 paper
+specifies every optimization detail. Ground-truth labels are deferred until the
+final independent View1/View2/fused evaluation. Do not start seeds 43/44 until
+the seed-42 artifact has passed `mvdec-audit-runs` and its metrics are reviewed.
+
+The isolated output directory is
+`output/public_benchmark/mvdec/reuters/mvdec_2025_public_reproduction_v1/<config_hash_12>/seed_42/`.
+Its artifact and manifest retain independent View1, View2, and fused ACC/NMI;
+`acc` and `nmi` remain aliases of the fused metrics for compatibility.
+
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
 `--data-path`; the CSV is a row manifest, not a regenerated feature dataset:

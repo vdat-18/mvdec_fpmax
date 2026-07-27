@@ -129,8 +129,7 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
     assert mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION") == "minmax"
     assert mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION", "none") == "none"
     assert (
-        mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION", "standard")
-        == "standard"
+        mvdec.resolve_unlabeled_scaling_method("AIRPOLLUTION", "standard") == "standard"
     )
     assert mvdec._preprocessing_input_space(None) == "x"
     assert mvdec._preprocessing_input_space({"method": "minmax"}) == "x_minmax"
@@ -164,9 +163,15 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
         preprocessing_metadata=None,
     )
     assert (
-        run_config["deterministic_runtime_policy"]
-        == mvdec.DETERMINISTIC_RUNTIME_POLICY
+        run_config["deterministic_runtime_policy"] == mvdec.DETERMINISTIC_RUNTIME_POLICY
     )
+    assert run_config["kmeans_refresh_policy"] == "one_epoch"
+    assert run_config["refinement_batching_policy"] == (
+        "balanced_shuffled_each_epoch"
+    )
+    assert "update_interval" not in run_config
+    assert "max_training_steps" not in run_config
+    assert "kmeans_n_init_policy" not in run_config
     assert mvdec.DEFAULT_GREEDY_EIGEN_DIRECTION == "largest"
     assert mvdec.DEFAULT_GREEDY_TARGET_MODE == "frozen_snapshot"
     assert mvdec.validate_max_refinement_epochs(1400) == 1400
@@ -431,6 +436,16 @@ def test_primary_protocol_is_explicit_and_immutable(monkeypatch):
     assert contract["objective"]["loss_terms"]["L3_scatter_trace"]["optimized"] is False
     assert contract["eigen"]["direction"] == "largest"
     assert contract["greedy_target"]["mode"] == "frozen_snapshot"
+    assert "schedule" not in contract
+    primary_schedule = mvdec.resolve_refinement_schedule(
+        protocol,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+    assert primary_schedule.batches_per_epoch == 39
+    assert primary_schedule.kmeans_refresh_interval == 39
+    assert primary_schedule.max_training_steps == 54_600
     assert (
         mvdec.validate_protocol_assignment_change_tolerance(
             protocol,
@@ -454,6 +469,123 @@ def test_primary_protocol_is_explicit_and_immutable(monkeypatch):
             eigen_direction="largest",
             target_mode="frozen_snapshot",
         )
+
+
+def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+    schedule = mvdec.resolve_refinement_schedule(
+        protocol,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+
+    assert protocol == mvdec.PUBLIC_REPRODUCTION_PROTOCOL
+    assert schedule.batches_per_epoch == 40
+    assert schedule.kmeans_refresh_interval == 10
+    assert schedule.max_training_steps == 14_000
+    assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
+        "objective": "release_greedy_mse_only",
+        "batch_size": 256,
+        "batching_policy": "sequential_release_order",
+        "kmeans_refresh_policy": "fixed_10_updates",
+        "update_interval": 10,
+        "max_training_steps": 14_000,
+        "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
+    }
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+    with pytest.raises(ValueError, match="supports only"):
+        mvdec.validate_protocol_dataset_scope(protocol, "TIKI")
+    with pytest.raises(ValueError, match="fixes refinement"):
+        mvdec.validate_protocol_max_refinement_epochs(protocol, 100)
+
+
+def test_release_batch_order_and_dynamic_kmeans_restarts(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    np.testing.assert_array_equal(
+        mvdec.sequential_release_batch_indices(1000, 256, 0),
+        np.arange(0, 256),
+    )
+    np.testing.assert_array_equal(
+        mvdec.sequential_release_batch_indices(1000, 256, 3),
+        np.arange(768, 1000),
+    )
+    np.testing.assert_array_equal(
+        mvdec.sequential_release_batch_indices(1000, 256, 4),
+        np.arange(0, 256),
+    )
+
+    class FittedKMeans:
+        n_iter_ = 7
+
+    assert (
+        mvdec.next_kmeans_n_init(
+            mvdec.PUBLIC_REPRODUCTION_PROTOCOL,
+            FittedKMeans(),
+        )
+        == 14
+    )
+    assert (
+        mvdec.next_kmeans_n_init(
+            mvdec.PRIMARY_MVDEC_PROTOCOL,
+            FittedKMeans(),
+        )
+        == 100
+    )
+
+
+def test_public_representation_metrics_use_independent_kmeans(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "n_clusters", 2)
+    truth = np.array([0, 0, 1, 1])
+    h_view1 = np.array([[0.0], [0.1], [5.0], [5.1]])
+    h_view2 = np.array([[10.0], [10.1], [-5.0], [-5.1]])
+    h_fused = np.column_stack((h_view1[:, 0], h_view2[:, 0]))
+
+    evaluations = mvdec.evaluate_public_representations(
+        h_view1,
+        h_view2,
+        h_fused,
+        truth,
+        random_seed=42,
+    )
+
+    assert set(evaluations) == {"view1", "view2", "fused"}
+    assert all(evaluation.metrics.acc == 1.0 for evaluation in evaluations.values())
+    assert all(evaluation.metrics.nmi == 1.0 for evaluation in evaluations.values())
+
+
+def test_public_reproduction_defers_ground_truth_until_final(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Ground truth was used during refinement")
+
+    monkeypatch.setattr(mvdec, "compute_external_metrics", fail_if_called)
+    metric_text, metric_value = mvdec._training_metric_for_labels(
+        np.zeros((4, 2)),
+        np.array([0, 0, 1, 1]),
+        np.array([0, 0, 1, 1]),
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL,
+    )
+
+    assert metric_text == "external_metrics = deferred_to_final"
+    assert metric_value is None
+    assert (
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"][
+            "final_evaluation"
+        ]["ground_truth_usage"]
+        == "final_evaluation_only"
+    )
 
 
 def test_custom_protocol_cannot_claim_primary_objective(monkeypatch):
@@ -613,6 +745,100 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     with artifact_path.open("wb") as file:
         pickle.dump(artifact, file)
     with pytest.raises(ValueError, match="immutable protocol"):
+        load_mvdec_result(result_path=artifact_path, data_path=data_path)
+
+
+def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
+    monkeypatch.setattr(mvdec, "input_shape", 2)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    monkeypatch.setattr(mvdec, "n_clusters", 2)
+    monkeypatch.setattr(mvdec, "assignment_change_tolerance", 0.001)
+    shuffled_indices = np.array([2, 0, 3, 1])
+    h_view1 = np.array([[5.0, 5.0], [0.0, 0.0], [5.1, 5.0], [0.1, 0.0]])
+    h_view2 = h_view1 + 0.2
+    labels = np.array([1, 0, 1, 0])
+    truth = labels.copy()
+    metrics = compute_external_metrics(truth, labels, n_clusters=2)
+    representation_metrics = {
+        "view1": metrics,
+        "view2": metrics,
+        "fused": metrics,
+    }
+    artifact_path = tmp_path / "reuters_reproduction.pkl"
+    data_path = tmp_path / "reuters.csv"
+    pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    run_config = {
+        "dataset": "REUTERS",
+        "protocol_contract": mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(
+            0.001
+        ),
+    }
+    config_hash = canonical_config_hash(run_config)
+    run_id = build_run_id(
+        "REUTERS",
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        config_hash,
+        seed=42,
+        run_index=1,
+    )
+
+    mvdec.save_airpollution_mvdec_artifact(
+        artifact_path=artifact_path,
+        h_view1=h_view1,
+        h_view2=h_view2,
+        h_fused=(h_view1 + h_view2) / 2,
+        labels=labels,
+        score=0.5,
+        iteration=30,
+        orig_idx=shuffled_indices,
+        feature_columns=["a", "b"],
+        random_seed=42,
+        greedy_eigen_direction="largest",
+        greedy_target_mode="frozen_snapshot",
+        batches_per_epoch=1,
+        max_refinement_epochs=1400,
+        stop_reason="converged_assignment",
+        refinement_epochs_completed=30,
+        preprocessing_metadata=None,
+        true_labels=truth,
+        source_sha256="e" * 64,
+        external_metrics=metrics,
+        representation_external_metrics=representation_metrics,
+        training_steps_completed=30,
+        protocol=mvdec.PUBLIC_REPRODUCTION_PROTOCOL,
+        run_id=run_id,
+        config_hash=config_hash,
+    )
+    manifest_payload = {
+        "run_id": run_id,
+        "status": "complete",
+        "dataset": "REUTERS",
+        "protocol_id": mvdec.PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        "config_hash": config_hash,
+        "config": run_config,
+        "seed": 42,
+        "paths": {"artifact": str(artifact_path)},
+        "output_sha256": {"artifact": file_sha256(artifact_path)},
+    }
+    write_run_manifest(tmp_path / "manifest.json", manifest_payload)
+
+    loaded = load_mvdec_result(result_path=artifact_path, data_path=data_path)
+
+    assert loaded.raw["view1_acc"] == 1.0
+    assert loaded.raw["view2_nmi"] == 1.0
+    assert loaded.raw["fused_acc"] == loaded.raw["acc"] == 1.0
+    assert loaded.raw["training_steps_completed"] == 30
+
+    with artifact_path.open("rb") as file:
+        artifact = pickle.load(file)
+    artifact["config"]["update_interval"] = 9
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+    manifest_payload["output_sha256"]["artifact"] = file_sha256(artifact_path)
+    write_run_manifest(tmp_path / "manifest.json", manifest_payload)
+    with pytest.raises(ValueError, match="public-reproduction artifact"):
         load_mvdec_result(result_path=artifact_path, data_path=data_path)
 
 

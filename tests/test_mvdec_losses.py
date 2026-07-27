@@ -50,6 +50,29 @@ def test_pretrain_loss_uses_only_reconstruction_tail(monkeypatch):
     np.testing.assert_allclose(loss.numpy(), [9.0, 25.0])
 
 
+def test_release_losses_average_transformed_dimensions(monkeypatch):
+    tensorflow, mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 3)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    y_true = tensorflow.zeros((2, 3))
+    y_pred = tensorflow.constant(
+        [
+            [100.0, 100.0, 1.0, 2.0, 2.0],
+            [200.0, 200.0, 3.0, 4.0, 0.0],
+        ]
+    )
+
+    pretrain_loss = mvdec.release_loss_train_base(y_true, y_pred)
+    selected, nonselected = mvdec.release_greedy_loss_components(
+        tensorflow.zeros((2, 2)),
+        tensorflow.constant([[1.0, 2.0], [3.0, 4.0]]),
+        -1,
+    )
+
+    np.testing.assert_allclose(pretrain_loss.numpy(), [3.0, 25.0 / 3.0])
+    assert float(selected + nonselected) == pytest.approx(7.5)
+
+
 def test_orthonormal_loss_keeps_the_same_squared_distance(monkeypatch):
     tensorflow, mvdec = _load_mvdec(monkeypatch)
     residual = tensorflow.constant([[2.0, 1.0], [-3.0, 4.0]])
@@ -94,9 +117,7 @@ def test_greedy_loss_components_partition_total_loss(
         y_pred,
         eigen_index,
     )
-    total = tensorflow.reduce_mean(
-        mvdec.squared_euclidean_per_sample(y_true, y_pred)
-    )
+    total = tensorflow.reduce_mean(mvdec.squared_euclidean_per_sample(y_true, y_pred))
 
     assert float(selected) == pytest.approx(expected_selected)
     assert float(nonselected) == pytest.approx(expected_nonselected)
