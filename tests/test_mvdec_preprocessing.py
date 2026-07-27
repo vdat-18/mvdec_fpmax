@@ -382,6 +382,28 @@ def test_concatenated_latent_fusion_preserves_tensor_gradients(monkeypatch):
     np.testing.assert_allclose(gradients[1].numpy(), np.ones((1, 2)))
 
 
+def test_l2_normalized_average_balances_view_scale_and_handles_zero(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    view1 = mvdec.tf.Variable([[3.0, 4.0], [0.0, 0.0]], dtype=mvdec.tf.float32)
+    view2 = mvdec.tf.Variable([[0.0, 2.0], [0.0, 0.0]], dtype=mvdec.tf.float32)
+
+    with mvdec.tf.GradientTape() as tape:
+        fused = mvdec.fused_latent_embedding(
+            view1,
+            view2,
+            fusion_contract=mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+        )
+        loss = mvdec.tf.reduce_sum(fused)
+
+    gradients = tape.gradient(loss, [view1, view2])
+
+    np.testing.assert_allclose(fused.numpy()[0], [0.3, 0.9], atol=1e-6)
+    np.testing.assert_allclose(fused.numpy()[1], [0.0, 0.0], atol=1e-6)
+    assert all(gradient is not None for gradient in gradients)
+    assert all(np.isfinite(gradient.numpy()).all() for gradient in gradients)
+
+
 def test_epoch_losses_are_averaged_across_all_batches(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -658,6 +680,40 @@ def test_direct_joint_head_concat_protocol_changes_only_fusion(monkeypatch):
     assert protocol.manifest_contract(0.001)["architecture"] == {
         "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
         "fusion": mvdec.FUSION_ENCODER_CONCATENATE,
+    }
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+
+
+def test_direct_joint_head_l2norm_protocol_changes_only_fusion(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+
+    assert protocol == mvdec.PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL
+    assert protocol.view2_architecture_id == (
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.view2_architecture_id
+    )
+    assert protocol.fusion_contract == (
+        mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE
+    )
+    assert mvdec.protocol_method_name(protocol) == (
+        "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
+    )
+    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
+    )
+    assert protocol.manifest_contract(0.001)["schedule"] == (
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
+    )
+    assert protocol.manifest_contract(0.001)["architecture"] == {
+        "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+        "fusion": mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     }
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
@@ -961,6 +1017,13 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
             "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation",
             "mvdec2025_encoder_concatenate",
+        ),
+        (
+            "PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL",
+            "mvdec_2025_view2_direct_23_split_l2norm_average_v1",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation",
+            "mvdec2025_encoder_l2_normalized_average",
         ),
     ),
 )

@@ -3,9 +3,9 @@
 ## Mục tiêu
 
 Tài liệu này ghi lại ablation có kiểm soát nhằm kiểm tra giả thuyết: kết quả
-REUTERS thấp hơn MvDEC 2025 có phải do vị trí latent của View2 hay không. Đây là
-một chẩn đoán kiến trúc trên một seed, không phải bằng chứng thống kê cuối cùng
-và không thay thế protocol public multi-seed.
+REUTERS thấp hơn MvDEC 2025 có phải do vị trí latent của View2 hoặc phép fusion
+hay không. Đây là chẩn đoán trên một seed, không phải bằng chứng thống kê cuối
+cùng và không thay thế protocol public multi-seed.
 
 Nguồn đối chiếu chính:
 
@@ -16,38 +16,42 @@ Nguồn đối chiếu chính:
 
 Các run được thực hiện trên Kaggle bằng Tesla P100 16 GB, TensorFlow 2.18.0 và
 seed 42. A0/A1 dùng commit `3b8cc0aaf3a51ee66fbb43818accdc544fa43e2c`;
-A2 dùng commit `57e27ddda456f3eda579625107527c8b38822643`. Dataset là release array
+A2 dùng commit `57e27ddda456f3eda579625107527c8b38822643`; A3 dùng commit
+`da5ededbf407f04868ed30ce5f91f3636bf7d0b8`. Dataset là release array
 REUTERS `10,000 x 2,000`, `K=4`, với source SHA-256:
 
 ```text
 427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b
 ```
 
-Hai arm dùng cùng dataset, row order, seed, preprocessing, View1, loss,
+Các arm dùng cùng dataset, row order, seed, preprocessing, loss,
 K-means schedule, stopping tolerance và final evaluation. Protocol contract xác
-nhận `schedule_equal=True` và `objective_equal=True`. Khác biệt chủ đích duy
-nhất về thuật toán là View2 architecture:
+nhận schedule và objective giống nhau. Khác biệt chủ đích được cô lập ở View2
+architecture hoặc fusion:
 
-| Arm | Protocol | Config hash | View2 architecture |
-|---|---|---|---|
-| A0 | `mvdec_2025_public_reproduction_v1` | `cc605fec5c5f` | `mvdec2025_post_skip_latent_bottleneck_v2` |
-| A1 | `mvdec_2025_view2_encoder_bottleneck_v1` | `56a24affdb9e` | `mvdec2025_encoder_bottleneck_skip_decoder_v1` |
-| A2 | `mvdec_2025_view2_direct_23_split_v1` | `ea0b9d5986c9` | `mvdec2025_post_skip_direct_latent_reconstruction_head_v1` |
+| Arm | Protocol | Config hash | View2 architecture | Fusion |
+|---|---|---|---|---|
+| A0 | `mvdec_2025_public_reproduction_v1` | `cc605fec5c5f` | `mvdec2025_post_skip_latent_bottleneck_v2` | average 10D |
+| A1 | `mvdec_2025_view2_encoder_bottleneck_v1` | `56a24affdb9e` | `mvdec2025_encoder_bottleneck_skip_decoder_v1` | average 10D |
+| A2 | `mvdec_2025_view2_direct_23_split_v1` | `ea0b9d5986c9` | `mvdec2025_post_skip_direct_latent_reconstruction_head_v1` | average 10D |
+| A3 | `mvdec_2025_view2_direct_23_split_concat_v1` | `0438065b1101` | `mvdec2025_post_skip_direct_latent_reconstruction_head_v1` | concatenate 20D |
 
 A0 đặt latent 10D sau toàn bộ dense skip decoder. A1 đặt latent 10D ngay sau
 encoder bottleneck 1024D rồi giải mã qua cùng skip decoder. A2 dùng một terminal
 linear head `10 + input_dim`, lấy 10 chiều đầu làm latent và phần còn lại làm
-reconstruction. Do hai view được
+reconstruction. A3 giữ nguyên head của A2 và chỉ thay average bằng concatenate
+hai latent 10D. Do hai view được
 joint-refine thông qua fused embedding, thay View2 có thể làm trajectory và
 final metrics của View1 thay đổi; đó là downstream effect của intervention,
 không phải dấu hiệu trộn config.
 
-Artifact A1 và A2 đều đã qua `mvdec-audit-runs`: `1 complete, 0 failed` cho mỗi
-protocol. Archive tải từ Kaggle có SHA-256:
+Artifact A1, A2 và A3 đều đã qua `mvdec-audit-runs`: `1 complete, 0 failed` cho
+mỗi protocol. Archive tải từ Kaggle có SHA-256:
 
 ```text
 A1: d9cf003a2c18a240823af1b9d30547d7d677c5bab186dfd1f0cfa855529a014c
 A2: e97156fbcad157f8feb7401fc1df027610d73e9b1f9c954a7f50086a118223a7
+A3: d0c9309209992d6d28ec8c14fb7ed67274488954308be1465d5ea1a44f69468c
 ```
 
 ## Kết quả ablation
@@ -88,6 +92,9 @@ phải paired statistical replication.
    thích được kết quả Table 2.
 5. Một seed không đủ kết luận robustness. Tuy nhiên hiệu ứng âm rất lớn trên
    View2 đủ để loại A1/A2 khỏi ứng viên chính trước khi tốn chi phí multi-seed.
+6. A3 cải thiện View2 so với A2 (`ACC +0.0707`, `NMI +0.0252`) nhưng fused ACC
+   không đổi và fused NMI giảm `0.0005`; latent concatenation vì vậy không tạo
+   thêm lợi ích clustering tổng thể.
 
 ## Chẩn đoán paper: View2 và fusion chưa đủ đặc tả
 
@@ -178,7 +185,7 @@ Tên protocol giữ `direct_23_split` theo output `10 + 13 = 23` trong Fig. 2. V
 REUTERS, cùng contract tổng quát tạo joint head `10 + 2,000 = 2,010`; exact
 input/output dimensions và architecture ID được lưu trong config/manifest.
 
-### P1: fusion sensitivity sau khi khóa View2 head - IMPLEMENTED, GPU RUN PENDING
+### P1: fusion sensitivity sau khi khóa View2 head - COMPLETE, NEGATIVE
 
 P0 không giải thích gap, nên protocol sensitivity tiếp theo đã được khóa:
 
@@ -190,8 +197,63 @@ P0 không giải thích gap, nên protocol sensitivity tiếp theo đã được
 Arm concat có fusion contract `mvdec2025_encoder_concatenate`, protocol/config
 hash và output directory riêng. Loader xác minh `h_fused` đúng bằng
 `concatenate(h_view1, h_view2)` và từ chối artifact sai chiều hoặc sai contract.
-Ground truth chỉ dùng ở final evaluation. Kết quả seed 42 chỉ là diagnostic;
-không chọn arm tốt nhất trên test labels rồi báo như confirmatory result.
+Ground truth chỉ dùng ở final evaluation.
+
+| Metric | A2 average 10D | A3 concat 20D | Delta A3-A2 |
+|---|---:|---:|---:|
+| View1 ACC | 0.7621 | 0.7621 | 0.0000 |
+| View1 NMI | 0.6000 | 0.5998 | -0.0002 |
+| View2 ACC | 0.3701 | 0.4408 | +0.0707 |
+| View2 NMI | 0.0943 | 0.1194 | +0.0252 |
+| Fused ACC | 0.7621 | 0.7621 | 0.0000 |
+| Fused NMI | 0.6002 | 0.5998 | -0.0005 |
+
+Sau Hungarian label alignment, A2 và A3 chỉ khác 166/10,000 assignments
+(`1.66%`), với `ARI=0.9541` và NMI giữa hai assignment vectors `0.9243`. Vì vậy
+concat thay đổi geometry một phần và cải thiện View2 standalone, nhưng fused
+clustering vẫn gần như giữ nguyên và không tiến gần Table 2. Không mở rộng seed
+43/44 và không chọn A3 làm main protocol.
+
+### Chẩn đoán scale sau P1
+
+View2 không chỉ có chất lượng standalone thấp mà còn có scale nhỏ hơn View1 rất
+lớn:
+
+| Arm | Mean row norm View1 | Mean row norm View2 | Total variance View1 | Total variance View2 |
+|---|---:|---:|---:|---:|
+| A2 average | 0.7052 | 0.0460 | 0.3889 | 0.000893 |
+| A3 concat | 0.6827 | 0.0286 | 0.3630 | 0.000522 |
+
+Với A2, fused assignments gần như trùng View1 (`ARI=0.9997`); với A3, chúng
+trùng hoàn toàn (`ARI=1.0000`). Ngược lại, ARI giữa fused và View2 chỉ là
+`0.0050` ở A2 và `0.0524` ở A3. Đây là bằng chứng trực tiếp rằng View1 chi phối
+fusion do chênh lệch geometry/scale, không chỉ vì lựa chọn average hay concat.
+
+Thí nghiệm hợp lý tiếp theo, nếu tiếp tục chẩn đoán, là một protocol
+**scale-balanced latent fusion** có identity riêng. Cần preregister phép chuẩn
+hóa không dùng labels trước khi chạy; không được chọn giữa nhiều normalization
+bằng ACC/NMI trên cùng test set.
+
+### P2: L2-normalized latent average - IMPLEMENTED, GPU RUN PENDING
+
+Protocol preregistered duy nhất cho scale sensitivity là:
+
+```text
+mvdec_2025_view2_direct_23_split_l2norm_average_v1
+```
+
+Nó giữ nguyên A2 direct View2 head, objective, schedule, seed và phép average,
+nhưng thay fusion bằng:
+
+```text
+h_fused = (L2_normalize(h1) + L2_normalize(h2)) / 2
+```
+
+Normalization áp dụng độc lập theo từng sample, không dùng labels và không fit
+thống kê toàn dataset. Zero vector giữ nguyên zero. Protocol/config hash,
+artifact fusion contract và output directory đều độc lập; loader recompute phép
+fusion và từ chối artifact sai contract. Chỉ chạy REUTERS seed 42 như diagnostic
+gate; không thử thêm normalization khác trên cùng test labels.
 
 `full_output_concatenate_46d` chưa được implement vì Fig. 2 không xác định tensor
 46D đó là clustering representation, và với REUTERS nó sẽ là 4,020D chứ không
@@ -204,5 +266,7 @@ phải 46D. Chỉ thêm arm này nếu có căn cứ paper/source-code mới.
   ablation, không dùng làm main method.
 - `mvdec_2025_view2_direct_23_split_v1`: giữ artifact làm negative/diagnostic
   ablation; không chạy thêm seed và không dùng làm main method.
-- `mvdec_2025_view2_direct_23_split_concat_v1`: đã implement và khóa contract;
-  chờ diagnostic run REUTERS seed 42.
+- `mvdec_2025_view2_direct_23_split_concat_v1`: giữ artifact làm negative fusion
+  ablation; không chạy thêm seed và không dùng làm main method.
+- `mvdec_2025_view2_direct_23_split_l2norm_average_v1`: đã implement và khóa
+  contract; chờ diagnostic run REUTERS seed 42.

@@ -82,11 +82,29 @@ với Eq. (4) về fusion. Toàn bộ provenance, checksum và bảng đối chi
 ghi tại `MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`.
 
 Fusion-sensitivity protocol
-`mvdec_2025_view2_direct_23_split_concat_v1` đã được implement để giữ nguyên
-direct View2 head nhưng thay Eq. (4) average 10D bằng latent concatenation 20D.
-Protocol, config hash, artifact fusion contract và output directory độc lập;
-loader kiểm tra trực tiếp `h_fused = concatenate(h_view1, h_view2)`. Đây chỉ là
-diagnostic arm seed 42, không phải phương pháp được chọn bằng ground truth.
+`mvdec_2025_view2_direct_23_split_concat_v1` đã chạy và audit trên seed 42. So
+với average 10D, concat 20D cải thiện View2 (`ACC 0.3701 -> 0.4408`, `NMI
+0.0943 -> 0.1194`) nhưng fused ACC giữ `0.7621` và fused NMI giảm `0.6002 ->
+0.5998`. Sau alignment, hai fused assignment vectors chỉ khác `1.66%`
+(`ARI=0.9541`). Vì vậy concat là negative fusion ablation, không mở rộng thêm
+seed và không được chọn làm main method. Protocol, config hash, artifact fusion
+contract và output directory độc lập; loader kiểm tra trực tiếp
+`h_fused = concatenate(h_view1, h_view2)`.
+
+Scale diagnosis cho thấy nguyên nhân fused result không đổi: total latent
+variance của View2 chỉ khoảng `0.0005-0.0009`, trong khi View1 khoảng
+`0.36-0.39`. Fused assignments có `ARI=0.9997-1.0000` với View1 nhưng chỉ
+`ARI=0.0050-0.0524` với View2. Nếu tiếp tục, ablation kế tiếp phải là một
+scale-balanced latent fusion được preregister và không dùng labels để chọn phép
+normalization.
+
+Scale-sensitivity protocol
+`mvdec_2025_view2_direct_23_split_l2norm_average_v1` đã được implement và khóa
+trước khi chạy. Nó L2-normalize từng sample latent của mỗi view rồi average,
+không dùng labels hoặc fit dataset statistics. Contract, config hash, artifact
+fusion metadata và output directory riêng; loader recompute fusion để kiểm tra.
+Chỉ seed 42 được dùng làm diagnostic gate và không thử thêm normalization khác
+dựa trên ACC/NMI của cùng test set.
 
 ## Findings - Critical
 

@@ -16,6 +16,7 @@ from pipeline.clustering import compute_gower_distance, compute_silhouette_diagn
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_CONCATENATE,
+    FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -49,6 +50,12 @@ PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID = (
 PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD = (
     "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
 )
+PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID = (
+    "mvdec_2025_view2_direct_23_split_l2norm_average_v1"
+)
+PUBLIC_DIRECT_JOINT_HEAD_L2NORM_METHOD = (
+    "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (
@@ -56,6 +63,9 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
     ),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
+        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    ),
+    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
         VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
     ),
 }
@@ -66,12 +76,18 @@ PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
         PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD
     ),
+    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
+        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_METHOD
+    ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: FUSION_ENCODER_CONCATENATE,
+    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
+        FUSION_ENCODER_L2_NORMALIZED_AVERAGE
+    ),
 }
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -689,6 +705,16 @@ def _validate_mvdec2025_contract(
         expected = (h_view1 + h_view2) / 2
     elif fusion_contract == FUSION_ENCODER_CONCATENATE:
         expected = np.concatenate([h_view1, h_view2], axis=1)
+    elif fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
+        view1_squared_norm = np.sum(np.square(h_view1), axis=1, keepdims=True)
+        view2_squared_norm = np.sum(np.square(h_view2), axis=1, keepdims=True)
+        view1_normalized = h_view1 / np.sqrt(
+            np.maximum(view1_squared_norm, 1e-12)
+        )
+        view2_normalized = h_view2 / np.sqrt(
+            np.maximum(view2_squared_norm, 1e-12)
+        )
+        expected = (view1_normalized + view2_normalized) / 2
     else:
         msg = f"Unsupported MvDEC fusion contract: {fusion_contract!r}."
         raise ValueError(msg)
@@ -737,7 +763,11 @@ def load_mvdec_result(
         raise ValueError(msg)
 
     fusion_contract = best_result.get("fusion_contract")
-    if fusion_contract in {FUSION_ENCODER_AVERAGE, FUSION_ENCODER_CONCATENATE}:
+    if fusion_contract in {
+        FUSION_ENCODER_AVERAGE,
+        FUSION_ENCODER_CONCATENATE,
+        FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    }:
         _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif fusion_contract == "mvdec2025_figure_output_average":
         if not allow_legacy_concat:
