@@ -13,7 +13,10 @@ from sklearn.metrics import silhouette_score
 
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
-from pipeline.mvdec_contract import VIEW2_ARCHITECTURE_ID
+from pipeline.mvdec_contract import (
+    VIEW2_ARCHITECTURE_ID,
+    VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
+)
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
@@ -29,6 +32,22 @@ PUBLIC_REPRODUCTION_OBJECTIVE = (
     "l1_reconstruction_plus_l4_greedy_mse"
 )
 PUBLIC_REPRODUCTION_METHOD = "MvDEC-2025-public-reproduction"
+PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
+    "mvdec_2025_view2_encoder_bottleneck_v1"
+)
+PUBLIC_ENCODER_BOTTLENECK_METHOD = (
+    "MvDEC-2025-View2-encoder-bottleneck-ablation"
+)
+PUBLIC_PROTOCOL_ARCHITECTURES = {
+    PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (
+        VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
+    ),
+}
+PUBLIC_PROTOCOL_METHODS = {
+    PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_METHOD,
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_METHOD,
+}
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
 
@@ -286,6 +305,8 @@ def _validate_public_reproduction_contract(
     greedy_target = contract["greedy_target"]
     stopping = contract["stopping"]
     schedule = contract.get("schedule")
+    protocol_id = best_result.get("protocol_id")
+    expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     expected_loss_terms = {
         "L1_reconstruction": {"weight": 1.0, "optimized": True},
         "L2_kmeans": {"weight": 0.0, "optimized": False},
@@ -348,8 +369,8 @@ def _validate_public_reproduction_contract(
         (
             best_result.get("dataset") not in PUBLIC_MVDEC_DATASETS,
             best_result.get("algorithm_family") != "MvDEC",
-            best_result.get("algorithm") != PUBLIC_REPRODUCTION_METHOD,
-            best_result.get("method_name") != PUBLIC_REPRODUCTION_METHOD,
+            best_result.get("algorithm") != expected_method,
+            best_result.get("method_name") != expected_method,
             objective.get("name") != PUBLIC_REPRODUCTION_OBJECTIVE,
             objective.get("loss_terms") != expected_loss_terms,
             eigen.get("order") != "ascending",
@@ -446,9 +467,13 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
         )
         raise ValueError(msg)
     view2_architecture_id = architecture.get("view2")
+    expected_architecture_id = PUBLIC_PROTOCOL_ARCHITECTURES.get(
+        protocol_id,
+        VIEW2_ARCHITECTURE_ID,
+    )
     if any(
         (
-            view2_architecture_id != VIEW2_ARCHITECTURE_ID,
+            view2_architecture_id != expected_architecture_id,
             best_result.get("view2_architecture_id") != view2_architecture_id,
             config.get("view2_architecture_id") != view2_architecture_id,
         )
@@ -461,12 +486,12 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
 
     if protocol_id not in {
         PRIMARY_MVDEC_PROTOCOL_ID,
-        PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        *PUBLIC_PROTOCOL_ARCHITECTURES,
         "custom",
     }:
         msg = f"Unsupported MvDEC protocol_id: {protocol_id!r}."
         raise ValueError(msg)
-    if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES:
         _validate_public_reproduction_contract(best_result, contract, config)
         return
     if protocol_id == "custom":

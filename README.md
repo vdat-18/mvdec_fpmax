@@ -260,6 +260,25 @@ The isolated output directory is
 Its artifact and manifest retain independent View1, View2, and fused ACC/NMI;
 `acc` and `nmi` remain aliases of the fused metrics for compatibility.
 
+To diagnose whether the under-specified View2 placement causes the REUTERS gap,
+run the immutable encoder-bottleneck ablation with the same seed and schedule:
+
+```bash
+PYTHONHASHSEED=42 uv run --no-sync python -u \
+  src/representation_learning/MVDEC_dense.py REUTERS \
+  --runs 1 \
+  --seed 42 \
+  --protocol mvdec_2025_view2_encoder_bottleneck_v1 \
+  --progress-interval 100 \
+  --dataset-root external_repos/DEKM/datasets \
+  --public-output-dir output/public_benchmark/mvdec
+```
+
+This ablation moves only the 10-dimensional View2 latent to the encoder
+bottleneck and decodes through the same dense skip path. It does not change
+View1, preprocessing, losses, K-Means, stopping, seed, or final evaluation, and
+its protocol/output identity remains separate from the reproduction run.
+
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
 `--data-path`; the CSV is a row manifest, not a regenerated feature dataset:

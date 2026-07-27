@@ -519,6 +519,36 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
         mvdec.validate_protocol_max_refinement_epochs(protocol, 100)
 
 
+def test_encoder_bottleneck_protocol_changes_only_view2_architecture(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+
+    assert protocol == mvdec.PUBLIC_ENCODER_BOTTLENECK_PROTOCOL
+    assert protocol.view2_architecture_id == (
+        mvdec.VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
+    )
+    assert mvdec.protocol_method_name(protocol) == (
+        "MvDEC-2025-View2-encoder-bottleneck-ablation"
+    )
+    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL
+    )
+    assert protocol.manifest_contract(0.001)["schedule"] == (
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"]
+    )
+    assert protocol.manifest_contract(0.001)["architecture"] != (
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
+    )
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+
+
 def test_release_batch_order_and_dynamic_kmeans_restarts(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -782,8 +812,33 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
         load_mvdec_result(result_path=artifact_path, data_path=data_path)
 
 
-def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("protocol_attribute", "protocol_id", "expected_architecture", "expected_method"),
+    (
+        (
+            "PUBLIC_REPRODUCTION_PROTOCOL",
+            "mvdec_2025_public_reproduction_v1",
+            "mvdec2025_post_skip_latent_bottleneck_v2",
+            "MvDEC-2025-public-reproduction",
+        ),
+        (
+            "PUBLIC_ENCODER_BOTTLENECK_PROTOCOL",
+            "mvdec_2025_view2_encoder_bottleneck_v1",
+            "mvdec2025_encoder_bottleneck_skip_decoder_v1",
+            "MvDEC-2025-View2-encoder-bottleneck-ablation",
+        ),
+    ),
+)
+def test_public_reproduction_artifact_persists_view_metrics(
+    tmp_path,
+    monkeypatch,
+    protocol_attribute,
+    protocol_id,
+    expected_architecture,
+    expected_method,
+):
     mvdec = _load_mvdec(monkeypatch)
+    protocol = getattr(mvdec, protocol_attribute)
     monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
     monkeypatch.setattr(mvdec, "input_shape", 2)
     monkeypatch.setattr(mvdec, "hidden_units", 2)
@@ -805,14 +860,12 @@ def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatc
     pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
     run_config = {
         "dataset": "REUTERS",
-        "protocol_contract": mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(
-            0.001
-        ),
+        "protocol_contract": protocol.manifest_contract(0.001),
     }
     config_hash = canonical_config_hash(run_config)
     run_id = build_run_id(
         "REUTERS",
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        protocol_id,
         config_hash,
         seed=42,
         run_index=1,
@@ -841,7 +894,7 @@ def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatc
         external_metrics=metrics,
         representation_external_metrics=representation_metrics,
         training_steps_completed=30,
-        protocol=mvdec.PUBLIC_REPRODUCTION_PROTOCOL,
+        protocol=protocol,
         run_id=run_id,
         config_hash=config_hash,
     )
@@ -849,7 +902,7 @@ def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatc
         "run_id": run_id,
         "status": "complete",
         "dataset": "REUTERS",
-        "protocol_id": mvdec.PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        "protocol_id": protocol_id,
         "config_hash": config_hash,
         "config": run_config,
         "seed": 42,
@@ -864,6 +917,8 @@ def test_public_reproduction_artifact_persists_view_metrics(tmp_path, monkeypatc
     assert loaded.raw["view2_nmi"] == 1.0
     assert loaded.raw["fused_acc"] == loaded.raw["acc"] == 1.0
     assert loaded.raw["training_steps_completed"] == 30
+    assert loaded.raw["view2_architecture_id"] == expected_architecture
+    assert loaded.raw["method_name"] == expected_method
 
     with artifact_path.open("rb") as file:
         artifact = pickle.load(file)

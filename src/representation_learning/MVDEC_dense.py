@@ -2,7 +2,7 @@ import argparse
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,7 +18,10 @@ from utils import log_csv
 
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
-from pipeline.mvdec_contract import VIEW2_ARCHITECTURE_ID
+from pipeline.mvdec_contract import (
+    VIEW2_ARCHITECTURE_ID,
+    VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
+)
 from pipeline.mvdec_runs import (
     append_run_log,
     build_summary_frames,
@@ -63,10 +66,20 @@ DEFAULT_GREEDY_EIGEN_DIRECTION = "largest"
 DEFAULT_GREEDY_TARGET_MODE = "frozen_snapshot"
 PRIMARY_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
+PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
+    "mvdec_2025_view2_encoder_bottleneck_v1"
+)
+PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
+    {
+        PUBLIC_REPRODUCTION_PROTOCOL_ID,
+        PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
+    }
+)
 CUSTOM_PROTOCOL_ID = "custom"
 PROTOCOL_IDS = (
     PRIMARY_PROTOCOL_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -121,6 +134,7 @@ class MvdecProtocol:
     protocol_id: str
     claim_scope: str
     architecture_source: str
+    view2_architecture_id: str
     refinement_source: str
     reconstruction_weight: float
     kmeans_weight: float
@@ -147,7 +161,7 @@ class MvdecProtocol:
             "claim_scope": self.claim_scope,
             "architecture_source": self.architecture_source,
             "architecture": {
-                "view2": VIEW2_ARCHITECTURE_ID,
+                "view2": self.view2_architecture_id,
             },
             "refinement_source": self.refinement_source,
             "objective": {
@@ -196,7 +210,7 @@ class MvdecProtocol:
                 ),
             },
         }
-        if self.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+        if self.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
             contract["schedule"] = {
                 "scope": "public_datasets_only",
                 "pretraining": {
@@ -228,6 +242,7 @@ PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
     protocol_id=PRIMARY_PROTOCOL_ID,
     claim_scope='MvDEC architecture with DEKM-2021-consistent greedy refinement',
     architecture_source='MvDEC 2025 multi-view encoder-latent fusion',
+    view2_architecture_id=VIEW2_ARCHITECTURE_ID,
     refinement_source='DEKM 2021 Algorithm 1 and released implementation',
     reconstruction_weight=1.0,
     kmeans_weight=DEFAULT_LAMBDA_KMEANS,
@@ -256,6 +271,7 @@ PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
         "not an exact-paper claim"
     ),
     architecture_source="MvDEC 2025 multi-view encoder-latent fusion",
+    view2_architecture_id=VIEW2_ARCHITECTURE_ID,
     refinement_source=(
         "MvDEC L1 reconstruction with released DEKM L4 training behavior"
     ),
@@ -275,6 +291,19 @@ PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
     kmeans_n_init_policy=RELEASE_KMEANS_N_INIT_POLICY,
     pretrain_loss_reduction=RELEASE_PRETRAIN_REDUCTION,
     pretrain_shuffle_buffer=RELEASE_PRETRAIN_SHUFFLE_BUFFER,
+)
+
+PUBLIC_ENCODER_BOTTLENECK_PROTOCOL = replace(
+    PUBLIC_REPRODUCTION_PROTOCOL,
+    protocol_id=PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC 2025 public-reproduction diagnostic with the View2 latent placed "
+        "at the encoder bottleneck; architecture ablation, not an exact-paper claim"
+    ),
+    architecture_source=(
+        "MvDEC 2025 dense U-Net with encoder-bottleneck latent and skip decoder"
+    ),
+    view2_architecture_id=VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
 )
 
 
@@ -307,7 +336,7 @@ def validate_protocol_assignment_change_tolerance(
         protocol.protocol_id
         in {
             PRIMARY_PROTOCOL_ID,
-            PUBLIC_REPRODUCTION_PROTOCOL_ID,
+            *PUBLIC_REPRODUCTION_PROTOCOL_IDS,
         }
         and tolerance != expected
     ):
@@ -326,11 +355,11 @@ def validate_protocol_dataset_scope(
     """Reject use of the public reproduction contract on private datasets."""
 
     if (
-        protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+        protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
         and dataset_name not in PUBLIC_DATASETS
     ):
         raise ValueError(
-            f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} supports only "
+            f"{protocol.protocol_id} supports only "
             f"{', '.join(PUBLIC_DATASETS)}; got {dataset_name!r}."
         )
 
@@ -343,11 +372,11 @@ def validate_protocol_max_refinement_epochs(
 
     value = validate_max_refinement_epochs(max_refinement_epochs)
     if (
-        protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+        protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
         and value != MAX_REFINEMENT_EPOCHS
     ):
         raise ValueError(
-            f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} fixes refinement at "
+            f"{protocol.protocol_id} fixes refinement at "
             f"{RELEASE_MAX_TRAINING_STEPS} updates. "
             "--max-refinement-epochs applies only to the primary/custom protocols."
         )
@@ -367,7 +396,7 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
 
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
             "mvdec_2025_public_reproduction_release_"
             "l1_reconstruction_plus_l4_greedy_mse"
@@ -397,21 +426,26 @@ def resolve_mvdec_protocol(
         raise ValueError('MvDEC loss weights must be non-negative.')
     greedy_eigen_index(eigen_direction)
     validate_greedy_target_mode(target_mode)
-    if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+        public_protocol = (
+            PUBLIC_REPRODUCTION_PROTOCOL
+            if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+            else PUBLIC_ENCODER_BOTTLENECK_PROTOCOL
+        )
         if any(
             (
-                kmeans_weight != PUBLIC_REPRODUCTION_PROTOCOL.kmeans_weight,
-                greedy_weight != PUBLIC_REPRODUCTION_PROTOCOL.greedy_weight,
-                eigen_direction != PUBLIC_REPRODUCTION_PROTOCOL.greedy_eigen_direction,
-                target_mode != PUBLIC_REPRODUCTION_PROTOCOL.greedy_target_mode,
+                kmeans_weight != public_protocol.kmeans_weight,
+                greedy_weight != public_protocol.greedy_weight,
+                eigen_direction != public_protocol.greedy_eigen_direction,
+                target_mode != public_protocol.greedy_target_mode,
             )
         ):
             raise ValueError(
-                f"{PUBLIC_REPRODUCTION_PROTOCOL_ID} is immutable. Use "
+                f"{protocol_id} is immutable. Use "
                 "--protocol custom for loss, eigen-direction, or target-mode "
                 "ablations."
             )
-        return PUBLIC_REPRODUCTION_PROTOCOL
+        return public_protocol
 
     resolved = MvdecProtocol(
         protocol_id=protocol_id,
@@ -421,6 +455,7 @@ def resolve_mvdec_protocol(
             else 'Explicit custom ablation; not a faithful paper-replication claim'
         ),
         architecture_source=PRIMARY_MVDEC_PROTOCOL.architecture_source,
+        view2_architecture_id=PRIMARY_MVDEC_PROTOCOL.view2_architecture_id,
         refinement_source=(
             PRIMARY_MVDEC_PROTOCOL.refinement_source
             if protocol_id == PRIMARY_PROTOCOL_ID
@@ -463,7 +498,9 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
 
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
         return "MvDEC-DEKM-consistent"
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id == PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID:
+        return "MvDEC-2025-View2-encoder-bottleneck-ablation"
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
 
@@ -491,7 +528,7 @@ def resolved_run_config(
         "hidden_units": int(hidden_units),
         "view1_filters": list(view1_filters),
         "view2_base_units": int(view2_base_units),
-        "view2_architecture_id": VIEW2_ARCHITECTURE_ID,
+        "view2_architecture_id": protocol.view2_architecture_id,
         "pretrain_epochs": int(pretrain_epochs),
         "batch_size": int(batch_size),
         "kmeans_n_init": int(KMEANS_N_INIT),
@@ -502,7 +539,7 @@ def resolved_run_config(
         "assignment_change_tolerance": float(tolerance),
         "l4_reduction": protocol.l4_reduction,
     }
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         config.update(
             {
                 "pretrain_loss_reduction": protocol.pretrain_loss_reduction,
@@ -685,7 +722,7 @@ def resolve_refinement_schedule(
         protocol,
         max_refinement_epochs,
     )
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         batches_per_epoch = (n_samples + current_batch_size - 1) // current_batch_size
         return RefinementSchedule(
             batches_per_epoch=batches_per_epoch,
@@ -1029,7 +1066,7 @@ def save_airpollution_mvdec_artifact(
         'protocol_contract_sha256': protocol_sha256,
         'claim_scope': protocol.claim_scope,
         'architecture_source': protocol.architecture_source,
-        'view2_architecture_id': VIEW2_ARCHITECTURE_ID,
+        'view2_architecture_id': protocol.view2_architecture_id,
         'refinement_source': protocol.refinement_source,
         'dataset': ds_name,
         'paper_basis': [
@@ -1087,7 +1124,7 @@ def save_airpollution_mvdec_artifact(
             "view2_latent_dim": int(hidden_units),
             "view1_filters": list(view1_filters),
             "view2_base_units": int(view2_base_units),
-            "view2_architecture_id": VIEW2_ARCHITECTURE_ID,
+            "view2_architecture_id": protocol.view2_architecture_id,
             "view1_embedding_dim": int(h_view1.shape[1]),
             "view2_embedding_dim": int(h_view2.shape[1]),
             "fusion_dim": int(h_fused.shape[1]),
@@ -1116,7 +1153,7 @@ def save_airpollution_mvdec_artifact(
     if external_metrics is not None:
         artifact["acc"] = float(external_metrics.acc)
         artifact["nmi"] = float(external_metrics.nmi)
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         if not isinstance(representation_external_metrics, dict) or set(
             representation_external_metrics
         ) != {"view1", "view2", "fused"}:
@@ -1191,8 +1228,18 @@ def model_view1(load_weights=True, weights_path=None):
     return model
 
 
-def model_view2(load_weights=True, weights_path=None):
-    """Build the dense U-Net view with a trainable post-skip latent bottleneck."""
+def model_view2(
+    load_weights=True,
+    weights_path=None,
+    architecture_id=VIEW2_ARCHITECTURE_ID,
+):
+    """Build View2 according to the immutable protocol architecture identity."""
+
+    if architecture_id not in {
+        VIEW2_ARCHITECTURE_ID,
+        VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
+    }:
+        raise ValueError(f"Unsupported View2 architecture: {architecture_id!r}.")
 
     init = 'glorot_uniform'
     activation = 'relu'
@@ -1214,8 +1261,19 @@ def model_view2(load_weights=True, weights_path=None):
         kernel_initializer=init,
     )(e4)
 
+    if architecture_id == VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID:
+        h = layers.Dense(
+            hidden_units,
+            activation=output_activation,
+            kernel_initializer=init,
+            name="view2_latent",
+        )(bottleneck)
+        decoder_input = h
+    else:
+        decoder_input = bottleneck
+
     x = layers.Dense(8 * b, activation=activation, kernel_initializer=init)(
-        bottleneck
+        decoder_input
     )
     x = layers.Dense(4 * b, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e4])
@@ -1232,18 +1290,22 @@ def model_view2(load_weights=True, weights_path=None):
     x = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e1])
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
-    h = layers.Dense(
-        hidden_units,
-        activation=output_activation,
-        kernel_initializer=init,
-        name="view2_latent",
-    )(x)
+    if architecture_id == VIEW2_ARCHITECTURE_ID:
+        h = layers.Dense(
+            hidden_units,
+            activation=output_activation,
+            kernel_initializer=init,
+            name="view2_latent",
+        )(x)
+        reconstruction_input = h
+    else:
+        reconstruction_input = x
     y = layers.Dense(
         input_shape,
         activation=output_activation,
         kernel_initializer=init,
         name="view2_reconstruction",
-    )(h)
+    )(reconstruction_input)
     output = layers.Concatenate(name="view2_output")([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
@@ -1406,7 +1468,10 @@ def train_base_view2(
     weights_path=None,
     protocol=PRIMARY_MVDEC_PROTOCOL,
 ):
-    model = model_view2(load_weights=False)
+    model = model_view2(
+        load_weights=False,
+        architecture_id=protocol.view2_architecture_id,
+    )
     model.compile(optimizer="adam", loss=pretraining_loss(protocol))
     history = model.fit(
         ds_xx,
@@ -1455,7 +1520,7 @@ def _training_metric_for_labels(
 ):
     """Defer public-reproduction ground-truth metrics until final evaluation."""
 
-    if y is not None and protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if y is not None and protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return 'external_metrics = deferred_to_final', None
     return _metric_for_labels(features, labels, y=y)
 
@@ -1646,7 +1711,10 @@ def train(
     else:
         log_csv(log_str.split(';'), file_name=train_log_name)
     model1 = model_view1(weights_path=pretrain_view1_path)
-    model2 = model_view2(weights_path=pretrain_view2_path)
+    model2 = model_view2(
+        weights_path=pretrain_view2_path,
+        architecture_id=protocol.view2_architecture_id,
+    )
 
     optimizer = tf.keras.optimizers.Adam()
     loss_value = 0
@@ -1771,7 +1839,7 @@ def train(
                 "lambda_kmeans": lambda_kmeans,
                 "lambda_greedy": lambda_greedy,
             }
-            if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+            if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
                 eigen_log_fields["next_kmeans_n_init"] = kmeans_n_init
             loss = np.round(_loss_scalar(loss_value), 5)
             metric_str, metric_value = _training_metric_for_labels(
@@ -1840,7 +1908,7 @@ def train(
             stop_reason = 'converged_assignment'
             refinement_epochs_completed = (
                 ite // batches_per_epoch
-                if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+                if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
                 else ite // kmeans_refresh_interval
             )
             training_steps_completed = ite
@@ -2050,7 +2118,7 @@ def train(
     )
     model1.save_weights(resolved_final_view1_path)
     model2.save_weights(resolved_final_view2_path)
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         stop_log_str = (
             f"phase:training_stop; stop_reason:{stop_reason}; "
             f"training_steps_completed:{training_steps_completed}; "
@@ -2076,7 +2144,7 @@ def train(
     h2 = latent_embedding(view2_output)
     H = fused_latent_embedding(view1_output, view2_output)
     representation_evaluations = None
-    if y is not None and protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if y is not None and protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         representation_evaluations = evaluate_public_representations(
             h1,
             h2,
@@ -2132,7 +2200,7 @@ def train(
         "stop_reason": stop_reason,
         "refinement_epochs_completed": refinement_epochs_completed,
     }
-    if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         final_log_fields.update(
             {
                 "training_steps_completed": training_steps_completed,
@@ -2211,7 +2279,7 @@ def train(
             score=artifact_score,
             iteration=(
                 training_steps_completed
-                if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
+                if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
                 else refinement_epochs_completed
             ),
             orig_idx=orig_idx,
@@ -2610,7 +2678,7 @@ if __name__ == '__main__':
                 f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
             )
-            if protocol.protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID:
+            if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
                 run_str += (
                     f"; view1_acc:{metric['view1_acc']}; "
                     f"view1_nmi:{metric['view1_nmi']}; "
