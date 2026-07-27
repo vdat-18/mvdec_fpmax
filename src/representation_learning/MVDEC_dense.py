@@ -20,6 +20,7 @@ from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
     VIEW2_ARCHITECTURE_ID,
+    VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
 )
 from pipeline.mvdec_runs import (
@@ -69,10 +70,12 @@ PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
 PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
     "mvdec_2025_view2_encoder_bottleneck_v1"
 )
+PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
+        PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
     }
 )
 CUSTOM_PROTOCOL_ID = "custom"
@@ -80,6 +83,7 @@ PROTOCOL_IDS = (
     PRIMARY_PROTOCOL_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
+    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -306,6 +310,26 @@ PUBLIC_ENCODER_BOTTLENECK_PROTOCOL = replace(
     view2_architecture_id=VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
 )
 
+PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL = replace(
+    PUBLIC_REPRODUCTION_PROTOCOL,
+    protocol_id=PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC 2025 public-reproduction diagnostic with the Fig. 2 View2 "
+        "direct latent-reconstruction head; architecture ablation, not an "
+        "exact-paper claim"
+    ),
+    architecture_source=(
+        "MvDEC 2025 dense U-Net with a post-skip direct joint linear head"
+    ),
+    view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+)
+
+PUBLIC_REPRODUCTION_PROTOCOLS = {
+    PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
+    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+}
+
 
 def resolve_assignment_change_tolerance(dataset_name, override=None):
     """Return an explicit valid tolerance for one dataset protocol."""
@@ -427,11 +451,7 @@ def resolve_mvdec_protocol(
     greedy_eigen_index(eigen_direction)
     validate_greedy_target_mode(target_mode)
     if protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
-        public_protocol = (
-            PUBLIC_REPRODUCTION_PROTOCOL
-            if protocol_id == PUBLIC_REPRODUCTION_PROTOCOL_ID
-            else PUBLIC_ENCODER_BOTTLENECK_PROTOCOL
-        )
+        public_protocol = PUBLIC_REPRODUCTION_PROTOCOLS[protocol_id]
         if any(
             (
                 kmeans_weight != public_protocol.kmeans_weight,
@@ -500,6 +520,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return "MvDEC-DEKM-consistent"
     if protocol.protocol_id == PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID:
         return "MvDEC-2025-View2-encoder-bottleneck-ablation"
+    if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID:
+        return "MvDEC-2025-View2-direct-joint-head-ablation"
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
@@ -1237,6 +1259,7 @@ def model_view2(
 
     if architecture_id not in {
         VIEW2_ARCHITECTURE_ID,
+        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
     }:
         raise ValueError(f"Unsupported View2 architecture: {architecture_id!r}.")
@@ -1290,23 +1313,31 @@ def model_view2(
     x = layers.Dense(b // 2, activation=activation, kernel_initializer=init)(x)
     x = layers.Concatenate()([x, e1])
     x = layers.Dense(b, activation=activation, kernel_initializer=init)(x)
-    if architecture_id == VIEW2_ARCHITECTURE_ID:
-        h = layers.Dense(
-            hidden_units,
+    if architecture_id == VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID:
+        output = layers.Dense(
+            hidden_units + input_shape,
             activation=output_activation,
             kernel_initializer=init,
-            name="view2_latent",
+            name="view2_joint_head",
         )(x)
-        reconstruction_input = h
     else:
-        reconstruction_input = x
-    y = layers.Dense(
-        input_shape,
-        activation=output_activation,
-        kernel_initializer=init,
-        name="view2_reconstruction",
-    )(reconstruction_input)
-    output = layers.Concatenate(name="view2_output")([h, y])
+        if architecture_id == VIEW2_ARCHITECTURE_ID:
+            h = layers.Dense(
+                hidden_units,
+                activation=output_activation,
+                kernel_initializer=init,
+                name="view2_latent",
+            )(x)
+            reconstruction_input = h
+        else:
+            reconstruction_input = x
+        y = layers.Dense(
+            input_shape,
+            activation=output_activation,
+            kernel_initializer=init,
+            name="view2_reconstruction",
+        )(reconstruction_input)
+        output = layers.Concatenate(name="view2_output")([h, y])
     model = Model(inputs=input, outputs=output)
     if load_weights:
         path = (

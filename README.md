@@ -279,6 +279,28 @@ bottleneck and decodes through the same dense skip path. It does not change
 View1, preprocessing, losses, K-Means, stopping, seed, or final evaluation, and
 its protocol/output identity remains separate from the reproduction run.
 
+The completed REUTERS seed-42 diagnosis and the remaining Fig. 2/Eq. (4)
+ambiguities are documented in `MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`.
+
+The next preregistered diagnostic follows the single linear View2 terminal head
+drawn in Fig. 2, then reads the first latent dimensions and final reconstruction
+dimensions from that one output:
+
+```bash
+PYTHONHASHSEED=42 uv run --no-sync python -u \
+  src/representation_learning/MVDEC_dense.py REUTERS \
+  --runs 1 \
+  --seed 42 \
+  --protocol mvdec_2025_view2_direct_23_split_v1 \
+  --progress-interval 100 \
+  --dataset-root external_repos/DEKM/datasets \
+  --public-output-dir output/public_benchmark/mvdec
+```
+
+The `23` in the protocol name records the Air Pollution Fig. 2 layout
+(`10 + 13`). For public 2,000-dimensional inputs the same contract creates a
+`10 + 2,000` joint head and persists the resolved dimensions in the manifest.
+
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
 `--data-path`; the CSV is a row manifest, not a regenerated feature dataset:

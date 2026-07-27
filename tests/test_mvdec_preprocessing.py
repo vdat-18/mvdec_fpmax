@@ -549,6 +549,36 @@ def test_encoder_bottleneck_protocol_changes_only_view2_architecture(monkeypatch
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
 
+def test_direct_joint_head_protocol_changes_only_view2_architecture(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+
+    assert protocol == mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
+    assert protocol.view2_architecture_id == (
+        mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    )
+    assert mvdec.protocol_method_name(protocol) == (
+        "MvDEC-2025-View2-direct-joint-head-ablation"
+    )
+    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL
+    )
+    assert protocol.manifest_contract(0.001)["schedule"] == (
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"]
+    )
+    assert protocol.manifest_contract(0.001)["architecture"] != (
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
+    )
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+
+
 def test_release_batch_order_and_dynamic_kmeans_restarts(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -826,6 +856,12 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "mvdec_2025_view2_encoder_bottleneck_v1",
             "mvdec2025_encoder_bottleneck_skip_decoder_v1",
             "MvDEC-2025-View2-encoder-bottleneck-ablation",
+        ),
+        (
+            "PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL",
+            "mvdec_2025_view2_direct_23_split_v1",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-View2-direct-joint-head-ablation",
         ),
     ),
 )

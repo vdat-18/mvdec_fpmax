@@ -129,3 +129,38 @@ def test_view2_encoder_bottleneck_precedes_skip_decoder(monkeypatch):
 
     assert gradient is not None
     assert float(tensorflow.linalg.norm(gradient)) > 0.0
+
+
+def test_view2_direct_joint_head_matches_figure_output(monkeypatch):
+    """The Fig. 2 diagnostic must emit latent and reconstruction in one head."""
+
+    tensorflow = pytest.importorskip("tensorflow")
+    representation_dir = (
+        Path(__file__).resolve().parents[1] / "src" / "representation_learning"
+    )
+    monkeypatch.syspath_prepend(str(representation_dir))
+    mvdec = importlib.import_module("MVDEC_dense")
+    monkeypatch.setattr(mvdec, "input_shape", 13)
+    monkeypatch.setattr(mvdec, "hidden_units", 10)
+    monkeypatch.setattr(mvdec, "view2_base_units", 64)
+    tensorflow.keras.utils.set_random_seed(42)
+    model = mvdec.model_view2(
+        load_weights=False,
+        architecture_id=mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    )
+    joint_head = model.get_layer("view2_joint_head")
+
+    assert joint_head.input.shape[-1] == 64
+    assert joint_head.units == 23
+    assert model.output_shape == (None, 23)
+
+    inputs = tensorflow.ones((4, 13), dtype=tensorflow.float32)
+    with tensorflow.GradientTape() as tape:
+        outputs = model(inputs)
+        loss = tensorflow.reduce_mean(mvdec.release_loss_train_base(inputs, outputs))
+    gradient = tape.gradient(loss, joint_head.kernel)
+
+    assert mvdec.latent_embedding(outputs).shape == (4, 10)
+    assert mvdec.reconstruction_output(outputs).shape == (4, 13)
+    assert gradient is not None
+    assert float(tensorflow.linalg.norm(gradient)) > 0.0

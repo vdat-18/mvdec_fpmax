@@ -70,6 +70,17 @@ sau khi Air Pollution và Tiki được train lại trên GPU theo các seed đ�
 chạy `mvdec-audit-runs` thành công và lưu các config directories mới. Repository
 không còn artifact cũ để vô tình dùng làm bảng paper trong thời gian chờ rerun.
 
+## REUTERS View2 architecture ablation - DIAGNOSTIC COMPLETE
+
+Kết quả seed 42 của protocol `mvdec_2025_view2_encoder_bottleneck_v1` đã được
+audit và đối chiếu với reproduction baseline. Fused ACC gần như không đổi
+(`0.7636 -> 0.7643`), fused NMI tăng (`0.5221 -> 0.6033`), nhưng View2 standalone
+giảm mạnh (`ACC 0.4643 -> 0.3843`, `NMI 0.2298 -> 0.0944`). Vì vậy encoder
+bottleneck không được chọn làm kiến trúc chính. Fig. 2 của MvDEC 2025 còn mâu
+thuẫn với Eq. (3)-(5) về terminal head và với Eq. (4) về fusion. Toàn bộ
+provenance, bảng đối chiếu paper và protocol chẩn đoán kế tiếp được ghi tại
+`MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`.
+
 ## Findings - Critical
 
 ### C1. Mặc định đang được gọi là MvDEC không tối ưu objective của MvDEC 2025
