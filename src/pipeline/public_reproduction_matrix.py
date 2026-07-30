@@ -10,6 +10,7 @@ import tarfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 from loguru import logger
 
@@ -168,12 +169,6 @@ def run_training(
     ]
     environment = os.environ.copy()
     environment["PYTHONHASHSEED"] = str(spec.seed)
-    logger.info(
-        "Starting public MvDEC run: dataset={}, protocol={}, seed={}",
-        spec.dataset,
-        spec.protocol_id,
-        spec.seed,
-    )
     subprocess.run(
         command,
         cwd=PROJECT_DIR,
@@ -315,19 +310,25 @@ def run_public_matrix(
         raise ValueError("progress_interval must be positive.")
     specs = build_run_specs(datasets, protocols, seeds)
     summary_path = archive_root / SUMMARY_FILENAME
-    for index, spec in enumerate(specs, start=1):
+    for spec in specs:
+        run_started = perf_counter()
         archive_path, checksum_path = archive_paths(archive_root, spec)
         if resume and checksum_matches(archive_path, checksum_path):
             logger.info(
-                "Skipping packaged run {}/{}: dataset={}, protocol={}, seed={}",
-                index,
-                len(specs),
+                "run_skip; dataset:{}; protocol:{}; seed:{}; reason:archive_verified",
                 spec.dataset,
                 spec.protocol_id,
                 spec.seed,
             )
             yield CompletedMatrixRun(spec, archive_path, checksum_path, True)
             continue
+
+        logger.info(
+            "run_start; dataset:{}; protocol:{}; seed:{}",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+        )
 
         manifests = matching_complete_manifests(output_root, spec)
         if len(manifests) > 1:
@@ -347,15 +348,17 @@ def run_public_matrix(
         manifest_path = Path(str(manifest["_manifest_path"]))
         audit_run(manifest_path.parent)
         archive_sha256 = package_run(manifest, archive_path, checksum_path)
-        update_summary(
-            summary_path,
-            summary_record(manifest, archive_path, archive_sha256),
-        )
+        record = summary_record(manifest, archive_path, archive_sha256)
+        update_summary(summary_path, record)
         logger.info(
-            "Packaged run {}/{}: {}",
-            index,
-            len(specs),
-            archive_path,
+            "run_complete; dataset:{}; protocol:{}; seed:{}; elapsed:{:.1f}s; "
+            "acc:{:.5f}; nmi:{:.5f}",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+            perf_counter() - run_started,
+            float(record["acc"]),
+            float(record["nmi"]),
         )
         yield CompletedMatrixRun(spec, archive_path, checksum_path, False)
 
@@ -378,7 +381,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
-    for completed in run_public_matrix(
+    for _completed in run_public_matrix(
         datasets=args.datasets,
         protocols=args.protocols,
         seeds=args.seeds,
@@ -388,8 +391,7 @@ def main() -> None:
         progress_interval=args.progress_interval,
         resume=args.resume,
     ):
-        logger.info("Archive ready: {}", completed.archive_path)
-        logger.info("Checksum ready: {}", completed.checksum_path)
+        pass
 
 
 if __name__ == "__main__":
