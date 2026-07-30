@@ -28,6 +28,7 @@ mvdec-audit-runs = "pipeline.mvdec_audit:main"
 mvdec-without-ffs = "pipeline.private_without_ffs:main"
 mvdec-ffs = "pipeline.private_ffs:main"
 mvdec-intuitive = "pipeline.private_intuitive:main"
+mvdec-public-matrix = "pipeline.public_reproduction_matrix:main"
 
 [dependency-groups]
 dev = [
