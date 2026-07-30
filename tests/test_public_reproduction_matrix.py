@@ -83,6 +83,32 @@ def test_run_training_redirects_verbose_child_output(
     assert stdout_path.read_text(encoding="utf-8") == "verbose child output\n"
 
 
+def test_reusable_complete_manifest_rejects_corrupt_outputs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Resume must rebuild a run whose manifest hashes no longer validate."""
+
+    manifest = {"status": "complete"}
+    monkeypatch.setattr(
+        matrix,
+        "matching_complete_manifests",
+        lambda _output_root, _spec: [manifest],
+    )
+
+    def reject_outputs(_manifest: dict[str, object]) -> None:
+        raise ValueError("hash mismatch")
+
+    monkeypatch.setattr(matrix, "validate_manifest_outputs", reject_outputs)
+
+    reusable = matrix.reusable_complete_manifest(
+        tmp_path,
+        matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+    )
+
+    assert reusable is None
+
+
 def test_update_summary_upserts_one_run_identity(tmp_path: Path) -> None:
     """Resumed packaging must replace, rather than duplicate, a summary row."""
 

@@ -146,6 +146,31 @@ def require_single_complete_manifest(
     return manifests[0]
 
 
+def reusable_complete_manifest(
+    output_root: Path,
+    spec: MatrixRunSpec,
+) -> dict[str, object] | None:
+    """Return an auditable completed run, or require it to be rebuilt."""
+
+    manifests = matching_complete_manifests(output_root, spec)
+    if len(manifests) > 1:
+        require_single_complete_manifest(output_root, spec)
+    if not manifests:
+        return None
+    manifest = manifests[0]
+    try:
+        validate_manifest_outputs(manifest)
+    except ValueError:
+        logger.warning(
+            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:invalid_output_hash",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+        )
+        return None
+    return manifest
+
+
 def run_training(
     spec: MatrixRunSpec,
     *,
@@ -376,12 +401,8 @@ def run_public_matrix(
             spec.seed,
         )
 
-        manifests = matching_complete_manifests(output_root, spec)
-        if len(manifests) > 1:
-            require_single_complete_manifest(output_root, spec)
-        if manifests:
-            manifest = manifests[0]
-        else:
+        manifest = reusable_complete_manifest(output_root, spec)
+        if manifest is None:
             run_training(
                 spec,
                 dataset_root=dataset_root,
