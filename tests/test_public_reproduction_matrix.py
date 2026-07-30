@@ -58,6 +58,31 @@ def test_package_run_writes_portable_archive_and_checksum(
     assert "output/public/seed_42/artifact.pkl" in names
 
 
+def test_run_training_redirects_verbose_child_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Training noise must be retained in a file instead of flooding stdout."""
+
+    project_dir = tmp_path / "repo"
+    training_script = project_dir / "src" / "representation_learning" / "MVDEC_dense.py"
+    training_script.parent.mkdir(parents=True)
+    training_script.write_text("print('verbose child output')\n", encoding="utf-8")
+    monkeypatch.setattr(matrix, "PROJECT_DIR", project_dir)
+    stdout_path = tmp_path / "training.log"
+
+    matrix.run_training(
+        matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+        dataset_root=tmp_path / "datasets",
+        output_root=tmp_path / "output",
+        progress_interval=100,
+        stdout_path=stdout_path,
+        heartbeat_seconds=300,
+    )
+
+    assert stdout_path.read_text(encoding="utf-8") == "verbose child output\n"
+
+
 def test_update_summary_upserts_one_run_identity(tmp_path: Path) -> None:
     """Resumed packaging must replace, rather than duplicate, a summary row."""
 

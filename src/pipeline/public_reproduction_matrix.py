@@ -10,7 +10,7 @@ import tarfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 
 from loguru import logger
 
@@ -23,6 +23,7 @@ from pipeline.mvdec_runs import (
 )
 
 SUMMARY_FILENAME = "public_mvdec_matrix_runs.csv"
+TRAINING_STDOUT_DIRNAME = "training_stdout"
 SUMMARY_FIELDS = (
     "dataset",
     "protocol_id",
@@ -91,6 +92,13 @@ def archive_paths(archive_root: Path, spec: MatrixRunSpec) -> tuple[Path, Path]:
     return archive_path, archive_path.with_suffix(f"{archive_path.suffix}.sha256")
 
 
+def training_stdout_path(archive_root: Path, spec: MatrixRunSpec) -> Path:
+    """Resolve the retained stdout/stderr log for one training process."""
+
+    stem = f"{spec.dataset.lower()}__{spec.protocol_id.lower()}__seed_{spec.seed}"
+    return archive_root / TRAINING_STDOUT_DIRNAME / f"{stem}.log"
+
+
 def checksum_matches(archive_path: Path, checksum_path: Path) -> bool:
     """Return whether an existing archive matches its checksum file."""
 
@@ -144,8 +152,10 @@ def run_training(
     dataset_root: Path,
     output_root: Path,
     progress_interval: int,
+    stdout_path: Path,
+    heartbeat_seconds: int,
 ) -> None:
-    """Execute one public MvDEC training run with deterministic seed metadata."""
+    """Execute one training run while retaining verbose child-process output."""
 
     training_script = PROJECT_DIR / "src" / "representation_learning" / "MVDEC_dense.py"
     command = [
@@ -169,28 +179,60 @@ def run_training(
     ]
     environment = os.environ.copy()
     environment["PYTHONHASHSEED"] = str(spec.seed)
-    subprocess.run(
-        command,
-        cwd=PROJECT_DIR,
-        env=environment,
-        check=True,
-    )
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    started = perf_counter()
+    next_heartbeat = started + heartbeat_seconds
+    with stdout_path.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            command,
+            cwd=PROJECT_DIR,
+            env=environment,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        while process.poll() is None:
+            now = perf_counter()
+            if now >= next_heartbeat:
+                logger.info(
+                    "run_progress; dataset:{}; protocol:{}; seed:{}; elapsed:{:.1f}s",
+                    spec.dataset,
+                    spec.protocol_id,
+                    spec.seed,
+                    now - started,
+                )
+                next_heartbeat = now + heartbeat_seconds
+            sleep(1)
+        return_code = process.wait()
+    if return_code != 0:
+        logger.error(
+            "run_failed; dataset:{}; protocol:{}; seed:{}; log:{}",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+            stdout_path,
+        )
+        raise subprocess.CalledProcessError(return_code, command)
 
 
-def audit_run(run_dir: Path) -> None:
-    """Run the repository audit command against one completed run directory."""
+def audit_run(run_dir: Path, stdout_path: Path) -> None:
+    """Audit one run and append verbose audit output to its retained log."""
 
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pipeline.mvdec_audit",
-            "--root",
-            str(run_dir),
-        ],
-        cwd=PROJECT_DIR,
-        check=True,
-    )
+    with stdout_path.open("a", encoding="utf-8") as output:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pipeline.mvdec_audit",
+                "--root",
+                str(run_dir),
+            ],
+            cwd=PROJECT_DIR,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+        )
 
 
 def package_run(
@@ -302,17 +344,21 @@ def run_public_matrix(
     output_root: Path = PUBLIC_BENCHMARK_OUTPUT_DIR / "mvdec",
     archive_root: Path,
     progress_interval: int = 100,
+    heartbeat_seconds: int = 300,
     resume: bool = False,
 ) -> Iterator[CompletedMatrixRun]:
     """Run, audit, package, and yield each requested matrix combination."""
 
     if progress_interval <= 0:
         raise ValueError("progress_interval must be positive.")
+    if heartbeat_seconds <= 0:
+        raise ValueError("heartbeat_seconds must be positive.")
     specs = build_run_specs(datasets, protocols, seeds)
     summary_path = archive_root / SUMMARY_FILENAME
     for spec in specs:
         run_started = perf_counter()
         archive_path, checksum_path = archive_paths(archive_root, spec)
+        stdout_path = training_stdout_path(archive_root, spec)
         if resume and checksum_matches(archive_path, checksum_path):
             logger.info(
                 "run_skip; dataset:{}; protocol:{}; seed:{}; reason:archive_verified",
@@ -341,12 +387,14 @@ def run_public_matrix(
                 dataset_root=dataset_root,
                 output_root=output_root,
                 progress_interval=progress_interval,
+                stdout_path=stdout_path,
+                heartbeat_seconds=heartbeat_seconds,
             )
             manifest = require_single_complete_manifest(output_root, spec)
 
         validate_manifest_outputs(manifest)
         manifest_path = Path(str(manifest["_manifest_path"]))
-        audit_run(manifest_path.parent)
+        audit_run(manifest_path.parent, stdout_path)
         archive_sha256 = package_run(manifest, archive_path, checksum_path)
         record = summary_record(manifest, archive_path, archive_sha256)
         update_summary(summary_path, record)
@@ -378,6 +426,7 @@ def main() -> None:
     )
     parser.add_argument("--archive-root", type=Path, required=True)
     parser.add_argument("--progress-interval", type=int, default=100)
+    parser.add_argument("--heartbeat-seconds", type=int, default=300)
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
@@ -389,6 +438,7 @@ def main() -> None:
         output_root=args.output_root,
         archive_root=args.archive_root,
         progress_interval=args.progress_interval,
+        heartbeat_seconds=args.heartbeat_seconds,
         resume=args.resume,
     ):
         pass
