@@ -15,8 +15,6 @@ from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
-    FUSION_ENCODER_CONCATENATE,
-    FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -30,6 +28,8 @@ from pipeline.mvdec_runs import (
 PRIMARY_MVDEC_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
 PRIMARY_MVDEC_OBJECTIVE = "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
 PRIMARY_MVDEC_METHOD = "MvDEC-DEKM-consistent"
+PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID = "mvdec_dekm_consistent_public_v1"
+PUBLIC_DEKM_CONSISTENT_METHOD = "MvDEC-DEKM-consistent-public"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
 PUBLIC_REPRODUCTION_OBJECTIVE = (
     "mvdec_2025_public_reproduction_release_"
@@ -44,50 +44,25 @@ PUBLIC_ENCODER_BOTTLENECK_METHOD = (
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_DIRECT_JOINT_HEAD_METHOD = "MvDEC-2025-View2-direct-joint-head-ablation"
-PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID = (
-    "mvdec_2025_view2_direct_23_split_concat_v1"
-)
-PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD = (
-    "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
-)
-PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID = (
-    "mvdec_2025_view2_direct_23_split_l2norm_average_v1"
-)
-PUBLIC_DIRECT_JOINT_HEAD_L2NORM_METHOD = (
-    "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
-)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
+    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
     ),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
-    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
-        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
-    ),
-    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
-        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
-    ),
 }
 PUBLIC_PROTOCOL_METHODS = {
+    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_METHOD,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_METHOD,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_METHOD,
-    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
-        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_METHOD
-    ),
-    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
-        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_METHOD
-    ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
+    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
-    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: FUSION_ENCODER_CONCATENATE,
-    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
-        FUSION_ENCODER_L2_NORMALIZED_AVERAGE
-    ),
 }
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -334,12 +309,12 @@ def _protocol_contract_sha256(contract: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _validate_public_reproduction_contract(
+def _validate_public_protocol_contract(
     best_result: dict,
     contract: dict,
     config: dict,
 ) -> None:
-    """Validate the immutable historical public-reproduction schedule."""
+    """Validate an immutable bounded public-dataset protocol."""
 
     objective = contract["objective"]
     eigen = contract["eigen"]
@@ -348,6 +323,38 @@ def _validate_public_reproduction_contract(
     schedule = contract.get("schedule")
     protocol_id = best_result.get("protocol_id")
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
+    is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
+    expected_objective = (
+        PRIMARY_MVDEC_OBJECTIVE
+        if is_dekm_consistent
+        else PUBLIC_REPRODUCTION_OBJECTIVE
+    )
+    expected_l4_reduction = (
+        "sum_squared_dimensions_then_mean_batch"
+        if is_dekm_consistent
+        else "mean_squared_dimensions_per_sample_sum_batch_gradient"
+    )
+    expected_pretrain_reduction = (
+        "sum_squared_dimensions_per_sample"
+        if is_dekm_consistent
+        else "mean_squared_dimensions_per_sample"
+    )
+    expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
+    expected_refinement_objective = (
+        "joint_reconstruction_plus_greedy"
+        if is_dekm_consistent
+        else "release_reconstruction_plus_greedy_mse"
+    )
+    expected_batching_policy = (
+        "balanced_shuffled_each_epoch"
+        if is_dekm_consistent
+        else "sequential_release_order"
+    )
+    expected_kmeans_n_init_policy = (
+        "fixed_100"
+        if is_dekm_consistent
+        else "initial_100_then_twice_previous_n_iter"
+    )
     expected_loss_terms = {
         "L1_reconstruction": {"weight": 1.0, "optimized": True},
         "L2_kmeans": {"weight": 0.0, "optimized": False},
@@ -359,7 +366,7 @@ def _validate_public_reproduction_contract(
         "L4_greedy": {
             "weight": 1.0,
             "optimized": True,
-            "reduction": ("mean_squared_dimensions_per_sample_sum_batch_gradient"),
+            "reduction": expected_l4_reduction,
         },
     }
     expected_schedule = {
@@ -367,17 +374,17 @@ def _validate_public_reproduction_contract(
         "pretraining": {
             "epochs": 200,
             "batch_size": 256,
-            "loss_reduction": "mean_squared_dimensions_per_sample",
-            "shuffle_buffer": 8000,
+            "loss_reduction": expected_pretrain_reduction,
+            "shuffle_buffer": expected_pretrain_shuffle_buffer,
         },
         "refinement": {
-            "objective": "release_reconstruction_plus_greedy_mse",
+            "objective": expected_refinement_objective,
             "batch_size": 256,
-            "batching_policy": "sequential_release_order",
+            "batching_policy": expected_batching_policy,
             "kmeans_refresh_policy": "fixed_10_updates",
             "update_interval": 10,
             "max_training_steps": 14000,
-            "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
+            "kmeans_n_init_policy": expected_kmeans_n_init_policy,
         },
         "final_evaluation": {
             "representations": ["view1", "view2", "fused"],
@@ -412,7 +419,7 @@ def _validate_public_reproduction_contract(
             best_result.get("algorithm_family") != "MvDEC",
             best_result.get("algorithm") != expected_method,
             best_result.get("method_name") != expected_method,
-            objective.get("name") != PUBLIC_REPRODUCTION_OBJECTIVE,
+            objective.get("name") != expected_objective,
             objective.get("loss_terms") != expected_loss_terms,
             eigen.get("order") != "ascending",
             eigen.get("direction") != "largest",
@@ -420,20 +427,19 @@ def _validate_public_reproduction_contract(
             schedule != expected_schedule,
             config.get("loss_weights") != expected_loss_weights,
             config.get("kmeans_refresh_policy") != "fixed_10_updates",
-            config.get("refinement_batching_policy") != "sequential_release_order",
+            config.get("refinement_batching_policy") != expected_batching_policy,
             config.get("update_interval") != 10,
             config.get("max_training_steps") != 14000,
-            config.get("kmeans_n_init_policy")
-            != "initial_100_then_twice_previous_n_iter",
-            config.get("pretrain_loss_reduction")
-            != "mean_squared_dimensions_per_sample",
-            config.get("pretrain_shuffle_buffer") != 8000,
-            config.get("refinement_objective")
-            != "release_reconstruction_plus_greedy_mse",
+            config.get("kmeans_n_init_policy") != expected_kmeans_n_init_policy,
+            config.get("pretrain_loss_reduction") != expected_pretrain_reduction,
+            config.get("pretrain_shuffle_buffer")
+            != expected_pretrain_shuffle_buffer,
+            config.get("refinement_objective") != expected_refinement_objective,
             best_result.get("kmeans_refresh_policy") != "fixed_10_updates",
-            best_result.get("refinement_batching_policy") != "sequential_release_order",
+            best_result.get("refinement_batching_policy")
+            != expected_batching_policy,
             best_result.get("kmeans_n_init_policy")
-            != "initial_100_then_twice_previous_n_iter",
+            != expected_kmeans_n_init_policy,
             best_result.get("iteration") != training_steps_completed,
             config.get("training_steps_completed") != training_steps_completed,
             batches_per_epoch < 1,
@@ -461,7 +467,7 @@ def _validate_public_reproduction_contract(
             ),
         )
     ):
-        msg = "MvDEC public-reproduction artifact violates its immutable protocol."
+        msg = "MvDEC public artifact violates its immutable protocol."
         raise ValueError(msg)
 
 
@@ -548,7 +554,7 @@ def _validate_mvdec_protocol_contract(best_result: dict) -> None:
         msg = "MvDEC fusion identity is missing or inconsistent."
         raise ValueError(msg)
     if protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES:
-        _validate_public_reproduction_contract(best_result, contract, config)
+        _validate_public_protocol_contract(best_result, contract, config)
         return
     if protocol_id == "custom":
         if not str(objective.get("name", "")).startswith("mvdec_custom_"):
@@ -703,18 +709,6 @@ def _validate_mvdec2025_contract(
             )
             raise ValueError(msg)
         expected = (h_view1 + h_view2) / 2
-    elif fusion_contract == FUSION_ENCODER_CONCATENATE:
-        expected = np.concatenate([h_view1, h_view2], axis=1)
-    elif fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
-        view1_squared_norm = np.sum(np.square(h_view1), axis=1, keepdims=True)
-        view2_squared_norm = np.sum(np.square(h_view2), axis=1, keepdims=True)
-        view1_normalized = h_view1 / np.sqrt(
-            np.maximum(view1_squared_norm, 1e-12)
-        )
-        view2_normalized = h_view2 / np.sqrt(
-            np.maximum(view2_squared_norm, 1e-12)
-        )
-        expected = (view1_normalized + view2_normalized) / 2
     else:
         msg = f"Unsupported MvDEC fusion contract: {fusion_contract!r}."
         raise ValueError(msg)
@@ -763,11 +757,7 @@ def load_mvdec_result(
         raise ValueError(msg)
 
     fusion_contract = best_result.get("fusion_contract")
-    if fusion_contract in {
-        FUSION_ENCODER_AVERAGE,
-        FUSION_ENCODER_CONCATENATE,
-        FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
-    }:
+    if fusion_contract == FUSION_ENCODER_AVERAGE:
         _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif fusion_contract == "mvdec2025_figure_output_average":
         if not allow_legacy_concat:

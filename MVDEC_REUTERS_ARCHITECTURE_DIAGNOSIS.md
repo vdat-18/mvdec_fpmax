@@ -1,5 +1,9 @@
 # REUTERS MvDEC architecture diagnosis
 
+> Historical note: the concat and L2-normalized-average protocols documented
+> here were negative ablations. They were removed from executable code and the
+> public experiment matrix on 2026-07-30; retained results are provenance only.
+
 ## Mục tiêu
 
 Tài liệu này ghi lại ablation có kiểm soát nhằm kiểm tra giả thuyết: kết quả

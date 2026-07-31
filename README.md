@@ -301,45 +301,6 @@ The `23` in the protocol name records the Air Pollution Fig. 2 layout
 (`10 + 13`). For public 2,000-dimensional inputs the same contract creates a
 `10 + 2,000` joint head and persists the resolved dimensions in the manifest.
 
-The controlled fusion-sensitivity arm keeps that exact View2 head and training
-schedule, but concatenates the two 10-dimensional latents instead of averaging
-them. It has an independent protocol, config hash, output directory, and
-20-dimensional fused representation:
-
-```bash
-PYTHONHASHSEED=42 uv run --no-sync python -u \
-  src/representation_learning/MVDEC_dense.py REUTERS \
-  --runs 1 \
-  --seed 42 \
-  --protocol mvdec_2025_view2_direct_23_split_concat_v1 \
-  --progress-interval 100 \
-  --dataset-root external_repos/DEKM/datasets \
-  --public-output-dir output/public_benchmark/mvdec
-```
-
-This is a diagnostic fusion ablation, not a literal-paper reproduction. Ground
-truth remains deferred to final evaluation and must not be used to select the
-fusion arm as a confirmatory result.
-
-The preregistered scale-balance diagnostic keeps the same direct View2 head and
-averaging fusion, but L2-normalizes each sample's View1 and View2 latent vectors
-before averaging:
-
-```bash
-PYTHONHASHSEED=42 uv run --no-sync python -u \
-  src/representation_learning/MVDEC_dense.py REUTERS \
-  --runs 1 \
-  --seed 42 \
-  --protocol mvdec_2025_view2_direct_23_split_l2norm_average_v1 \
-  --progress-interval 100 \
-  --dataset-root external_repos/DEKM/datasets \
-  --public-output-dir output/public_benchmark/mvdec
-```
-
-This arm uses no labels or fitted dataset-level scaling statistics. Zero latent
-vectors remain zero, and the normalization is part of the differentiable
-training/fusion contract rather than a post-hoc evaluation transform.
-
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
 `--data-path`; the CSV is a row manifest, not a regenerated feature dataset:

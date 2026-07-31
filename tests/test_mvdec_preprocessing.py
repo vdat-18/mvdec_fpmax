@@ -331,79 +331,6 @@ def test_final_clustering_is_recomputed_from_current_model_outputs(monkeypatch):
     assert labels[0] != labels[2]
 
 
-def test_final_clustering_supports_concatenated_latent_fusion(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-    monkeypatch.setattr(mvdec, "hidden_units", 2)
-    monkeypatch.setattr(mvdec, "n_clusters", 2)
-
-    class FakeModel:
-        def __init__(self, output):
-            self.output = mvdec.tf.constant(output, dtype=mvdec.tf.float32)
-
-        def __call__(self, _):
-            return self.output
-
-    view1 = FakeModel([[0.0, 0.0], [0.0, 0.2], [5.0, 5.0], [5.0, 5.2]])
-    view2 = FakeModel([[0.0, 0.2], [0.0, 0.0], [5.0, 5.2], [5.0, 5.0]])
-
-    h1, h2, h_fused, labels = mvdec.recompute_final_clustering(
-        view1,
-        view2,
-        np.zeros((4, 1), dtype=np.float32),
-        random_seed=42,
-        fusion_contract=mvdec.FUSION_ENCODER_CONCATENATE,
-    )
-
-    np.testing.assert_allclose(h_fused, np.concatenate([h1, h2], axis=1))
-    assert h_fused.shape == (4, 4)
-    assert labels[0] == labels[1]
-    assert labels[2] == labels[3]
-    assert labels[0] != labels[2]
-
-
-def test_concatenated_latent_fusion_preserves_tensor_gradients(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-    monkeypatch.setattr(mvdec, "hidden_units", 2)
-    view1 = mvdec.tf.Variable([[1.0, 2.0]], dtype=mvdec.tf.float32)
-    view2 = mvdec.tf.Variable([[3.0, 4.0]], dtype=mvdec.tf.float32)
-
-    with mvdec.tf.GradientTape() as tape:
-        fused = mvdec.fused_latent_embedding(
-            view1,
-            view2,
-            fusion_contract=mvdec.FUSION_ENCODER_CONCATENATE,
-        )
-        loss = mvdec.tf.reduce_sum(fused)
-
-    gradients = tape.gradient(loss, [view1, view2])
-
-    np.testing.assert_allclose(fused.numpy(), [[1.0, 2.0, 3.0, 4.0]])
-    np.testing.assert_allclose(gradients[0].numpy(), np.ones((1, 2)))
-    np.testing.assert_allclose(gradients[1].numpy(), np.ones((1, 2)))
-
-
-def test_l2_normalized_average_balances_view_scale_and_handles_zero(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-    monkeypatch.setattr(mvdec, "hidden_units", 2)
-    view1 = mvdec.tf.Variable([[3.0, 4.0], [0.0, 0.0]], dtype=mvdec.tf.float32)
-    view2 = mvdec.tf.Variable([[0.0, 2.0], [0.0, 0.0]], dtype=mvdec.tf.float32)
-
-    with mvdec.tf.GradientTape() as tape:
-        fused = mvdec.fused_latent_embedding(
-            view1,
-            view2,
-            fusion_contract=mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
-        )
-        loss = mvdec.tf.reduce_sum(fused)
-
-    gradients = tape.gradient(loss, [view1, view2])
-
-    np.testing.assert_allclose(fused.numpy()[0], [0.3, 0.9], atol=1e-6)
-    np.testing.assert_allclose(fused.numpy()[1], [0.0, 0.0], atol=1e-6)
-    assert all(gradient is not None for gradient in gradients)
-    assert all(np.isfinite(gradient.numpy()).all() for gradient in gradients)
-
-
 def test_epoch_losses_are_averaged_across_all_batches(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -592,6 +519,73 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
         mvdec.validate_protocol_max_refinement_epochs(protocol, 100)
 
 
+def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
+        kmeans_weight=0.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+    schedule = mvdec.resolve_refinement_schedule(
+        protocol,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+
+    assert protocol == mvdec.PUBLIC_DEKM_CONSISTENT_PROTOCOL
+    assert mvdec.final_training_objective(protocol) == (
+        "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+    )
+    assert mvdec.protocol_method_name(protocol) == "MvDEC-DEKM-consistent-public"
+    assert schedule.batches_per_epoch == 40
+    assert schedule.kmeans_refresh_interval == 10
+    assert schedule.max_training_steps == 14_000
+    assert protocol.manifest_contract(0.001)["schedule"]["pretraining"] == {
+        "epochs": 200,
+        "batch_size": 256,
+        "loss_reduction": "sum_squared_dimensions_per_sample",
+        "shuffle_buffer": None,
+    }
+    assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
+        "objective": "joint_reconstruction_plus_greedy",
+        "batch_size": 256,
+        "batching_policy": "balanced_shuffled_each_epoch",
+        "kmeans_refresh_policy": "fixed_10_updates",
+        "update_interval": 10,
+        "max_training_steps": 14_000,
+        "kmeans_n_init_policy": "fixed_100",
+    }
+    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
+    with pytest.raises(ValueError, match="supports only"):
+        mvdec.validate_protocol_dataset_scope(protocol, "TIKI")
+    with pytest.raises(ValueError, match="fixes refinement"):
+        mvdec.validate_protocol_max_refinement_epochs(protocol, 100)
+
+
+@pytest.mark.parametrize(
+    "protocol_id",
+    (
+        "mvdec_2025_view2_direct_23_split_concat_v1",
+        "mvdec_2025_view2_direct_23_split_l2norm_average_v1",
+    ),
+)
+def test_removed_public_fusion_protocols_are_rejected(monkeypatch, protocol_id):
+    mvdec = _load_mvdec(monkeypatch)
+
+    with pytest.raises(ValueError, match="Unsupported MvDEC protocol"):
+        mvdec.resolve_mvdec_protocol(
+            protocol_id,
+            kmeans_weight=0.0,
+            greedy_weight=1.0,
+            eigen_direction="largest",
+            target_mode="frozen_snapshot",
+        )
+
+
 def test_encoder_bottleneck_protocol_changes_only_view2_architecture(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -649,72 +643,6 @@ def test_direct_joint_head_protocol_changes_only_view2_architecture(monkeypatch)
     assert protocol.manifest_contract(0.001)["architecture"] != (
         mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
     )
-    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
-
-
-def test_direct_joint_head_concat_protocol_changes_only_fusion(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-
-    protocol = mvdec.resolve_mvdec_protocol(
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
-        kmeans_weight=0.0,
-        greedy_weight=1.0,
-        eigen_direction="largest",
-        target_mode="frozen_snapshot",
-    )
-
-    assert protocol == mvdec.PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL
-    assert protocol.view2_architecture_id == (
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.view2_architecture_id
-    )
-    assert protocol.fusion_contract == mvdec.FUSION_ENCODER_CONCATENATE
-    assert mvdec.protocol_method_name(protocol) == (
-        "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
-    )
-    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
-    )
-    assert protocol.manifest_contract(0.001)["schedule"] == (
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
-    )
-    assert protocol.manifest_contract(0.001)["architecture"] == {
-        "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
-        "fusion": mvdec.FUSION_ENCODER_CONCATENATE,
-    }
-    mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
-
-
-def test_direct_joint_head_l2norm_protocol_changes_only_fusion(monkeypatch):
-    mvdec = _load_mvdec(monkeypatch)
-
-    protocol = mvdec.resolve_mvdec_protocol(
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
-        kmeans_weight=0.0,
-        greedy_weight=1.0,
-        eigen_direction="largest",
-        target_mode="frozen_snapshot",
-    )
-
-    assert protocol == mvdec.PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL
-    assert protocol.view2_architecture_id == (
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.view2_architecture_id
-    )
-    assert protocol.fusion_contract == (
-        mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE
-    )
-    assert mvdec.protocol_method_name(protocol) == (
-        "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
-    )
-    assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
-    )
-    assert protocol.manifest_contract(0.001)["schedule"] == (
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
-    )
-    assert protocol.manifest_contract(0.001)["architecture"] == {
-        "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
-        "fusion": mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
-    }
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
 
@@ -991,6 +919,13 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     ),
     (
         (
+            "PUBLIC_DEKM_CONSISTENT_PROTOCOL",
+            "mvdec_dekm_consistent_public_v1",
+            "mvdec2025_post_skip_latent_bottleneck_v2",
+            "MvDEC-DEKM-consistent-public",
+            "mvdec2025_encoder_average",
+        ),
+        (
             "PUBLIC_REPRODUCTION_PROTOCOL",
             "mvdec_2025_public_reproduction_v1",
             "mvdec2025_post_skip_latent_bottleneck_v2",
@@ -1010,20 +945,6 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
             "MvDEC-2025-View2-direct-joint-head-ablation",
             "mvdec2025_encoder_average",
-        ),
-        (
-            "PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL",
-            "mvdec_2025_view2_direct_23_split_concat_v1",
-            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
-            "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation",
-            "mvdec2025_encoder_concatenate",
-        ),
-        (
-            "PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL",
-            "mvdec_2025_view2_direct_23_split_l2norm_average_v1",
-            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
-            "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation",
-            "mvdec2025_encoder_l2_normalized_average",
         ),
     ),
 )
@@ -1132,7 +1053,7 @@ def test_public_reproduction_artifact_persists_view_metrics(
         pickle.dump(artifact, file)
     manifest_payload["output_sha256"]["artifact"] = file_sha256(artifact_path)
     write_run_manifest(tmp_path / "manifest.json", manifest_payload)
-    with pytest.raises(ValueError, match="public-reproduction artifact"):
+    with pytest.raises(ValueError, match="public artifact"):
         load_mvdec_result(result_path=artifact_path, data_path=data_path)
 
 

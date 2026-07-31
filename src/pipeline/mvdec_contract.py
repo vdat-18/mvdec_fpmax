@@ -8,7 +8,3 @@ VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID = (
     "mvdec2025_post_skip_direct_latent_reconstruction_head_v1"
 )
 FUSION_ENCODER_AVERAGE = "mvdec2025_encoder_average"
-FUSION_ENCODER_CONCATENATE = "mvdec2025_encoder_concatenate"
-FUSION_ENCODER_L2_NORMALIZED_AVERAGE = (
-    "mvdec2025_encoder_l2_normalized_average"
-)

@@ -1,5 +1,9 @@
 # Review toàn diện repository theo chuẩn code review và phương pháp nghiên cứu Q1
 
+> Historical note: the concat and L2-normalized-average protocols discussed in
+> this review were later removed from executable code and the public experiment
+> matrix on 2026-07-30. Their recorded results remain negative-ablation evidence.
+
 ## Quy ước phân loại
 
 - **[BUG - BẮT BUỘC SỬA]**: lỗi thực thi, sai identity thuật toán, mất artifact, sai kết quả hoặc không thể tái lập.

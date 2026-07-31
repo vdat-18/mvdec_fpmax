@@ -20,8 +20,6 @@ from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
-    FUSION_ENCODER_CONCATENATE,
-    FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -69,34 +67,29 @@ GREEDY_TARGET_MODES = ("selected_dimension_only", "frozen_snapshot")
 DEFAULT_GREEDY_EIGEN_DIRECTION = "largest"
 DEFAULT_GREEDY_TARGET_MODE = "frozen_snapshot"
 PRIMARY_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
+PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID = "mvdec_dekm_consistent_public_v1"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
 PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
     "mvdec_2025_view2_encoder_bottleneck_v1"
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
-PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID = (
-    "mvdec_2025_view2_direct_23_split_concat_v1"
-)
-PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID = (
-    "mvdec_2025_view2_direct_23_split_l2norm_average_v1"
-)
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
-        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
-        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
     }
+)
+PUBLIC_PROTOCOL_IDS = frozenset(
+    {PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID, *PUBLIC_REPRODUCTION_PROTOCOL_IDS}
 )
 CUSTOM_PROTOCOL_ID = "custom"
 PROTOCOL_IDS = (
     PRIMARY_PROTOCOL_ID,
+    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
-    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
-    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -230,7 +223,7 @@ class MvdecProtocol:
         }
         if self.fusion_contract != FUSION_ENCODER_AVERAGE:
             contract["architecture"]["fusion"] = self.fusion_contract
-        if self.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+        if self.protocol_id in PUBLIC_PROTOCOL_IDS:
             contract["schedule"] = {
                 "scope": "public_datasets_only",
                 "pretraining": {
@@ -315,6 +308,21 @@ PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
     pretrain_shuffle_buffer=RELEASE_PRETRAIN_SHUFFLE_BUFFER,
 )
 
+PUBLIC_DEKM_CONSISTENT_PROTOCOL = replace(
+    PRIMARY_MVDEC_PROTOCOL,
+    protocol_id=PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
+    claim_scope=(
+        "DEKM-2021-consistent MvDEC objective adapted to the bounded public "
+        "benchmark schedule; diagnostic protocol, not an exact-paper claim"
+    ),
+    refinement_source=(
+        "DEKM 2021 objective and batching with the bounded MvDEC public schedule"
+    ),
+    kmeans_refresh_policy=RELEASE_KMEANS_REFRESH_POLICY,
+    kmeans_refresh_interval=RELEASE_KMEANS_REFRESH_INTERVAL,
+    max_training_steps=RELEASE_MAX_TRAINING_STEPS,
+)
+
 PUBLIC_ENCODER_BOTTLENECK_PROTOCOL = replace(
     PUBLIC_REPRODUCTION_PROTOCOL,
     protocol_id=PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
@@ -342,45 +350,11 @@ PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL = replace(
     view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
 )
 
-PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL = replace(
-    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
-    protocol_id=PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID,
-    claim_scope=(
-        "MvDEC 2025 public-reproduction fusion diagnostic using concatenated "
-        "View1/View2 latents with the Fig. 2 direct joint View2 head; ablation, "
-        "not an exact-paper claim"
-    ),
-    architecture_source=(
-        "MvDEC 2025 dense U-Net direct joint head with latent concatenation"
-    ),
-    fusion_contract=FUSION_ENCODER_CONCATENATE,
-)
-
-PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL = replace(
-    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
-    protocol_id=PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
-    claim_scope=(
-        "MvDEC 2025 public-reproduction scale-sensitivity diagnostic using "
-        "per-sample L2-normalized View1/View2 latents with the Fig. 2 direct "
-        "joint View2 head; ablation, not an exact-paper claim"
-    ),
-    architecture_source=(
-        "MvDEC 2025 dense U-Net direct joint head with L2-normalized latent "
-        "average fusion"
-    ),
-    fusion_contract=FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
-)
-
-PUBLIC_REPRODUCTION_PROTOCOLS = {
+PUBLIC_PROTOCOLS = {
+    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
-    PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID: (
-        PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL
-    ),
-    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
-        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL
-    ),
 }
 
 
@@ -413,7 +387,7 @@ def validate_protocol_assignment_change_tolerance(
         protocol.protocol_id
         in {
             PRIMARY_PROTOCOL_ID,
-            *PUBLIC_REPRODUCTION_PROTOCOL_IDS,
+            *PUBLIC_PROTOCOL_IDS,
         }
         and tolerance != expected
     ):
@@ -432,7 +406,7 @@ def validate_protocol_dataset_scope(
     """Reject use of the public reproduction contract on private datasets."""
 
     if (
-        protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
+        protocol.protocol_id in PUBLIC_PROTOCOL_IDS
         and dataset_name not in PUBLIC_DATASETS
     ):
         raise ValueError(
@@ -449,7 +423,7 @@ def validate_protocol_max_refinement_epochs(
 
     value = validate_max_refinement_epochs(max_refinement_epochs)
     if (
-        protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
+        protocol.protocol_id in PUBLIC_PROTOCOL_IDS
         and value != MAX_REFINEMENT_EPOCHS
     ):
         raise ValueError(
@@ -471,7 +445,10 @@ def view_output_layout():
 def final_training_objective(protocol: MvdecProtocol) -> str:
     """Return an objective name that does not overclaim paper fidelity."""
 
-    if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
+    if protocol.protocol_id in {
+        PRIMARY_PROTOCOL_ID,
+        PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
+    }:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
@@ -503,8 +480,8 @@ def resolve_mvdec_protocol(
         raise ValueError('MvDEC loss weights must be non-negative.')
     greedy_eigen_index(eigen_direction)
     validate_greedy_target_mode(target_mode)
-    if protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
-        public_protocol = PUBLIC_REPRODUCTION_PROTOCOLS[protocol_id]
+    if protocol_id in PUBLIC_PROTOCOL_IDS:
+        public_protocol = PUBLIC_PROTOCOLS[protocol_id]
         if any(
             (
                 kmeans_weight != public_protocol.kmeans_weight,
@@ -572,15 +549,13 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
 
     if protocol.protocol_id == PRIMARY_PROTOCOL_ID:
         return "MvDEC-DEKM-consistent"
+    if protocol.protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID:
+        return "MvDEC-DEKM-consistent-public"
     if protocol.protocol_id == PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID:
         return "MvDEC-2025-View2-encoder-bottleneck-ablation"
     if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID:
         return "MvDEC-2025-View2-direct-joint-head-ablation"
-    if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_CONCAT_PROTOCOL_ID:
-        return "MvDEC-2025-View2-direct-joint-head-latent-concat-ablation"
-    if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID:
-        return "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
 
@@ -619,7 +594,7 @@ def resolved_run_config(
         "assignment_change_tolerance": float(tolerance),
         "l4_reduction": protocol.l4_reduction,
     }
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         config.update(
             {
                 "pretrain_loss_reduction": protocol.pretrain_loss_reduction,
@@ -643,19 +618,6 @@ def reconstruction_output(view_output):
     return view_output[:, -input_shape:]
 
 
-def l2_normalize_latent(
-    latent: np.ndarray | tf.Tensor,
-) -> np.ndarray | tf.Tensor:
-    """L2-normalize each latent row with TensorFlow's stable zero handling."""
-
-    if isinstance(latent, np.ndarray):
-        return tf.math.l2_normalize(
-            tf.convert_to_tensor(latent),
-            axis=1,
-        ).numpy()
-    return tf.math.l2_normalize(latent, axis=1)
-
-
 def fused_latent_embedding(
     view1_output,
     view2_output,
@@ -667,14 +629,6 @@ def fused_latent_embedding(
     h_view2 = latent_embedding(view2_output)
     if fusion_contract == FUSION_ENCODER_AVERAGE:
         return (h_view1 + h_view2) / 2
-    if fusion_contract == FUSION_ENCODER_CONCATENATE:
-        if isinstance(h_view1, np.ndarray):
-            return np.concatenate([h_view1, h_view2], axis=1)
-        return tf.concat([h_view1, h_view2], axis=1)
-    if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
-        return (
-            l2_normalize_latent(h_view1) + l2_normalize_latent(h_view2)
-        ) / 2
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
 
 
@@ -835,7 +789,7 @@ def resolve_refinement_schedule(
         protocol,
         max_refinement_epochs,
     )
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         batches_per_epoch = (n_samples + current_batch_size - 1) // current_batch_size
         return RefinementSchedule(
             batches_per_epoch=batches_per_epoch,
@@ -1170,13 +1124,6 @@ def save_airpollution_mvdec_artifact(
         FUSION_ENCODER_AVERAGE: (
             "h_fused = (view1_latent + view2_latent) / 2"
         ),
-        FUSION_ENCODER_CONCATENATE: (
-            "h_fused = concatenate(view1_latent, view2_latent)"
-        ),
-        FUSION_ENCODER_L2_NORMALIZED_AVERAGE: (
-            "h_fused = (L2_normalize(view1_latent) + "
-            "L2_normalize(view2_latent)) / 2"
-        ),
     }
     fusion_expression = fusion_expressions[protocol.fusion_contract]
 
@@ -1280,7 +1227,7 @@ def save_airpollution_mvdec_artifact(
     if external_metrics is not None:
         artifact["acc"] = float(external_metrics.acc)
         artifact["nmi"] = float(external_metrics.nmi)
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         if not isinstance(representation_external_metrics, dict) or set(
             representation_external_metrics
         ) != {"view1", "view2", "fused"}:
@@ -1656,7 +1603,7 @@ def _training_metric_for_labels(
 ):
     """Defer public-reproduction ground-truth metrics until final evaluation."""
 
-    if y is not None and protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if y is not None and protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         return 'external_metrics = deferred_to_final', None
     return _metric_for_labels(features, labels, y=y)
 
@@ -1935,10 +1882,13 @@ def train(
             ite,
             kmeans_refresh_interval,
         )
+        if (
+            protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY
+            and ite % batches_per_epoch == 0
+        ):
+            epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
         if log_paper_step_checkpoint:
             epoch_batch_losses = []
-            if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
-                epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
             view1_output = model1(x).numpy()
             view2_output = model2(x).numpy()
             H = fused_latent_embedding(
@@ -1991,7 +1941,7 @@ def train(
                 "lambda_kmeans": lambda_kmeans,
                 "lambda_greedy": lambda_greedy,
             }
-            if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+            if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
                 eigen_log_fields["next_kmeans_n_init"] = kmeans_n_init
             loss = np.round(_loss_scalar(loss_value), 5)
             metric_str, metric_value = _training_metric_for_labels(
@@ -2060,7 +2010,7 @@ def train(
             stop_reason = 'converged_assignment'
             refinement_epochs_completed = (
                 ite // batches_per_epoch
-                if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
+                if protocol.protocol_id in PUBLIC_PROTOCOL_IDS
                 else ite // kmeans_refresh_interval
             )
             training_steps_completed = ite
@@ -2275,7 +2225,7 @@ def train(
     )
     model1.save_weights(resolved_final_view1_path)
     model2.save_weights(resolved_final_view2_path)
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         stop_log_str = (
             f"phase:training_stop; stop_reason:{stop_reason}; "
             f"training_steps_completed:{training_steps_completed}; "
@@ -2305,7 +2255,7 @@ def train(
         protocol.fusion_contract,
     )
     representation_evaluations = None
-    if y is not None and protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if y is not None and protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         representation_evaluations = evaluate_public_representations(
             h1,
             h2,
@@ -2361,12 +2311,16 @@ def train(
         "stop_reason": stop_reason,
         "refinement_epochs_completed": refinement_epochs_completed,
     }
-    if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         final_log_fields.update(
             {
                 "training_steps_completed": training_steps_completed,
                 "max_training_steps": max_training_steps,
-                "loss_scope": "last_completed_release_update_window_mean",
+                "loss_scope": (
+                    "last_completed_update_window_mean"
+                    if protocol.protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
+                    else "last_completed_release_update_window_mean"
+                ),
             }
         )
     else:
@@ -2440,7 +2394,7 @@ def train(
             score=artifact_score,
             iteration=(
                 training_steps_completed
-                if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS
+                if protocol.protocol_id in PUBLIC_PROTOCOL_IDS
                 else refinement_epochs_completed
             ),
             orig_idx=orig_idx,
@@ -2839,7 +2793,7 @@ if __name__ == '__main__':
                 f'greedy_target_mode:{args.greedy_target_mode}; '
                 f'acc:{acc}; nmi:{nmi}; time:{time.time() - time_start:.3f}'
             )
-            if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
+            if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
                 run_str += (
                     f"; view1_acc:{metric['view1_acc']}; "
                     f"view1_nmi:{metric['view1_nmi']}; "
