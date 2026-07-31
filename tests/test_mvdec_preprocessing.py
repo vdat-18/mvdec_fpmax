@@ -541,30 +541,23 @@ def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatc
         "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     )
     assert mvdec.protocol_method_name(protocol) == "MvDEC-DEKM-consistent-public"
-    assert schedule.batches_per_epoch == 39
+    assert schedule.batches_per_epoch == 40
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
-    assert len(
-        mvdec.epoch_batch_indices(
-            n_samples=10_000,
-            current_batch_size=256,
-            rng=np.random.default_rng(42),
-        )
-    ) == schedule.batches_per_epoch
     assert protocol.manifest_contract(0.001)["schedule"]["pretraining"] == {
         "epochs": 200,
         "batch_size": 256,
-        "loss_reduction": "sum_squared_dimensions_per_sample",
-        "shuffle_buffer": None,
+        "loss_reduction": "mean_squared_dimensions_per_sample",
+        "shuffle_buffer": 8000,
     }
     assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
         "objective": "joint_reconstruction_plus_greedy",
         "batch_size": 256,
-        "batching_policy": "balanced_shuffled_each_epoch",
+        "batching_policy": "sequential_release_order",
         "kmeans_refresh_policy": "fixed_10_updates",
         "update_interval": 10,
         "max_training_steps": 14_000,
-        "kmeans_n_init_policy": "fixed_100",
+        "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
     }
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
     with pytest.raises(ValueError, match="supports only"):

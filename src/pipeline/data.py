@@ -334,27 +334,15 @@ def _validate_public_protocol_contract(
         if is_dekm_consistent
         else "mean_squared_dimensions_per_sample_sum_batch_gradient"
     )
-    expected_pretrain_reduction = (
-        "sum_squared_dimensions_per_sample"
-        if is_dekm_consistent
-        else "mean_squared_dimensions_per_sample"
-    )
-    expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
+    expected_pretrain_reduction = "mean_squared_dimensions_per_sample"
+    expected_pretrain_shuffle_buffer = 8000
     expected_refinement_objective = (
         "joint_reconstruction_plus_greedy"
         if is_dekm_consistent
         else "release_reconstruction_plus_greedy_mse"
     )
-    expected_batching_policy = (
-        "balanced_shuffled_each_epoch"
-        if is_dekm_consistent
-        else "sequential_release_order"
-    )
-    expected_kmeans_n_init_policy = (
-        "fixed_100"
-        if is_dekm_consistent
-        else "initial_100_then_twice_previous_n_iter"
-    )
+    expected_batching_policy = "sequential_release_order"
+    expected_kmeans_n_init_policy = "initial_100_then_twice_previous_n_iter"
     expected_loss_terms = {
         "L1_reconstruction": {"weight": 1.0, "optimized": True},
         "L2_kmeans": {"weight": 0.0, "optimized": False},
