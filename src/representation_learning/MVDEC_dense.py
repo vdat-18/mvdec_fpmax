@@ -316,15 +316,11 @@ PUBLIC_DEKM_CONSISTENT_PROTOCOL = replace(
         "benchmark schedule; diagnostic protocol, not an exact-paper claim"
     ),
     refinement_source=(
-        "DEKM 2021 objective with the bounded MvDEC public training schedule"
+        "DEKM 2021 objective and batching with the bounded MvDEC public schedule"
     ),
     kmeans_refresh_policy=RELEASE_KMEANS_REFRESH_POLICY,
     kmeans_refresh_interval=RELEASE_KMEANS_REFRESH_INTERVAL,
-    refinement_batching_policy=RELEASE_REFINEMENT_BATCHING_POLICY,
     max_training_steps=RELEASE_MAX_TRAINING_STEPS,
-    kmeans_n_init_policy=RELEASE_KMEANS_N_INIT_POLICY,
-    pretrain_loss_reduction=RELEASE_PRETRAIN_REDUCTION,
-    pretrain_shuffle_buffer=RELEASE_PRETRAIN_SHUFFLE_BUFFER,
 )
 
 PUBLIC_ENCODER_BOTTLENECK_PROTOCOL = replace(
