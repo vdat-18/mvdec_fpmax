@@ -541,9 +541,16 @@ def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatc
         "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     )
     assert mvdec.protocol_method_name(protocol) == "MvDEC-DEKM-consistent-public"
-    assert schedule.batches_per_epoch == 40
+    assert schedule.batches_per_epoch == 39
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
+    assert len(
+        mvdec.epoch_batch_indices(
+            n_samples=10_000,
+            current_batch_size=256,
+            rng=np.random.default_rng(42),
+        )
+    ) == schedule.batches_per_epoch
     assert protocol.manifest_contract(0.001)["schedule"]["pretraining"] == {
         "epochs": 200,
         "batch_size": 256,

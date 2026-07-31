@@ -790,7 +790,11 @@ def resolve_refinement_schedule(
         max_refinement_epochs,
     )
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
-        batches_per_epoch = (n_samples + current_batch_size - 1) // current_batch_size
+        batches_per_epoch = (
+            number_of_batches(n_samples, current_batch_size)
+            if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY
+            else (n_samples + current_batch_size - 1) // current_batch_size
+        )
         return RefinementSchedule(
             batches_per_epoch=batches_per_epoch,
             kmeans_refresh_interval=int(protocol.kmeans_refresh_interval),
