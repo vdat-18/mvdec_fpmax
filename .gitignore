@@ -1,4 +1,4 @@
-﻿# Virtual environments
+# Virtual environments
 .venv/
 venv/
 env/
@@ -43,9 +43,8 @@ external_repos/DEKM/log_history/
 # Model weight checkpoints (regenerable, not meant for git; keep log_history/*.csv instead)
 *.weights.h5
 
-# Experiment outputs
-output/*_trials.csv
-output/**/*_trials.csv
+# Experiment outputs are regenerated locally or on Kaggle.
+output/
 
 # Downloaded public experiment datasets
 data/public/raw/
