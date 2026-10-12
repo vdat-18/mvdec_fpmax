@@ -194,9 +194,17 @@ inconsistency rather than the repository default.
 
 The first milestone is an isolated reproduction of the official DEKM release on
 REUTERS. Do not start MvDEC or the enhancement stages until this baseline has
-been validated. The runner preserves the released dense architecture, 200-epoch
-autoencoder pretraining, dynamic K-Means refreshes, frozen greedy target, and
-last/largest eigen direction while supporting current Kaggle TensorFlow.
+been validated. The runner exposes two separate, immutable protocols:
+
+- `modern-deterministic`: Xavier initialization, symmetric eigendecomposition,
+  seeded K-Means, 0.1% stopping tolerance, and deterministic TensorFlow ops.
+- `release-2021`: the released 2021 code behavior: uniform initialization,
+  `np.linalg.eig`, global-RNG K-Means, 0.5% stopping tolerance, and a full
+  10,000-row REUTERS refinement batch.
+
+`release-2021` is seeded by the wrapper so runs can be audited, but executes on
+the current TensorFlow/scikit-learn runtime. It is not a bitwise reproduction of
+the unavailable Python 3.8 / TensorFlow 2.4.1 legacy environment.
 
 Download the exact files linked by the official DEKM Google Drive folder:
 
@@ -210,8 +218,9 @@ intended for a Kaggle GPU:
 
 ```bash
 dekm-reproduce REUTERS \
+  --protocol release-2021 \
   --seed 42 \
-  --runs 1 \
+  --runs 3 \
   --require-gpu \
   --dataset-root external_repos/DEKM/datasets \
   --output-dir output/public_benchmark/dekm
@@ -219,12 +228,12 @@ dekm-reproduce REUTERS \
 
 For Kaggle, enable both **GPU** and **Internet**, then run
 `notebooks/dekm_2021_reuters_kaggle.ipynb`. The notebook clones the `dev`
-branch, downloads the official REUTERS arrays, runs seed 42, displays the
-manifest and summary, and creates a result ZIP. Validate seed 42 before running
-seeds 43 and 44.
-The runner enables deterministic TensorFlow kernels and deterministic `tf.data`
-execution. The Kaggle notebook executes seed 42 twice in isolated directories
-and rejects the run unless both metrics and persisted output hashes match.
+branch, downloads the official REUTERS arrays, runs release-faithful seeds
+42-44, displays the manifests and aggregate summary, and creates a result ZIP.
+The manifests record the protocol, dataset/config hashes, runtime versions, and
+whether deterministic TensorFlow execution was enabled. Use
+`--protocol modern-deterministic` when exact replay on the same runtime is the
+primary goal.
 
 The DEKM paper reports these three-run reference averages; a single deterministic
 seed is not expected to match an average exactly:
@@ -237,7 +246,7 @@ seed is not expected to match an average exactly:
 
 Each completed seed writes a manifest, assignments, training log, embedding
 artifact, and model weights under
-`output/public_benchmark/dekm/<dataset>/dekm_2021_released_code_v1/<config_hash_12>/seed_<seed>/`.
+`output/public_benchmark/dekm/<dataset>/<protocol_id>/<config_hash_12>/seed_<seed>/`.
 Generated `output/` data and downloaded datasets are intentionally ignored by
 Git. The RCV1 release contains only split indices, so its run additionally
 requires the scikit-learn RCV1 cache.

@@ -29,7 +29,8 @@ from pipeline.public_artifacts import (
 )
 from pipeline.public_data import PublicDataset, load_dekm_public_dataset
 from representation_learning.dekm_protocol import (
-    DEKM_RELEASED_PROTOCOL_ID,
+    DEKM_MODERN_PROTOCOL_ID,
+    DEKM_RELEASE_2021_PROTOCOL_ID,
     DekmConfig,
     assignment_change_count,
     build_frozen_greedy_target,
@@ -62,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         description="Reproduce the DEKM 2021 dense public benchmark protocol."
     )
     parser.add_argument("dataset", choices=("REUTERS", "20NEWS", "RCV1"))
+    parser.add_argument(
+        "--protocol",
+        choices=("modern-deterministic", "release-2021"),
+        default="modern-deterministic",
+    )
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dataset-root", type=Path, default=DEKM_DATASET_DIR)
@@ -72,10 +78,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--pretrain-epochs", type=int, default=200)
     parser.add_argument("--pretrain-batch-size", type=int, default=256)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int)
     parser.add_argument("--update-interval", type=int, default=10)
     parser.add_argument("--max-refinement-steps", type=int, default=14_000)
-    parser.add_argument("--assignment-tolerance", type=float, default=0.001)
+    parser.add_argument("--assignment-tolerance", type=float)
     parser.add_argument("--initial-kmeans-n-init", type=int, default=100)
     parser.add_argument(
         "--require-gpu",
@@ -110,7 +116,66 @@ def enable_tensorflow_determinism(tf: Any) -> None:
     tf.config.experimental.enable_op_determinism()
 
 
-def build_model(tf: Any, input_dim: int, latent_dim: int) -> Any:
+def build_config(args: argparse.Namespace) -> DekmConfig:
+    """Build the selected modern or release-faithful DEKM contract."""
+
+    common = {
+        "pretrain_epochs": args.pretrain_epochs,
+        "pretrain_batch_size": args.pretrain_batch_size,
+        "update_interval": args.update_interval,
+        "max_refinement_steps": args.max_refinement_steps,
+        "initial_kmeans_n_init": args.initial_kmeans_n_init,
+    }
+    if args.protocol == "release-2021":
+        config = DekmConfig(
+            protocol_id=DEKM_RELEASE_2021_PROTOCOL_ID,
+            kernel_initializer="uniform",
+            eigen_solver="general_eig",
+            kmeans_random_state="global",
+            deterministic_runtime=False,
+            data_shuffle="release_random_0_99",
+            refinement_batch_size=(
+                args.batch_size
+                if args.batch_size is not None
+                else 10_000
+                if args.dataset == "REUTERS"
+                else 256
+            ),
+            assignment_change_tolerance=(
+                args.assignment_tolerance
+                if args.assignment_tolerance is not None
+                else 0.005
+            ),
+            **common,
+        )
+    else:
+        config = DekmConfig(
+            protocol_id=DEKM_MODERN_PROTOCOL_ID,
+            kernel_initializer="glorot_uniform",
+            eigen_solver="symmetric_eigh",
+            kmeans_random_state="seeded",
+            deterministic_runtime=True,
+            data_shuffle="direct_seed",
+            refinement_batch_size=(
+                args.batch_size if args.batch_size is not None else 256
+            ),
+            assignment_change_tolerance=(
+                args.assignment_tolerance
+                if args.assignment_tolerance is not None
+                else 0.001
+            ),
+            **common,
+        )
+    config.validate()
+    return config
+
+
+def build_model(
+    tf: Any,
+    input_dim: int,
+    latent_dim: int,
+    kernel_initializer: str,
+) -> Any:
     """Build the released dense DEKM autoencoder and concatenated output."""
 
     layers = tf.keras.layers
@@ -120,12 +185,12 @@ def build_model(tf: Any, input_dim: int, latent_dim: int) -> Any:
         values = layers.Dense(
             units,
             activation="relu",
-            kernel_initializer="glorot_uniform",
+            kernel_initializer=kernel_initializer,
             name=f"encoder_dense_{index}",
         )(values)
     embedding = layers.Dense(
         latent_dim,
-        kernel_initializer="glorot_uniform",
+        kernel_initializer=kernel_initializer,
         name="embedding",
     )(values)
 
@@ -134,12 +199,12 @@ def build_model(tf: Any, input_dim: int, latent_dim: int) -> Any:
         values = layers.Dense(
             units,
             activation="relu",
-            kernel_initializer="glorot_uniform",
+            kernel_initializer=kernel_initializer,
             name=f"decoder_dense_{index}",
         )(values)
     reconstruction = layers.Dense(
         input_dim,
-        kernel_initializer="glorot_uniform",
+        kernel_initializer=kernel_initializer,
         name="reconstruction",
     )(values)
     outputs = layers.Concatenate(name="dekm_output")([embedding, reconstruction])
@@ -171,10 +236,15 @@ def pretrain(
     options.deterministic = True
     dataset = (
         tf.data.Dataset.from_tensor_slices((features, features))
-        .shuffle(8000, seed=seed, reshuffle_each_iteration=True)
+        .shuffle(
+            8000,
+            seed=seed if config.data_shuffle == "direct_seed" else None,
+            reshuffle_each_iteration=True,
+        )
         .batch(config.pretrain_batch_size)
-        .with_options(options)
     )
+    if config.deterministic_runtime:
+        dataset = dataset.with_options(options)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(),
         loss=reconstruction_loss(tf, config.latent_dim),
@@ -216,7 +286,7 @@ def run_refinement(
             kmeans = KMeans(
                 n_clusters=n_clusters,
                 n_init=kmeans_n_init,
-                random_state=seed,
+                random_state=(seed if config.kmeans_random_state == "seeded" else None),
             ).fit(embedding)
             labels = kmeans.labels_.astype(int)
             centroids = kmeans.cluster_centers_
@@ -224,7 +294,10 @@ def run_refinement(
             previous_labels = labels.copy()
 
             scatter = within_cluster_scatter(embedding, labels, centroids)
-            eigenvalues, eigenvectors = sorted_eigendecomposition(scatter)
+            eigenvalues, eigenvectors = sorted_eigendecomposition(
+                scatter,
+                solver=config.eigen_solver,
+            )
             transformed_embedding = embedding @ eigenvectors
             transformed_centroids = centroids @ eigenvectors
             metrics = compute_external_metrics(
@@ -325,7 +398,7 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     temporary.replace(path)
 
 
-def runtime_metadata(tf: Any) -> dict[str, object]:
+def runtime_metadata(tf: Any, deterministic_runtime: bool = True) -> dict[str, object]:
     """Capture the environment needed to interpret numerical differences."""
 
     gpu_devices = [device.name for device in tf.config.list_physical_devices("GPU")]
@@ -336,9 +409,11 @@ def runtime_metadata(tf: Any) -> dict[str, object]:
         "scikit_learn": sklearn_version,
         "tensorflow": tf.__version__,
         "gpu_devices": gpu_devices,
-        "deterministic_runtime_policy": DETERMINISTIC_RUNTIME_POLICY,
-        "tensorflow_op_determinism": True,
-        "tf_data_deterministic": True,
+        "deterministic_runtime_policy": (
+            DETERMINISTIC_RUNTIME_POLICY if deterministic_runtime else "disabled"
+        ),
+        "tensorflow_op_determinism": deterministic_runtime,
+        "tf_data_deterministic": deterministic_runtime,
     }
 
 
@@ -380,14 +455,23 @@ def run_one_seed(
     tf.keras.backend.clear_session()
     tf.keras.utils.set_random_seed(seed)
     started = time.time()
+    if config.data_shuffle == "release_random_0_99":
+        shuffle_seed = int(np.random.randint(100))
+    else:
+        shuffle_seed = seed
     row_indices = tf.random.shuffle(
         np.arange(len(dataset.X), dtype=int),
-        seed=seed,
+        seed=shuffle_seed,
     ).numpy()
     features = dataset.X[row_indices]
     true_labels = dataset.y[row_indices]
 
-    model = build_model(tf, dataset.X.shape[1], config.latent_dim)
+    model = build_model(
+        tf,
+        dataset.X.shape[1],
+        config.latent_dim,
+        config.kernel_initializer,
+    )
     pretrain_path = run_dir / "pretrain.weights.h5"
     final_path = run_dir / "final.weights.h5"
     pretrain(tf, model, features, config, seed, pretrain_path)
@@ -428,7 +512,7 @@ def run_one_seed(
     artifact.update(
         {
             "algorithm_family": "DEKM",
-            "protocol_id": DEKM_RELEASED_PROTOCOL_ID,
+            "protocol_id": config.protocol_id,
             "protocol_contract": config.contract(),
             "config_hash": config_hash(config),
             "steps_completed": result.steps_completed,
@@ -463,7 +547,7 @@ def run_one_seed(
         "status": "complete",
         "dataset": dataset.spec.name,
         "method": "DEKM",
-        "protocol_id": DEKM_RELEASED_PROTOCOL_ID,
+        "protocol_id": config.protocol_id,
         "official_repository": OFFICIAL_REPOSITORY,
         "seed": seed,
         "config": asdict(config),
@@ -477,7 +561,7 @@ def run_one_seed(
         "refreshes_completed": result.refreshes_completed,
         "stop_reason": result.stop_reason,
         "fit_time_seconds": elapsed,
-        "runtime": runtime_metadata(tf),
+        "runtime": runtime_metadata(tf, config.deterministic_runtime),
         "paths": {name: path.name for name, path in output_paths.items()},
         "output_sha256": {
             name: file_sha256(path) for name, path in output_paths.items()
@@ -492,7 +576,7 @@ def run_one_seed(
     return {
         "dataset": dataset.spec.name,
         "method": "DEKM",
-        "protocol_id": DEKM_RELEASED_PROTOCOL_ID,
+        "protocol_id": config.protocol_id,
         "config_hash": config_hash(config),
         "seed": seed,
         "n_samples": len(dataset.X),
@@ -517,20 +601,12 @@ def main() -> None:
         raise ValueError("--runs must be at least 1.")
     if args.seed < 0:
         raise ValueError("--seed must be non-negative.")
-    config = DekmConfig(
-        pretrain_epochs=args.pretrain_epochs,
-        pretrain_batch_size=args.pretrain_batch_size,
-        refinement_batch_size=args.batch_size,
-        update_interval=args.update_interval,
-        max_refinement_steps=args.max_refinement_steps,
-        assignment_change_tolerance=args.assignment_tolerance,
-        initial_kmeans_n_init=args.initial_kmeans_n_init,
-    )
-    config.validate()
+    config = build_config(args)
 
     tf = import_tensorflow()
-    enable_tensorflow_determinism(tf)
-    runtime = runtime_metadata(tf)
+    if config.deterministic_runtime:
+        enable_tensorflow_determinism(tf)
+    runtime = runtime_metadata(tf, config.deterministic_runtime)
     print(json.dumps(runtime, indent=2))
     if args.require_gpu and not runtime["gpu_devices"]:
         raise RuntimeError("--require-gpu was set, but TensorFlow found no GPU.")
@@ -538,10 +614,7 @@ def main() -> None:
     dataset = load_dekm_public_dataset(args.dataset, args.dataset_root)
     hash_prefix = config_hash(config)[:12]
     config_root = (
-        args.output_dir
-        / dataset.spec.name.lower()
-        / DEKM_RELEASED_PROTOCOL_ID
-        / hash_prefix
+        args.output_dir / dataset.spec.name.lower() / config.protocol_id / hash_prefix
     )
     records: list[dict[str, object]] = []
     for seed in range(args.seed, args.seed + args.runs):
@@ -575,7 +648,7 @@ def main() -> None:
                 {
                     "dataset": dataset.spec.name,
                     "method": "DEKM",
-                    "protocol_id": DEKM_RELEASED_PROTOCOL_ID,
+                    "protocol_id": config.protocol_id,
                     "config_hash": config_hash(config),
                     "completed_runs": len(combined),
                     "acc_mean": combined["acc"].mean(),

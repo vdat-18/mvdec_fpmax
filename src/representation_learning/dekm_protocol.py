@@ -9,13 +9,21 @@ from dataclasses import asdict, dataclass
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-DEKM_RELEASED_PROTOCOL_ID = "dekm_2021_released_code_v1"
+DEKM_MODERN_PROTOCOL_ID = "dekm_modern_deterministic_v1"
+DEKM_RELEASE_2021_PROTOCOL_ID = "dekm_2021_release_seeded_modern_runtime_v1"
+DEKM_RELEASED_PROTOCOL_ID = DEKM_MODERN_PROTOCOL_ID
 
 
 @dataclass(frozen=True)
 class DekmConfig:
     """Runtime settings that define one reproducible DEKM experiment."""
 
+    protocol_id: str = DEKM_MODERN_PROTOCOL_ID
+    kernel_initializer: str = "glorot_uniform"
+    eigen_solver: str = "symmetric_eigh"
+    kmeans_random_state: str = "seeded"
+    deterministic_runtime: bool = True
+    data_shuffle: str = "direct_seed"
     pretrain_epochs: int = 200
     pretrain_batch_size: int = 256
     refinement_batch_size: int = 256
@@ -40,6 +48,19 @@ class DekmConfig:
         invalid = [name for name, value in positive_fields.items() if value < 1]
         if invalid:
             raise ValueError(f"DEKM settings must be positive: {invalid}.")
+        if self.protocol_id not in {
+            DEKM_MODERN_PROTOCOL_ID,
+            DEKM_RELEASE_2021_PROTOCOL_ID,
+        }:
+            raise ValueError(f"Unsupported DEKM protocol: {self.protocol_id}.")
+        if self.kernel_initializer not in {"glorot_uniform", "uniform"}:
+            raise ValueError("Unsupported DEKM kernel initializer.")
+        if self.eigen_solver not in {"symmetric_eigh", "general_eig"}:
+            raise ValueError("Unsupported DEKM eigen solver.")
+        if self.kmeans_random_state not in {"seeded", "global"}:
+            raise ValueError("Unsupported DEKM K-Means random-state policy.")
+        if self.data_shuffle not in {"direct_seed", "release_random_0_99"}:
+            raise ValueError("Unsupported DEKM data-shuffle policy.")
         if not 0 <= self.assignment_change_tolerance < 1:
             msg = "assignment_change_tolerance must be in the range [0, 1)."
             raise ValueError(msg)
@@ -48,12 +69,12 @@ class DekmConfig:
         """Return the immutable released-code behavior plus runtime values."""
 
         return {
-            "protocol_id": DEKM_RELEASED_PROTOCOL_ID,
+            "protocol_id": self.protocol_id,
             "architecture": {
                 "encoder_units": [500, 500, 2000, self.latent_dim],
                 "decoder_units": [2000, 500, 500],
                 "hidden_activation": "relu",
-                "kernel_initializer": "glorot_uniform",
+                "kernel_initializer": self.kernel_initializer,
             },
             "pretraining": {
                 "objective": "reconstruction_mse_mean_dimensions",
@@ -65,8 +86,14 @@ class DekmConfig:
                 "optimizer": "adam_default",
                 "batching": "sequential_wraparound",
                 "eigenvalue_order": "ascending",
+                "eigen_solver": self.eigen_solver,
                 "greedy_eigen_direction": "largest_last",
                 "kmeans_refresh_policy": "dynamic_2x_previous_iterations",
+                "kmeans_random_state": self.kmeans_random_state,
+            },
+            "randomness": {
+                "deterministic_runtime": self.deterministic_runtime,
+                "data_shuffle": self.data_shuffle,
             },
             "runtime": asdict(self),
         }
@@ -79,14 +106,24 @@ def config_hash(config: DekmConfig) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def sorted_eigendecomposition(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Match the released DEKM ascending symmetric eigendecomposition."""
+def sorted_eigendecomposition(
+    matrix: np.ndarray,
+    solver: str = "symmetric_eigh",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ascending eigenpairs using the selected DEKM implementation."""
 
     values = np.asarray(matrix, dtype=float)
     if values.ndim != 2 or values.shape[0] != values.shape[1]:
         raise ValueError("The DEKM scatter matrix must be square.")
-    symmetric = (values + values.T) / 2
-    eigenvalues, eigenvectors = np.linalg.eigh(symmetric)
+    if solver == "symmetric_eigh":
+        symmetric = (values + values.T) / 2
+        eigenvalues, eigenvectors = np.linalg.eigh(symmetric)
+    elif solver == "general_eig":
+        eigenvalues, eigenvectors = np.linalg.eig(values)
+        eigenvalues = np.real_if_close(eigenvalues).real
+        eigenvectors = np.real_if_close(eigenvectors).real
+    else:
+        raise ValueError(f"Unsupported DEKM eigen solver: {solver}.")
     order = np.argsort(eigenvalues)
     return eigenvalues[order], eigenvectors[:, order]
 

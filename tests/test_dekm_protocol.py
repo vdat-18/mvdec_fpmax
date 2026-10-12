@@ -7,10 +7,13 @@ import pytest
 
 from representation_learning.DEKM_dense import (
     DETERMINISTIC_RUNTIME_POLICY,
+    build_config,
     enable_tensorflow_determinism,
     runtime_metadata,
 )
 from representation_learning.dekm_protocol import (
+    DEKM_MODERN_PROTOCOL_ID,
+    DEKM_RELEASE_2021_PROTOCOL_ID,
     DekmConfig,
     assignment_change_count,
     build_frozen_greedy_target,
@@ -19,6 +22,67 @@ from representation_learning.dekm_protocol import (
     sorted_eigendecomposition,
     within_cluster_scatter,
 )
+
+
+def config_args(**overrides: object) -> SimpleNamespace:
+    """Return CLI-like values for protocol configuration tests."""
+
+    values = {
+        "dataset": "REUTERS",
+        "protocol": "modern-deterministic",
+        "pretrain_epochs": 200,
+        "pretrain_batch_size": 256,
+        "batch_size": None,
+        "update_interval": 10,
+        "max_refinement_steps": 14_000,
+        "assignment_tolerance": None,
+        "initial_kmeans_n_init": 100,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_modern_protocol_defaults_are_explicit() -> None:
+    config = build_config(config_args())
+
+    assert config.protocol_id == DEKM_MODERN_PROTOCOL_ID
+    assert config.kernel_initializer == "glorot_uniform"
+    assert config.eigen_solver == "symmetric_eigh"
+    assert config.kmeans_random_state == "seeded"
+    assert config.deterministic_runtime is True
+    assert config.data_shuffle == "direct_seed"
+    assert config.refinement_batch_size == 256
+    assert config.assignment_change_tolerance == 0.001
+
+
+def test_release_2021_reuters_defaults_match_released_code() -> None:
+    config = build_config(config_args(protocol="release-2021"))
+    contract = config.contract()
+
+    assert config.protocol_id == DEKM_RELEASE_2021_PROTOCOL_ID
+    assert config.kernel_initializer == "uniform"
+    assert config.eigen_solver == "general_eig"
+    assert config.kmeans_random_state == "global"
+    assert config.deterministic_runtime is False
+    assert config.data_shuffle == "release_random_0_99"
+    assert config.refinement_batch_size == 10_000
+    assert config.assignment_change_tolerance == 0.005
+    assert contract["architecture"]["kernel_initializer"] == "uniform"
+    assert contract["refinement"]["eigen_solver"] == "general_eig"
+
+
+def test_release_2021_non_reuters_and_cli_overrides() -> None:
+    config = build_config(
+        config_args(
+            dataset="20NEWS",
+            protocol="release-2021",
+            batch_size=512,
+            assignment_tolerance=0.01,
+        )
+    )
+
+    assert config.refinement_batch_size == 512
+    assert config.assignment_change_tolerance == 0.01
 
 
 def test_config_validation_rejects_invalid_values() -> None:
@@ -34,6 +98,8 @@ def test_config_hash_is_stable_and_sensitive_to_runtime_values() -> None:
 
     assert config_hash(config) == config_hash(DekmConfig())
     assert config_hash(config) != config_hash(DekmConfig(pretrain_epochs=1))
+    release_config = build_config(config_args(protocol="release-2021"))
+    assert config_hash(config) != config_hash(release_config)
     assert len(config_hash(config)) == 64
 
 
@@ -46,6 +112,23 @@ def test_sorted_eigendecomposition_orders_values_ascending() -> None:
     np.testing.assert_allclose(
         eigenvectors.T @ matrix @ eigenvectors, np.diag(eigenvalues)
     )
+
+
+def test_general_eigendecomposition_matches_symmetric_eigenpairs() -> None:
+    matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
+
+    expected, _ = sorted_eigendecomposition(matrix, solver="symmetric_eigh")
+    actual, eigenvectors = sorted_eigendecomposition(matrix, solver="general_eig")
+
+    np.testing.assert_allclose(actual, expected)
+    np.testing.assert_allclose(
+        matrix @ eigenvectors, eigenvectors * actual[np.newaxis, :]
+    )
+
+
+def test_sorted_eigendecomposition_rejects_unknown_solver() -> None:
+    with pytest.raises(ValueError, match="Unsupported DEKM eigen solver"):
+        sorted_eigendecomposition(np.eye(2), solver="unknown")
 
 
 def test_within_cluster_scatter_matches_manual_result() -> None:
@@ -114,3 +197,16 @@ def test_tensorflow_determinism_is_enabled_and_reported() -> None:
     assert metadata["deterministic_runtime_policy"] == DETERMINISTIC_RUNTIME_POLICY
     assert metadata["tensorflow_op_determinism"] is True
     assert metadata["tf_data_deterministic"] is True
+
+
+def test_runtime_metadata_reports_nondeterministic_release_policy() -> None:
+    fake_tf = SimpleNamespace(
+        __version__="test",
+        config=SimpleNamespace(list_physical_devices=lambda kind: []),
+    )
+
+    metadata = runtime_metadata(fake_tf, deterministic_runtime=False)
+
+    assert metadata["deterministic_runtime_policy"] == "disabled"
+    assert metadata["tensorflow_op_determinism"] is False
+    assert metadata["tf_data_deterministic"] is False
