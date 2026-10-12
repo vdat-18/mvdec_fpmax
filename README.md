@@ -297,6 +297,11 @@ Inf values. A failed or weak literal run remains the literal baseline; any
 changed loss weight, architecture, or schedule must use a separate ablation
 protocol rather than silently changing this contract.
 
+The paper/code contradiction matrix and named Eq. 11 experiments are documented
+in `MVDEC_PAPER_CODE_AUDIT.md`. Run the seed-42 ambiguity matrix on a Kaggle or
+Colab GPU with `notebooks/mvdec_2025_reuters_ambiguity_matrix_kaggle.ipynb`.
+The immutable literal baseline is never overwritten by these experiments.
+
 For the separate MvDEC 2025 public reproduction experiment, first validate
 seed 42 only:
 

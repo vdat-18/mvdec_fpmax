@@ -163,4 +163,7 @@ def test_view2_direct_joint_head_matches_figure_output(monkeypatch):
     assert mvdec.latent_embedding(outputs).shape == (4, 10)
     assert mvdec.reconstruction_output(outputs).shape == (4, 13)
     assert gradient is not None
-    assert float(tensorflow.linalg.norm(gradient)) > 0.0
+    latent_gradient = gradient[:, : mvdec.hidden_units]
+    reconstruction_gradient = gradient[:, mvdec.hidden_units :]
+    assert float(tensorflow.linalg.norm(latent_gradient)) == 0.0
+    assert float(tensorflow.linalg.norm(reconstruction_gradient)) > 0.0

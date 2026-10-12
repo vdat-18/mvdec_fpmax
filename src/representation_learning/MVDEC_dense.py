@@ -74,12 +74,35 @@ PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
+EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID = (
+    "mvdec_2025_equation11_smallest_frozen_v1"
+)
+EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID = (
+    "mvdec_2025_equation11_largest_selected_only_v1"
+)
+EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID = (
+    "mvdec_2025_equation11_smallest_selected_only_v1"
+)
+EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID = (
+    "mvdec_2025_equation11_largest_frozen_full_batch_v1"
+)
+PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_resolved_full_batch_v1"
+EQUATION11_PROTOCOL_IDS = frozenset(
+    {
+        LITERAL_EQUATION11_PROTOCOL_ID,
+        EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID,
+        EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
+        EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
+        EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
+        PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    }
+)
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
-        LITERAL_EQUATION11_PROTOCOL_ID,
+        *EQUATION11_PROTOCOL_IDS,
     }
 )
 PUBLIC_PROTOCOL_IDS = frozenset(
@@ -93,6 +116,11 @@ PROTOCOL_IDS = (
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
+    EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID,
+    EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
+    EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
+    EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -108,6 +136,8 @@ RELEASE_MAX_TRAINING_STEPS = 14_000
 RELEASE_PRETRAIN_SHUFFLE_BUFFER = 8_000
 RELEASE_KMEANS_REFRESH_POLICY = "fixed_10_updates"
 RELEASE_REFINEMENT_BATCHING_POLICY = "sequential_release_order"
+FIXED_256_BATCH_POLICY = "fixed_256"
+FULL_DATASET_BATCH_POLICY = "full_dataset"
 JOINT_REFINEMENT_OBJECTIVE = "joint_reconstruction_plus_greedy"
 RELEASE_REFINEMENT_OBJECTIVE = "release_reconstruction_plus_greedy_mse"
 SUM_SQUARED_PRETRAIN_REDUCTION = "sum_squared_dimensions_per_sample"
@@ -162,6 +192,7 @@ class MvdecProtocol:
     kmeans_refresh_policy: str
     kmeans_refresh_interval: int | None
     refinement_batching_policy: str
+    refinement_batch_size_policy: str
     max_training_steps: int | None
     kmeans_n_init_policy: str
     pretrain_loss_reduction: str
@@ -208,6 +239,9 @@ class MvdecProtocol:
                 'rationale': (
                     'DEKM 2021 sorts ascending and uses the largest/last '
                     'least-informative direction.'
+                    if self.greedy_eigen_direction == 'largest'
+                    else 'MvDEC Section 3.3.4 explicitly identifies the '
+                    'smallest-eigenvalue direction as least informative.'
                 ),
             },
             'greedy_target': {
@@ -215,6 +249,9 @@ class MvdecProtocol:
                 'rationale': (
                     'Frozen transformed-embedding target used by the released '
                     'DEKM 2021 implementation.'
+                    if self.greedy_target_mode == 'frozen_snapshot'
+                    else 'Only the selected transformed dimension contributes '
+                    'to the greedy loss.'
                 ),
             },
             'stopping': {
@@ -225,7 +262,7 @@ class MvdecProtocol:
                 ),
             },
         }
-        if self.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
+        if self.protocol_id in EQUATION11_PROTOCOL_IDS:
             literal_metadata = {
                 'L1_reconstruction': {
                     'definition': (
@@ -273,7 +310,12 @@ class MvdecProtocol:
                 },
                 "refinement": {
                     "objective": self.refinement_objective,
-                    "batch_size": 256,
+                    "batch_size": (
+                        "full_dataset"
+                        if self.refinement_batch_size_policy
+                        == FULL_DATASET_BATCH_POLICY
+                        else 256
+                    ),
                     "batching_policy": self.refinement_batching_policy,
                     "kmeans_refresh_policy": self.kmeans_refresh_policy,
                     "update_interval": self.kmeans_refresh_interval,
@@ -287,6 +329,12 @@ class MvdecProtocol:
                     "ground_truth_usage": "final_evaluation_only",
                 },
             }
+            if self.protocol_id in EQUATION11_PROTOCOL_IDS - {
+                LITERAL_EQUATION11_PROTOCOL_ID
+            }:
+                contract["schedule"]["refinement"]["batch_size_policy"] = (
+                    self.refinement_batch_size_policy
+                )
         return contract
 
 
@@ -309,6 +357,7 @@ PRIMARY_MVDEC_PROTOCOL = MvdecProtocol(
     kmeans_refresh_policy=KMEANS_REFRESH_POLICY,
     kmeans_refresh_interval=None,
     refinement_batching_policy=REFINEMENT_BATCHING_POLICY,
+    refinement_batch_size_policy=FIXED_256_BATCH_POLICY,
     max_training_steps=None,
     kmeans_n_init_policy=FIXED_KMEANS_N_INIT_POLICY,
     pretrain_loss_reduction=SUM_SQUARED_PRETRAIN_REDUCTION,
@@ -341,6 +390,7 @@ PUBLIC_REPRODUCTION_PROTOCOL = MvdecProtocol(
     kmeans_refresh_policy=RELEASE_KMEANS_REFRESH_POLICY,
     kmeans_refresh_interval=RELEASE_KMEANS_REFRESH_INTERVAL,
     refinement_batching_policy=RELEASE_REFINEMENT_BATCHING_POLICY,
+    refinement_batch_size_policy=FIXED_256_BATCH_POLICY,
     max_training_steps=RELEASE_MAX_TRAINING_STEPS,
     kmeans_n_init_policy=RELEASE_KMEANS_N_INIT_POLICY,
     pretrain_loss_reduction=RELEASE_PRETRAIN_REDUCTION,
@@ -453,12 +503,148 @@ LITERAL_EQUATION11_PROTOCOL = replace(
     ),
 )
 
+
+def replace_decision_provenance(provenance, replacements):
+    """Replace named paper decisions while preserving their documented order."""
+
+    return tuple(
+        replacements.get(key, (key, category, rationale))
+        for key, category, rationale in provenance
+    )
+
+
+SMALLEST_EIGEN_PROVENANCE = {
+    'largest_last_eigen_direction': (
+        'smallest_eigen_direction',
+        'paper_explicit_conflicting_statement',
+        'MvDEC Section 3.3.4 identifies the smallest-eigenvalue direction as '
+        'least informative, conflicting with its DEKM-derived last-direction prose.',
+    )
+}
+SELECTED_ONLY_PROVENANCE = {
+    'frozen_greedy_target': (
+        'selected_dimension_only_greedy_target',
+        'paper_resolved_interpretation',
+        'Only the selected transformed dimension contributes to L4; unlike the '
+        'DEKM release, non-selected dimensions are not frozen snapshot anchors.',
+    )
+}
+FULL_BATCH_PROVENANCE = {
+    'refinement_schedule': (
+        'full_batch_refinement_schedule',
+        'paper_table_inference',
+        'MvDEC Table 2 says View1 is the same as DEKM_F, which DEKM defines as '
+        'full-batch representation updating.',
+    )
+}
+
+
+EQUATION11_SMALLEST_FROZEN_PROTOCOL = replace(
+    LITERAL_EQUATION11_PROTOCOL,
+    protocol_id=EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC Eq. 11 ambiguity experiment using the paper's explicit "
+        "smallest-eigenvalue statement and the DEKM frozen target"
+    ),
+    greedy_eigen_direction='smallest',
+    decision_provenance=replace_decision_provenance(
+        LITERAL_EQUATION11_PROTOCOL.decision_provenance,
+        SMALLEST_EIGEN_PROVENANCE,
+    ),
+)
+
+EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL = replace(
+    LITERAL_EQUATION11_PROTOCOL,
+    protocol_id=EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
+    claim_scope=(
+        'MvDEC Eq. 11 ambiguity experiment using the DEKM largest direction '
+        'and a selected-dimension-only greedy loss'
+    ),
+    greedy_target_mode='selected_dimension_only',
+    decision_provenance=replace_decision_provenance(
+        LITERAL_EQUATION11_PROTOCOL.decision_provenance,
+        SELECTED_ONLY_PROVENANCE,
+    ),
+)
+
+EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL = replace(
+    LITERAL_EQUATION11_PROTOCOL,
+    protocol_id=EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
+    claim_scope=(
+        'MvDEC Eq. 11 ambiguity experiment using the smallest direction and '
+        'a selected-dimension-only greedy loss'
+    ),
+    greedy_eigen_direction='smallest',
+    greedy_target_mode='selected_dimension_only',
+    decision_provenance=replace_decision_provenance(
+        replace_decision_provenance(
+            LITERAL_EQUATION11_PROTOCOL.decision_provenance,
+            SMALLEST_EIGEN_PROVENANCE,
+        ),
+        SELECTED_ONLY_PROVENANCE,
+    ),
+)
+
+EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL = replace(
+    LITERAL_EQUATION11_PROTOCOL,
+    protocol_id=EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'MvDEC Eq. 11 batch-isolation experiment using the DEKM largest '
+        'direction, frozen target, and full-dataset refinement batches'
+    ),
+    refinement_batch_size_policy=FULL_DATASET_BATCH_POLICY,
+    decision_provenance=replace_decision_provenance(
+        LITERAL_EQUATION11_PROTOCOL.decision_provenance,
+        FULL_BATCH_PROVENANCE,
+    ),
+)
+
+PAPER_RESOLVED_FULL_BATCH_PROTOCOL = replace(
+    LITERAL_EQUATION11_PROTOCOL,
+    protocol_id=PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Paper-resolved MvDEC experiment: smallest eigen direction, '
+        'selected-dimension-only greedy loss, and full-dataset refinement'
+    ),
+    refinement_source=(
+        'MvDEC 2025 Eq. 11 and smallest-eigenvalue prose, with the full-batch '
+        'DEKM_F clue from Table 2; not an official implementation claim'
+    ),
+    greedy_eigen_direction='smallest',
+    greedy_target_mode='selected_dimension_only',
+    refinement_batch_size_policy=FULL_DATASET_BATCH_POLICY,
+    decision_provenance=replace_decision_provenance(
+        replace_decision_provenance(
+            replace_decision_provenance(
+                LITERAL_EQUATION11_PROTOCOL.decision_provenance,
+                SMALLEST_EIGEN_PROVENANCE,
+            ),
+            SELECTED_ONLY_PROVENANCE,
+        ),
+        FULL_BATCH_PROVENANCE,
+    ),
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_PROTOCOL,
+    EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID: (
+        EQUATION11_SMALLEST_FROZEN_PROTOCOL
+    ),
+    EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID: (
+        EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL
+    ),
+    EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID: (
+        EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL
+    ),
+    EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID: (
+        EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL
+    ),
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
 }
 
 
@@ -554,7 +740,7 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
         PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
     }:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
-    if protocol.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
+    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
@@ -663,6 +849,10 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return "MvDEC-2025-View2-direct-joint-head-ablation"
     if protocol.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
         return 'MvDEC-2025-Eq11-literal'
+    if protocol.protocol_id == PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-paper-resolved-full-batch'
+    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
+        return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
@@ -676,6 +866,7 @@ def resolved_run_config(
     source_sha256: str | None,
     feature_columns: list[str],
     preprocessing_metadata: dict[str, object] | None,
+    resolved_refinement_batch_size: int | None = None,
 ) -> dict[str, object]:
     """Return the full seed-independent configuration used for run identity."""
 
@@ -711,6 +902,23 @@ def resolved_run_config(
                 "update_interval": protocol.kmeans_refresh_interval,
                 "max_training_steps": protocol.max_training_steps,
                 "kmeans_n_init_policy": protocol.kmeans_n_init_policy,
+            }
+        )
+    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS - {
+        LITERAL_EQUATION11_PROTOCOL_ID
+    }:
+        if resolved_refinement_batch_size is None:
+            raise ValueError(
+                'Named Eq. 11 ambiguity protocols require a resolved batch size.'
+            )
+        config.update(
+            {
+                'refinement_batch_size_policy': (
+                    protocol.refinement_batch_size_policy
+                ),
+                'resolved_refinement_batch_size': int(
+                    resolved_refinement_batch_size
+                ),
             }
         )
     if protocol.fusion_contract != FUSION_ENCODER_AVERAGE:
@@ -874,6 +1082,25 @@ def number_of_batches(n_samples: int, current_batch_size: int) -> int:
     if n_samples < 1 or current_batch_size < 1:
         raise ValueError('n_samples and batch_size must be positive.')
     return max(1, (n_samples + current_batch_size // 2) // current_batch_size)
+
+
+def resolve_refinement_batch_size(
+    protocol: MvdecProtocol,
+    n_samples: int,
+    default_batch_size: int,
+) -> int:
+    """Resolve a named protocol's actual refinement batch size."""
+
+    if n_samples < 1 or default_batch_size < 1:
+        raise ValueError('n_samples and default_batch_size must be positive.')
+    if protocol.refinement_batch_size_policy == FIXED_256_BATCH_POLICY:
+        return int(default_batch_size)
+    if protocol.refinement_batch_size_policy == FULL_DATASET_BATCH_POLICY:
+        return int(n_samples)
+    raise ValueError(
+        'Unsupported refinement batch-size policy: '
+        f'{protocol.refinement_batch_size_policy!r}.'
+    )
 
 
 @dataclass(frozen=True)
@@ -1168,6 +1395,7 @@ def save_airpollution_mvdec_artifact(
     protocol=PRIMARY_MVDEC_PROTOCOL,
     run_id=None,
     config_hash=None,
+    refinement_batch_size=None,
 ):
     greedy_eigen_index(greedy_eigen_direction)
     validate_greedy_target_mode(greedy_target_mode)
@@ -1175,10 +1403,13 @@ def save_airpollution_mvdec_artifact(
         protocol,
         max_refinement_epochs,
     )
+    actual_refinement_batch_size = (
+        batch_size if refinement_batch_size is None else int(refinement_batch_size)
+    )
     schedule = resolve_refinement_schedule(
         protocol,
         len(h_fused),
-        batch_size,
+        actual_refinement_batch_size,
         max_refinement_epochs,
     )
     if batches_per_epoch != schedule.batches_per_epoch:
@@ -1296,7 +1527,7 @@ def save_airpollution_mvdec_artifact(
             "seed": random_seed,
             "n_clusters": int(n_clusters),
             "kmeans_n_init": int(KMEANS_N_INIT),
-            "batch_size": int(batch_size),
+            "batch_size": int(actual_refinement_batch_size),
             "pretrain_epochs": int(pretrain_epochs),
             "kmeans_refresh_policy": protocol.kmeans_refresh_policy,
             "refinement_batching_policy": protocol.refinement_batching_policy,
@@ -1338,6 +1569,17 @@ def save_airpollution_mvdec_artifact(
             'preprocessing': preprocessing_metadata,
         },
     }
+    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS - {
+        LITERAL_EQUATION11_PROTOCOL_ID
+    }:
+        batch_metadata = {
+            'refinement_batch_size_policy': (
+                protocol.refinement_batch_size_policy
+            ),
+            'resolved_refinement_batch_size': int(actual_refinement_batch_size),
+        }
+        artifact.update(batch_metadata)
+        artifact['config'].update(batch_metadata)
     if external_metrics is not None:
         artifact["acc"] = float(external_metrics.acc)
         artifact["nmi"] = float(external_metrics.nmi)
@@ -1892,6 +2134,7 @@ def train(
     final_view2_path=None,
     assignments_path=None,
     return_run_metrics=False,
+    refinement_batch_size=None,
 ):
     train_start_time = time.time() if time_start is None else time_start
     if any(
@@ -1912,10 +2155,24 @@ def train(
         max_refinement_epochs,
     )
     progress_interval = validate_progress_interval(progress_interval)
-    schedule = resolve_refinement_schedule(
+    actual_refinement_batch_size = (
+        resolve_refinement_batch_size(protocol, len(x), batch_size)
+        if refinement_batch_size is None
+        else int(refinement_batch_size)
+    )
+    expected_refinement_batch_size = resolve_refinement_batch_size(
         protocol,
         len(x),
         batch_size,
+    )
+    if actual_refinement_batch_size != expected_refinement_batch_size:
+        raise ValueError(
+            'Resolved refinement batch size does not match the protocol policy.'
+        )
+    schedule = resolve_refinement_schedule(
+        protocol,
+        len(x),
+        actual_refinement_batch_size,
         max_refinement_epochs,
     )
     batches_per_epoch = schedule.batches_per_epoch
@@ -2019,7 +2276,9 @@ def train(
             protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY
             and ite % batches_per_epoch == 0
         ):
-            epoch_batches = epoch_batch_indices(len(x), batch_size, batch_rng)
+            epoch_batches = epoch_batch_indices(
+                len(x), actual_refinement_batch_size, batch_rng
+            )
         if log_paper_step_checkpoint:
             epoch_batch_losses = []
             view1_output = model1(x).numpy()
@@ -2151,7 +2410,9 @@ def train(
         if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
             idx = epoch_batches[index]
         else:
-            idx = sequential_release_batch_indices(len(x), batch_size, ite)
+            idx = sequential_release_batch_indices(
+                len(x), actual_refinement_batch_size, ite
+            )
         temp = assignment[idx]
         x_batch = tf.convert_to_tensor(x[idx], dtype=tf.float32)
         y_true_tensor = None
@@ -2556,6 +2817,7 @@ def train(
             protocol=protocol,
             run_id=run_id,
             config_hash=config_hash,
+            refinement_batch_size=actual_refinement_batch_size,
         )
 
     if y is not None:
@@ -2808,6 +3070,11 @@ if __name__ == '__main__':
                 f'feature_{index + 1}' for index in range(public_dataset.X.shape[1])
             ]
             source_sha256 = public_dataset.source_sha256
+        resolved_refinement_batch_size = resolve_refinement_batch_size(
+            protocol,
+            len(x),
+            batch_size,
+        )
         run_config = resolved_run_config(
             protocol=protocol,
             dataset_name=ds_name,
@@ -2816,6 +3083,7 @@ if __name__ == '__main__':
             source_sha256=source_sha256,
             feature_columns=feature_columns,
             preprocessing_metadata=preprocessing_metadata,
+            resolved_refinement_batch_size=resolved_refinement_batch_size,
         )
         run_paths = resolve_run_paths(
             output_root=output_root,
@@ -2889,6 +3157,7 @@ if __name__ == '__main__':
                 final_view2_path=run_paths.final_view2,
                 assignments_path=run_paths.assignments,
                 return_run_metrics=True,
+                refinement_batch_size=resolved_refinement_batch_size,
             )
         except Exception as error:
             write_run_manifest(

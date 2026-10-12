@@ -584,6 +584,177 @@ def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
         )
 
 
+@pytest.mark.parametrize(
+    (
+        'protocol_id',
+        'eigen_direction',
+        'target_mode',
+        'batch_policy',
+        'resolved_batch_size',
+    ),
+    [
+        (
+            'mvdec_2025_equation11_smallest_frozen_v1',
+            'smallest',
+            'frozen_snapshot',
+            'fixed_256',
+            256,
+        ),
+        (
+            'mvdec_2025_equation11_largest_selected_only_v1',
+            'largest',
+            'selected_dimension_only',
+            'fixed_256',
+            256,
+        ),
+        (
+            'mvdec_2025_equation11_smallest_selected_only_v1',
+            'smallest',
+            'selected_dimension_only',
+            'fixed_256',
+            256,
+        ),
+        (
+            'mvdec_2025_equation11_largest_frozen_full_batch_v1',
+            'largest',
+            'frozen_snapshot',
+            'full_dataset',
+            10_000,
+        ),
+        (
+            'mvdec_2025_paper_resolved_full_batch_v1',
+            'smallest',
+            'selected_dimension_only',
+            'full_dataset',
+            10_000,
+        ),
+    ],
+)
+def test_named_equation11_ambiguity_protocols_are_immutable(
+    monkeypatch,
+    protocol_id,
+    eigen_direction,
+    target_mode,
+    batch_policy,
+    resolved_batch_size,
+):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        protocol_id,
+        kmeans_weight=1.0,
+        greedy_weight=1.0,
+        eigen_direction=eigen_direction,
+        target_mode=target_mode,
+    )
+    actual_batch_size = mvdec.resolve_refinement_batch_size(
+        protocol,
+        n_samples=10_000,
+        default_batch_size=256,
+    )
+    schedule = mvdec.resolve_refinement_schedule(
+        protocol,
+        n_samples=10_000,
+        current_batch_size=actual_batch_size,
+        max_refinement_epochs=1400,
+    )
+
+    assert protocol.greedy_eigen_direction == eigen_direction
+    assert protocol.greedy_target_mode == target_mode
+    assert protocol.refinement_batch_size_policy == batch_policy
+    assert actual_batch_size == resolved_batch_size
+    assert schedule.batches_per_epoch == (
+        1 if batch_policy == 'full_dataset' else 40
+    )
+    assert mvdec.final_training_objective(protocol) == (
+        'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
+    )
+    with pytest.raises(ValueError, match='immutable'):
+        mvdec.resolve_mvdec_protocol(
+            protocol_id,
+            kmeans_weight=1.0,
+            greedy_weight=1.0,
+            eigen_direction=(
+                'largest' if eigen_direction == 'smallest' else 'smallest'
+            ),
+            target_mode=target_mode,
+        )
+
+
+def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    contract = mvdec.LITERAL_EQUATION11_PROTOCOL.manifest_contract(0.001)
+
+    assert mvdec.protocol_contract_sha256(contract) == (
+        '97825bcfc9af8637de0959f082576a75f746a4e696ae114f501832adb6bdf651'
+    )
+    assert contract['schedule']['refinement'] == {
+        'objective': 'joint_reconstruction_plus_greedy',
+        'batch_size': 256,
+        'batching_policy': 'sequential_release_order',
+        'kmeans_refresh_policy': 'fixed_10_updates',
+        'update_interval': 10,
+        'max_training_steps': 14_000,
+        'kmeans_n_init_policy': 'initial_100_then_twice_previous_n_iter',
+    }
+
+
+def test_literal_equation11_resolved_config_hash_is_unchanged(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, 'ds_name', 'REUTERS')
+    monkeypatch.setattr(mvdec, 'input_shape', 2000)
+    monkeypatch.setattr(mvdec, 'hidden_units', 10)
+    monkeypatch.setattr(mvdec, 'n_clusters', 4)
+
+    config = mvdec.resolved_run_config(
+        protocol=mvdec.LITERAL_EQUATION11_PROTOCOL,
+        dataset_name='REUTERS',
+        tolerance=0.001,
+        max_refinement_epochs=1400,
+        source_sha256=(
+            '427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b'
+        ),
+        feature_columns=[f'feature_{index + 1}' for index in range(2000)],
+        preprocessing_metadata=None,
+    )
+
+    assert canonical_config_hash(config) == (
+        '65c72cd56cfd16fc1ea3f5259b12fad4e4f583a497414b4bd089baf328acd0f7'
+    )
+    assert 'refinement_batch_size_policy' not in config
+    assert 'resolved_refinement_batch_size' not in config
+
+
+def test_paper_resolved_config_records_full_batch(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    protocol = mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL
+
+    config = mvdec.resolved_run_config(
+        protocol=protocol,
+        dataset_name='REUTERS',
+        tolerance=0.001,
+        max_refinement_epochs=1400,
+        source_sha256='a' * 64,
+        feature_columns=['feature_1'],
+        preprocessing_metadata=None,
+        resolved_refinement_batch_size=10_000,
+    )
+
+    assert config['refinement_batch_size_policy'] == 'full_dataset'
+    assert config['resolved_refinement_batch_size'] == 10_000
+    assert config['protocol_contract']['schedule']['refinement'] == {
+        'objective': 'joint_reconstruction_plus_greedy',
+        'batch_size': 'full_dataset',
+        'batching_policy': 'sequential_release_order',
+        'kmeans_refresh_policy': 'fixed_10_updates',
+        'update_interval': 10,
+        'max_training_steps': 14_000,
+        'kmeans_n_init_policy': 'initial_100_then_twice_previous_n_iter',
+        'batch_size_policy': 'full_dataset',
+    }
+
+
 def test_literal_equation11_direct_head_and_average_fusion(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     monkeypatch.setattr(mvdec, "input_shape", 3)
