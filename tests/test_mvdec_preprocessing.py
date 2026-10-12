@@ -1086,6 +1086,10 @@ def test_public_reproduction_artifact_persists_view_metrics(
 ):
     mvdec = _load_mvdec(monkeypatch)
     protocol = getattr(mvdec, protocol_attribute)
+    monkeypatch.setattr(mvdec, "lambda_reconstruction", protocol.reconstruction_weight)
+    monkeypatch.setattr(mvdec, "lambda_kmeans", protocol.kmeans_weight)
+    monkeypatch.setattr(mvdec, "lambda_orthonormal", protocol.scatter_trace_weight)
+    monkeypatch.setattr(mvdec, "lambda_greedy", protocol.greedy_weight)
     monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
     monkeypatch.setattr(mvdec, "input_shape", 2)
     monkeypatch.setattr(mvdec, "hidden_units", 2)
