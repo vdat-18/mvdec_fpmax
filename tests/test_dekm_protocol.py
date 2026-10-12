@@ -1,8 +1,15 @@
 """Tests for the DEKM 2021 released-code protocol helpers."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
+from representation_learning.DEKM_dense import (
+    DETERMINISTIC_RUNTIME_POLICY,
+    enable_tensorflow_determinism,
+    runtime_metadata,
+)
 from representation_learning.dekm_protocol import (
     DekmConfig,
     assignment_change_count,
@@ -86,3 +93,24 @@ def test_sequential_batches_wrap_after_the_final_partial_batch() -> None:
     np.testing.assert_array_equal(third, [4])
     np.testing.assert_array_equal(wrapped, [0, 1])
     assert final_index == 1
+
+
+def test_tensorflow_determinism_is_enabled_and_reported() -> None:
+    calls: list[str] = []
+    fake_tf = SimpleNamespace(
+        __version__="test",
+        config=SimpleNamespace(
+            experimental=SimpleNamespace(
+                enable_op_determinism=lambda: calls.append("enabled")
+            ),
+            list_physical_devices=lambda kind: [],
+        ),
+    )
+
+    enable_tensorflow_determinism(fake_tf)
+    metadata = runtime_metadata(fake_tf)
+
+    assert calls == ["enabled"]
+    assert metadata["deterministic_runtime_policy"] == DETERMINISTIC_RUNTIME_POLICY
+    assert metadata["tensorflow_op_determinism"] is True
+    assert metadata["tf_data_deterministic"] is True

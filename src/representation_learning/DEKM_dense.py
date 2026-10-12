@@ -40,6 +40,7 @@ from representation_learning.dekm_protocol import (
 )
 
 OFFICIAL_REPOSITORY = "https://github.com/spdj2271/DEKM"
+DETERMINISTIC_RUNTIME_POLICY = "keras_seeded_tf_deterministic_v1"
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,12 @@ def import_tensorflow() -> Any:
     return tf
 
 
+def enable_tensorflow_determinism(tf: Any) -> None:
+    """Require deterministic TensorFlow kernels for repeatable GPU runs."""
+
+    tf.config.experimental.enable_op_determinism()
+
+
 def build_model(tf: Any, input_dim: int, latent_dim: int) -> Any:
     """Build the released dense DEKM autoencoder and concatenated output."""
 
@@ -160,10 +167,13 @@ def pretrain(
 ) -> None:
     """Pretrain the autoencoder with the released reconstruction objective."""
 
+    options = tf.data.Options()
+    options.deterministic = True
     dataset = (
         tf.data.Dataset.from_tensor_slices((features, features))
         .shuffle(8000, seed=seed, reshuffle_each_iteration=True)
         .batch(config.pretrain_batch_size)
+        .with_options(options)
     )
     model.compile(
         optimizer=tf.keras.optimizers.Adam(),
@@ -326,6 +336,9 @@ def runtime_metadata(tf: Any) -> dict[str, object]:
         "scikit_learn": sklearn_version,
         "tensorflow": tf.__version__,
         "gpu_devices": gpu_devices,
+        "deterministic_runtime_policy": DETERMINISTIC_RUNTIME_POLICY,
+        "tensorflow_op_determinism": True,
+        "tf_data_deterministic": True,
     }
 
 
@@ -516,6 +529,7 @@ def main() -> None:
     config.validate()
 
     tf = import_tensorflow()
+    enable_tensorflow_determinism(tf)
     runtime = runtime_metadata(tf)
     print(json.dumps(runtime, indent=2))
     if args.require_gpu and not runtime["gpu_devices"]:

@@ -222,6 +222,9 @@ For Kaggle, enable both **GPU** and **Internet**, then run
 branch, downloads the official REUTERS arrays, runs seed 42, displays the
 manifest and summary, and creates a result ZIP. Validate seed 42 before running
 seeds 43 and 44.
+The runner enables deterministic TensorFlow kernels and deterministic `tf.data`
+execution. The Kaggle notebook executes seed 42 twice in isolated directories
+and rejects the run unless both metrics and persisted output hashes match.
 
 The DEKM paper reports these three-run reference averages; a single deterministic
 seed is not expected to match an average exactly:
