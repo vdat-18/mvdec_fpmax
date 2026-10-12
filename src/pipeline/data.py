@@ -14,7 +14,11 @@ from sklearn.metrics import silhouette_score
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
+    EQUATION11_PROTOCOL_IDS,
+    EQUATION11_PROTOCOL_SETTINGS,
     FUSION_ENCODER_AVERAGE,
+    LITERAL_EQUATION11_PROTOCOL_ID,
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
@@ -44,9 +48,10 @@ PUBLIC_ENCODER_BOTTLENECK_METHOD = (
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_DIRECT_JOINT_HEAD_METHOD = "MvDEC-2025-View2-direct-joint-head-ablation"
-LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
 LITERAL_EQUATION11_OBJECTIVE = "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4"
 LITERAL_EQUATION11_METHOD = "MvDEC-2025-Eq11-literal"
+EQUATION11_AMBIGUITY_METHOD = "MvDEC-2025-Eq11-ambiguity-experiment"
+PAPER_RESOLVED_METHOD = "MvDEC-2025-paper-resolved-full-batch"
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -54,21 +59,26 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
     ),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
-    LITERAL_EQUATION11_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    **{
+        protocol_id: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+        for protocol_id in EQUATION11_PROTOCOL_IDS
+    },
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_METHOD,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_METHOD,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_METHOD,
+    **{
+        protocol_id: EQUATION11_AMBIGUITY_METHOD
+        for protocol_id in EQUATION11_PROTOCOL_IDS
+    },
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_METHOD,
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_METHOD,
 }
 PUBLIC_PROTOCOL_FUSIONS = {
-    PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
-    PUBLIC_REPRODUCTION_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
-    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
-    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
-    LITERAL_EQUATION11_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
+    protocol_id: FUSION_ENCODER_AVERAGE
+    for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
 }
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -330,8 +340,8 @@ def _validate_public_protocol_contract(
     protocol_id = best_result.get("protocol_id")
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
-    is_literal_equation11 = protocol_id == LITERAL_EQUATION11_PROTOCOL_ID
-    if is_literal_equation11:
+    is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
+    if is_equation11:
         expected_objective = LITERAL_EQUATION11_OBJECTIVE
     elif is_dekm_consistent:
         expected_objective = PRIMARY_MVDEC_OBJECTIVE
@@ -339,7 +349,7 @@ def _validate_public_protocol_contract(
         expected_objective = PUBLIC_REPRODUCTION_OBJECTIVE
     expected_l4_reduction = (
         "sum_squared_dimensions_then_mean_batch"
-        if is_dekm_consistent or is_literal_equation11
+        if is_dekm_consistent or is_equation11
         else "mean_squared_dimensions_per_sample_sum_batch_gradient"
     )
     expected_pretrain_reduction = (
@@ -350,7 +360,7 @@ def _validate_public_protocol_contract(
     expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
     expected_refinement_objective = (
         "joint_reconstruction_plus_greedy"
-        if is_dekm_consistent or is_literal_equation11
+        if is_dekm_consistent or is_equation11
         else "release_reconstruction_plus_greedy_mse"
     )
     expected_batching_policy = (
@@ -363,7 +373,7 @@ def _validate_public_protocol_contract(
         if is_dekm_consistent
         else "initial_100_then_twice_previous_n_iter"
     )
-    if is_literal_equation11:
+    if is_equation11:
         expected_loss_terms = {
             "L1_reconstruction": {
                 "weight": 1.0,
@@ -416,6 +426,41 @@ def _validate_public_protocol_contract(
                 "reduction": expected_l4_reduction,
             },
         }
+    expected_eigen_direction = (
+        EQUATION11_PROTOCOL_SETTINGS[protocol_id][0]
+        if is_equation11
+        else "largest"
+    )
+    expected_target_mode = (
+        EQUATION11_PROTOCOL_SETTINGS[protocol_id][1]
+        if is_equation11
+        else "frozen_snapshot"
+    )
+    expected_batch_policy = (
+        EQUATION11_PROTOCOL_SETTINGS[protocol_id][2]
+        if is_equation11
+        else "fixed_256"
+    )
+    expected_batch_size = (
+        "full_dataset" if expected_batch_policy == "full_dataset" else 256
+    )
+    n_samples = int(best_result.get("n_samples", 0))
+    expected_resolved_batch_size = (
+        n_samples if expected_batch_policy == "full_dataset" else 256
+    )
+    if n_samples < 1 or expected_resolved_batch_size < 1:
+        expected_batches_per_epoch = 0
+    elif expected_batch_policy == "full_dataset":
+        expected_batches_per_epoch = 1
+    elif expected_batching_policy == "balanced_shuffled_each_epoch":
+        expected_batches_per_epoch = max(
+            n_samples // expected_resolved_batch_size,
+            1,
+        )
+    else:
+        expected_batches_per_epoch = (
+            n_samples + expected_resolved_batch_size - 1
+        ) // expected_resolved_batch_size
     expected_schedule = {
         "scope": "public_datasets_only",
         "pretraining": {
@@ -426,7 +471,7 @@ def _validate_public_protocol_contract(
         },
         "refinement": {
             "objective": expected_refinement_objective,
-            "batch_size": 256,
+            "batch_size": expected_batch_size,
             "batching_policy": expected_batching_policy,
             "kmeans_refresh_policy": "fixed_10_updates",
             "update_interval": 10,
@@ -440,10 +485,14 @@ def _validate_public_protocol_contract(
             "ground_truth_usage": "final_evaluation_only",
         },
     }
+    if is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID:
+        expected_schedule["refinement"]["batch_size_policy"] = (
+            expected_batch_policy
+        )
     expected_loss_weights = {
         "reconstruction": 1.0,
-        "kmeans": 1.0 if is_literal_equation11 else 0.0,
-        "scatter_trace_diagnostic": 1.0 if is_literal_equation11 else 0.0,
+        "kmeans": 1.0 if is_equation11 else 0.0,
+        "scatter_trace_diagnostic": 1.0 if is_equation11 else 0.0,
         "greedy": 1.0,
     }
     training_steps_completed = int(best_result.get("training_steps_completed", -1))
@@ -469,10 +518,11 @@ def _validate_public_protocol_contract(
             objective.get("name") != expected_objective,
             objective.get("loss_terms") != expected_loss_terms,
             eigen.get("order") != "ascending",
-            eigen.get("direction") != "largest",
-            greedy_target.get("mode") != "frozen_snapshot",
+            eigen.get("direction") != expected_eigen_direction,
+            greedy_target.get("mode") != expected_target_mode,
             schedule != expected_schedule,
             config.get("loss_weights") != expected_loss_weights,
+            config.get("batch_size") != expected_resolved_batch_size,
             config.get("kmeans_refresh_policy") != "fixed_10_updates",
             config.get("refinement_batching_policy") != expected_batching_policy,
             config.get("update_interval") != 10,
@@ -489,7 +539,8 @@ def _validate_public_protocol_contract(
             != expected_kmeans_n_init_policy,
             best_result.get("iteration") != training_steps_completed,
             config.get("training_steps_completed") != training_steps_completed,
-            batches_per_epoch < 1,
+            n_samples < 1,
+            batches_per_epoch != expected_batches_per_epoch,
             config.get("batches_per_epoch") != batches_per_epoch,
             refinement_epochs_completed
             != training_steps_completed // max(batches_per_epoch, 1),
@@ -503,9 +554,29 @@ def _validate_public_protocol_contract(
                 float(stopping.get("assignment_change_tolerance", np.nan)),
                 0.001,
             ),
-            is_literal_equation11
+            is_equation11
             and not contract.get("decision_provenance"),
-            is_literal_equation11
+            is_equation11
+            and protocol_id == LITERAL_EQUATION11_PROTOCOL_ID
+            and (
+                "refinement_batch_size_policy" in best_result
+                or "resolved_refinement_batch_size" in best_result
+                or "refinement_batch_size_policy" in config
+                or "resolved_refinement_batch_size" in config
+            ),
+            is_equation11
+            and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
+            and (
+                best_result.get("refinement_batch_size_policy")
+                != expected_batch_policy
+                or config.get("refinement_batch_size_policy")
+                != expected_batch_policy
+                or best_result.get("resolved_refinement_batch_size")
+                != expected_resolved_batch_size
+                or config.get("resolved_refinement_batch_size")
+                != expected_resolved_batch_size
+            ),
+            is_equation11
             and {
                 item.get("classification")
                 for item in contract.get("decision_provenance", {}).values()
@@ -514,6 +585,9 @@ def _validate_public_protocol_contract(
                 "paper_explicit",
                 "dekm_inherited",
                 "implementation_assumption",
+                "paper_explicit_conflicting_statement",
+                "paper_resolved_interpretation",
+                "paper_table_inference",
                 "ablation",
             },
             any(best_result.get(name) is None for name in metric_names),

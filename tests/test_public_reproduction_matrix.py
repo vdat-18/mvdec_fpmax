@@ -4,6 +4,8 @@ import csv
 import tarfile
 from pathlib import Path
 
+import pytest
+
 import pipeline.public_reproduction_matrix as matrix
 
 
@@ -142,3 +144,80 @@ def test_update_summary_upserts_one_run_identity(tmp_path: Path) -> None:
     assert records[0]["run_id"] == "run_new"
     assert records[0]["acc"] == "0.8"
     assert records[0]["archive_sha256"] == "new"
+
+
+def test_aggregate_summary_separates_mean_std_from_best_sensitivity() -> None:
+    records = [
+        {
+            "dataset": "REUTERS",
+            "protocol_id": "protocol_a",
+            "config_hash": "same",
+            "seed": seed,
+            "acc": acc,
+            "nmi": nmi,
+        }
+        for seed, acc, nmi in (
+            (42, 0.70, 0.50),
+            (43, 0.80, 0.40),
+            (44, 0.60, 0.60),
+        )
+    ]
+
+    aggregate = matrix.aggregate_summary_records(records)[0]
+
+    assert aggregate["completed_runs"] == 3
+    assert aggregate["seeds"] == "42,43,44"
+    assert aggregate["acc_mean"] == 0.7
+    assert aggregate["acc_std"] == pytest.approx(0.1)
+    assert aggregate["nmi_mean"] == 0.5
+    assert aggregate["nmi_std"] == pytest.approx(0.1)
+    assert aggregate["best_acc"] == 0.8
+    assert aggregate["best_acc_seed"] == 43
+    assert aggregate["best_nmi"] == 0.6
+    assert aggregate["best_nmi_seed"] == 44
+    assert aggregate["primary_reporting"] == "multi_seed_mean_sample_std"
+    assert aggregate["best_reporting"] == "sensitivity_only_not_primary"
+
+
+def test_write_aggregate_summary_groups_by_config_hash(tmp_path: Path) -> None:
+    summary_path = tmp_path / matrix.SUMMARY_FILENAME
+    records = [
+        {
+            "dataset": "REUTERS",
+            "protocol_id": "protocol_a",
+            "seed": 42,
+            "run_id": "run_42",
+            "config_hash": "config_a",
+            "acc": 0.7,
+            "nmi": 0.5,
+            "runtime_seconds": 1.0,
+            "archive_path": "a.tar.gz",
+            "archive_sha256": "a",
+        },
+        {
+            "dataset": "REUTERS",
+            "protocol_id": "protocol_a",
+            "seed": 43,
+            "run_id": "run_43",
+            "config_hash": "config_b",
+            "acc": 0.8,
+            "nmi": 0.6,
+            "runtime_seconds": 1.0,
+            "archive_path": "b.tar.gz",
+            "archive_sha256": "b",
+        },
+    ]
+    with summary_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=matrix.SUMMARY_FIELDS)
+        writer.writeheader()
+        writer.writerows(records)
+
+    aggregate_path = tmp_path / matrix.AGGREGATE_SUMMARY_FILENAME
+    matrix.write_aggregate_summary(summary_path, aggregate_path)
+
+    with aggregate_path.open(newline="", encoding="utf-8") as file:
+        aggregates = list(csv.DictReader(file))
+    assert len(aggregates) == 2
+    assert {row["config_hash"] for row in aggregates} == {"config_a", "config_b"}
+    assert all(row["acc_std"] == "" for row in aggregates)
+    assert all(row["nmi_std"] == "" for row in aggregates)

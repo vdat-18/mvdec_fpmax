@@ -10,6 +10,7 @@ import tarfile
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import mean, stdev
 from time import perf_counter, sleep
 
 from loguru import logger
@@ -23,6 +24,7 @@ from pipeline.mvdec_runs import (
 )
 
 SUMMARY_FILENAME = "public_mvdec_matrix_runs.csv"
+AGGREGATE_SUMMARY_FILENAME = "public_mvdec_matrix_aggregate.csv"
 TRAINING_STDOUT_DIRNAME = "training_stdout"
 SUMMARY_FIELDS = (
     "dataset",
@@ -35,6 +37,23 @@ SUMMARY_FIELDS = (
     "runtime_seconds",
     "archive_path",
     "archive_sha256",
+)
+AGGREGATE_SUMMARY_FIELDS = (
+    "dataset",
+    "protocol_id",
+    "config_hash",
+    "completed_runs",
+    "seeds",
+    "acc_mean",
+    "acc_std",
+    "nmi_mean",
+    "nmi_std",
+    "best_acc",
+    "best_acc_seed",
+    "best_nmi",
+    "best_nmi_seed",
+    "primary_reporting",
+    "best_reporting",
 )
 
 
@@ -360,6 +379,63 @@ def update_summary(summary_path: Path, record: dict[str, object]) -> None:
     replace_with_retry(temporary_path, summary_path)
 
 
+def aggregate_summary_records(
+    records: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Aggregate fair multi-seed results separately from best-run sensitivity."""
+
+    groups: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    for record in records:
+        key = (
+            str(record["dataset"]),
+            str(record["protocol_id"]),
+            str(record["config_hash"]),
+        )
+        groups.setdefault(key, []).append(record)
+
+    aggregates = []
+    for (dataset, protocol_id, config_hash), runs in sorted(groups.items()):
+        ordered = sorted(runs, key=lambda item: int(item["seed"]))
+        acc_values = [float(item["acc"]) for item in ordered]
+        nmi_values = [float(item["nmi"]) for item in ordered]
+        best_acc_run = max(ordered, key=lambda item: float(item["acc"]))
+        best_nmi_run = max(ordered, key=lambda item: float(item["nmi"]))
+        aggregates.append(
+            {
+                "dataset": dataset,
+                "protocol_id": protocol_id,
+                "config_hash": config_hash,
+                "completed_runs": len(ordered),
+                "seeds": ",".join(str(item["seed"]) for item in ordered),
+                "acc_mean": mean(acc_values),
+                "acc_std": stdev(acc_values) if len(acc_values) > 1 else None,
+                "nmi_mean": mean(nmi_values),
+                "nmi_std": stdev(nmi_values) if len(nmi_values) > 1 else None,
+                "best_acc": float(best_acc_run["acc"]),
+                "best_acc_seed": int(best_acc_run["seed"]),
+                "best_nmi": float(best_nmi_run["nmi"]),
+                "best_nmi_seed": int(best_nmi_run["seed"]),
+                "primary_reporting": "multi_seed_mean_sample_std",
+                "best_reporting": "sensitivity_only_not_primary",
+            }
+        )
+    return aggregates
+
+
+def write_aggregate_summary(summary_path: Path, aggregate_path: Path) -> None:
+    """Write protocol-level primary and sensitivity reporting fields."""
+
+    with summary_path.open(newline="", encoding="utf-8") as file:
+        records = list(csv.DictReader(file))
+    aggregates = aggregate_summary_records(records)
+    temporary_path = aggregate_path.with_name(f"{aggregate_path.name}.tmp")
+    with temporary_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=AGGREGATE_SUMMARY_FIELDS)
+        writer.writeheader()
+        writer.writerows(aggregates)
+    replace_with_retry(temporary_path, aggregate_path)
+
+
 def run_public_matrix(
     *,
     datasets: Sequence[str],
@@ -419,6 +495,10 @@ def run_public_matrix(
         archive_sha256 = package_run(manifest, archive_path, checksum_path)
         record = summary_record(manifest, archive_path, archive_sha256)
         update_summary(summary_path, record)
+        write_aggregate_summary(
+            summary_path,
+            archive_root / AGGREGATE_SUMMARY_FILENAME,
+        )
         logger.info(
             "run_complete; dataset:{}; protocol:{}; seed:{}; elapsed:{:.1f}s; "
             "acc:{:.5f}; nmi:{:.5f}",
