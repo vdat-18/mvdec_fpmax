@@ -73,11 +73,13 @@ PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
     "mvdec_2025_view2_encoder_bottleneck_v1"
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
+LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+        LITERAL_EQUATION11_PROTOCOL_ID,
     }
 )
 PUBLIC_PROTOCOL_IDS = frozenset(
@@ -90,6 +92,7 @@ PROTOCOL_IDS = (
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+    LITERAL_EQUATION11_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -163,6 +166,7 @@ class MvdecProtocol:
     kmeans_n_init_policy: str
     pretrain_loss_reduction: str
     pretrain_shuffle_buffer: int | None
+    decision_provenance: tuple[tuple[str, str, str], ...] = ()
 
     def manifest_contract(self, tolerance: float) -> dict[str, object]:
         """Return the explicit paper and optimization contract for artifacts."""
@@ -221,6 +225,41 @@ class MvdecProtocol:
                 ),
             },
         }
+        if self.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
+            literal_metadata = {
+                'L1_reconstruction': {
+                    'definition': (
+                        'mean_batch(||x-xhat_view1||^2 + ||x-xhat_view2||^2)'
+                    ),
+                    'reduction': 'sum_squared_dimensions_then_mean_batch',
+                    'source_classification': 'paper_explicit',
+                },
+                'L2_kmeans': {
+                    'definition': 'mean_batch(||h-u_assignment||^2)',
+                    'reduction': 'sum_squared_dimensions_then_mean_batch',
+                    'source_classification': 'paper_explicit',
+                },
+                'L3_scatter_trace': {
+                    'definition': 'mean_batch(||(h-u_assignment)V||^2)',
+                    'reduction': 'sum_squared_dimensions_then_mean_batch',
+                    'source_classification': 'paper_explicit',
+                    'double_counting_note': (
+                        'With orthonormal V this equals L2, so literal Eq. 11 '
+                        'counts the same distance twice.'
+                    ),
+                },
+                'L4_greedy': {
+                    'definition': 'mean_batch(||Y_prime-hV||^2)',
+                    'reduction': self.l4_reduction,
+                    'source_classification': 'paper_explicit',
+                },
+            }
+            for name, metadata in literal_metadata.items():
+                contract['objective']['loss_terms'][name].update(metadata)
+            contract['decision_provenance'] = {
+                key: {'classification': category, 'rationale': rationale}
+                for key, category, rationale in self.decision_provenance
+            }
         if self.fusion_contract != FUSION_ENCODER_AVERAGE:
             contract["architecture"]["fusion"] = self.fusion_contract
         if self.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -350,11 +389,76 @@ PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL = replace(
     view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
 )
 
+
+LITERAL_EQUATION11_PROTOCOL = replace(
+    PUBLIC_REPRODUCTION_PROTOCOL,
+    protocol_id=LITERAL_EQUATION11_PROTOCOL_ID,
+    claim_scope=(
+        'Literal implementation of MvDEC 2025 Eq. 11 with documented '
+        'interpretations for underspecified details'
+    ),
+    architecture_source=(
+        'MvDEC 2025 Figure 2 direct 23-dimensional View2 head, interpreted as '
+        '10 latent dimensions plus the input-width reconstruction'
+    ),
+    view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    refinement_source=(
+        'MvDEC 2025 Eq. 11 objective with DEKM 2021 schedule, target, and '
+        'largest/last eigen-direction details where MvDEC is ambiguous'
+    ),
+    reconstruction_weight=1.0,
+    kmeans_weight=1.0,
+    scatter_trace_weight=1.0,
+    greedy_weight=1.0,
+    l4_reduction=L4_REDUCTION,
+    refinement_objective=JOINT_REFINEMENT_OBJECTIVE,
+    decision_provenance=(
+        (
+            'view1_autoencoder',
+            'paper_explicit',
+            'MvDEC Figure 2 specifies the DEKM-style View1 encoder/decoder.',
+        ),
+        (
+            'view2_direct_23_split',
+            'implementation_assumption',
+            'Figure 2 shows a linear 23-wide output but does not label its '
+            '10-dimensional latent and input-width reconstruction split.',
+        ),
+        (
+            'latent_average_fusion',
+            'paper_explicit',
+            'MvDEC Eq. 3-4 defines equal-dimensional latent averaging.',
+        ),
+        (
+            'unit_loss_weights',
+            'implementation_assumption',
+            'Eq. 11 is an unweighted sum and supplies no coefficients.',
+        ),
+        (
+            'largest_last_eigen_direction',
+            'dekm_inherited',
+            'DEKM sorts eigenvalues ascending and refines the final direction.',
+        ),
+        (
+            'frozen_greedy_target',
+            'dekm_inherited',
+            'MvDEC omits target freezing; the DEKM release freezes Y prime.',
+        ),
+        (
+            'refinement_schedule',
+            'dekm_inherited',
+            'MvDEC omits its update schedule, so the validated DEKM release '
+            'schedule is used.',
+        ),
+    ),
+)
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+    LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_PROTOCOL,
 }
 
 
@@ -450,6 +554,8 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
         PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID,
     }:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
+    if protocol.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
+        return 'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
             "mvdec_2025_public_reproduction_release_"
@@ -555,6 +661,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return "MvDEC-2025-View2-encoder-bottleneck-ablation"
     if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID:
         return "MvDEC-2025-View2-direct-joint-head-ablation"
+    if protocol.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
+        return 'MvDEC-2025-Eq11-literal'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         return "MvDEC-2025-public-reproduction"
     return "MvDEC custom ablation"
@@ -1084,7 +1192,9 @@ def save_airpollution_mvdec_artifact(
         (
             protocol.greedy_eigen_direction != greedy_eigen_direction,
             protocol.greedy_target_mode != greedy_target_mode,
+            protocol.reconstruction_weight != lambda_reconstruction,
             protocol.kmeans_weight != lambda_kmeans,
+            protocol.scatter_trace_weight != lambda_orthonormal,
             protocol.greedy_weight != lambda_greedy,
         )
     ):
@@ -1480,6 +1590,23 @@ def release_reconstruction_greedy_losses(
     return total_loss, reconstruction_loss, greedy_loss
 
 
+def combine_joint_losses(
+    protocol: MvdecProtocol,
+    reconstruction_loss,
+    kmeans_loss,
+    scatter_trace_loss,
+    greedy_loss,
+):
+    """Combine MvDEC Eq. 11 terms using the immutable protocol weights."""
+
+    return (
+        protocol.reconstruction_weight * reconstruction_loss
+        + protocol.kmeans_weight * kmeans_loss
+        + protocol.scatter_trace_weight * scatter_trace_loss
+        + protocol.greedy_weight * greedy_loss
+    )
+
+
 def pretraining_loss(protocol: MvdecProtocol):
     """Return the loss function fixed by one MvDEC protocol."""
 
@@ -1771,7 +1898,9 @@ def train(
         (
             protocol.greedy_eigen_direction != greedy_eigen_direction,
             protocol.greedy_target_mode != greedy_target_mode,
+            protocol.reconstruction_weight != lambda_reconstruction,
             protocol.kmeans_weight != lambda_kmeans,
+            protocol.scatter_trace_weight != lambda_orthonormal,
             protocol.greedy_weight != lambda_greedy,
         )
     ):
@@ -2087,11 +2216,12 @@ def train(
                 greedy_loss_value = (
                     greedy_selected_loss_value + greedy_nonselected_loss_value
                 )
-                loss_value = (
-                    lambda_reconstruction * reconstruction_loss_value
-                    + lambda_kmeans * kmeans_loss_value
-                    + lambda_orthonormal * orthonormal_loss_value
-                    + lambda_greedy * greedy_loss_value
+                loss_value = combine_joint_losses(
+                    protocol,
+                    reconstruction_loss_value,
+                    kmeans_loss_value,
+                    orthonormal_loss_value,
+                    greedy_loss_value,
                 )
             elif protocol.refinement_objective == RELEASE_REFINEMENT_OBJECTIVE:
                 kmeans_loss_value = tf.constant(0.0)
@@ -2565,7 +2695,9 @@ if __name__ == '__main__':
         args.greedy_eigen_direction,
         args.greedy_target_mode,
     )
+    lambda_reconstruction = protocol.reconstruction_weight
     lambda_kmeans = protocol.kmeans_weight
+    lambda_orthonormal = protocol.scatter_trace_weight
     lambda_greedy = protocol.greedy_weight
     validate_protocol_max_refinement_epochs(
         protocol,

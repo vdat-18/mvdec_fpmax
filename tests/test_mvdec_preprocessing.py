@@ -519,6 +519,119 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
         mvdec.validate_protocol_max_refinement_epochs(protocol, 100)
 
 
+def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.LITERAL_EQUATION11_PROTOCOL_ID,
+        kmeans_weight=1.0,
+        greedy_weight=1.0,
+        eigen_direction="largest",
+        target_mode="frozen_snapshot",
+    )
+    contract = protocol.manifest_contract(0.001)
+    schedule = mvdec.resolve_refinement_schedule(
+        protocol,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+
+    assert protocol == mvdec.LITERAL_EQUATION11_PROTOCOL
+    assert protocol.view2_architecture_id == (
+        mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    )
+    assert protocol.fusion_contract == mvdec.FUSION_ENCODER_AVERAGE
+    assert (
+        mvdec.final_training_objective(protocol)
+        == "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4"
+    )
+    assert [
+        protocol.reconstruction_weight,
+        protocol.kmeans_weight,
+        protocol.scatter_trace_weight,
+        protocol.greedy_weight,
+    ] == [1.0, 1.0, 1.0, 1.0]
+    assert all(
+        term["optimized"]
+        for term in contract["objective"]["loss_terms"].values()
+    )
+    assert contract["schedule"]["refinement"] == {
+        "objective": "joint_reconstruction_plus_greedy",
+        "batch_size": 256,
+        "batching_policy": "sequential_release_order",
+        "kmeans_refresh_policy": "fixed_10_updates",
+        "update_interval": 10,
+        "max_training_steps": 14_000,
+        "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
+    }
+    assert schedule.kmeans_refresh_interval == 10
+    assert schedule.max_training_steps == 14_000
+    assert contract["decision_provenance"]["view2_direct_23_split"][
+        "classification"
+    ] == "implementation_assumption"
+    assert contract["decision_provenance"]["largest_last_eigen_direction"][
+        "classification"
+    ] == "dekm_inherited"
+
+    with pytest.raises(ValueError, match="immutable"):
+        mvdec.resolve_mvdec_protocol(
+            mvdec.LITERAL_EQUATION11_PROTOCOL_ID,
+            kmeans_weight=0.0,
+            greedy_weight=1.0,
+            eigen_direction="largest",
+            target_mode="frozen_snapshot",
+        )
+
+
+def test_literal_equation11_direct_head_and_average_fusion(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 3)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    monkeypatch.setattr(mvdec, "view2_base_units", 4)
+
+    model = mvdec.model_view2(
+        load_weights=False,
+        architecture_id=mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    )
+    output = model(np.ones((2, 3), dtype=np.float32), training=False)
+    view1_output = np.array([[2.0, 4.0, 0.0, 0.0, 0.0]] * 2)
+
+    assert model.output_shape == (None, 5)
+    assert mvdec.latent_embedding(output).shape == (2, 2)
+    assert mvdec.reconstruction_output(output).shape == (2, 3)
+    np.testing.assert_allclose(
+        mvdec.fused_latent_embedding(view1_output, output).numpy(),
+        (view1_output[:, :2] + output.numpy()[:, :2]) / 2,
+    )
+
+
+def test_literal_equation11_gradients_reach_both_views(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    tf = pytest.importorskip("tensorflow")
+    view1 = tf.Variable([[1.0, 2.0], [2.0, 3.0]])
+    view2 = tf.Variable([[2.0, 1.0], [3.0, 2.0]])
+
+    with tf.GradientTape() as tape:
+        fused = (view1 + view2) / 2
+        reconstruction = tf.reduce_sum(tf.square(view1 - 1.0))
+        kmeans = tf.reduce_sum(tf.square(fused))
+        scatter = tf.reduce_sum(tf.square(fused))
+        greedy = tf.reduce_sum(tf.square(view2))
+        total = mvdec.combine_joint_losses(
+            mvdec.LITERAL_EQUATION11_PROTOCOL,
+            reconstruction,
+            kmeans,
+            scatter,
+            greedy,
+        )
+    gradients = tape.gradient(total, [view1, view2])
+
+    assert all(gradient is not None for gradient in gradients)
+    assert all(np.any(np.abs(gradient.numpy()) > 0) for gradient in gradients)
+    np.testing.assert_allclose(kmeans.numpy(), scatter.numpy())
+
+
 def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -951,6 +1064,13 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "mvdec_2025_view2_direct_23_split_v1",
             "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
             "MvDEC-2025-View2-direct-joint-head-ablation",
+            "mvdec2025_encoder_average",
+        ),
+        (
+            "LITERAL_EQUATION11_PROTOCOL",
+            "mvdec_2025_equation11_literal_v1",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-Eq11-literal",
             "mvdec2025_encoder_average",
         ),
     ),

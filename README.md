@@ -250,6 +250,53 @@ artifact, and model weights under
 Generated `output/` data and downloaded datasets are intentionally ignored by
 Git. The RCV1 release contains only split indices, so its run additionally
 requires the scikit-learn RCV1 cache.
+### Reproduce MvDEC 2025 Equation 11 literally
+
+The primary MvDEC reconstruction protocol is
+`mvdec_2025_equation11_literal_v1`. It implements Equation 11 as the unweighted
+sum `L1 + L2 + L3 + L4`, uses the direct View2 joint head closest to Figure 2,
+and averages the two latent views for fusion. Every underspecified choice is
+persisted in the manifest as `paper_explicit`, `dekm_inherited`,
+`implementation_assumption`, or `ablation`.
+
+Run REUTERS seed 42 first on Kaggle or Colab GPU:
+
+```bash
+PYTHONHASHSEED=42 uv run --no-sync python -u \
+  src/representation_learning/MVDEC_dense.py REUTERS \
+  --runs 1 \
+  --seed 42 \
+  --protocol mvdec_2025_equation11_literal_v1 \
+  --lambda-kmeans 1 \
+  --progress-interval 100 \
+  --dataset-root external_repos/DEKM/datasets \
+  --public-output-dir output/public_benchmark/mvdec-equation11
+```
+
+The explicit `--lambda-kmeans 1` is required because named immutable protocols
+reject CLI values that disagree with their contract. This protocol fixes all
+four loss weights at `1`; in particular, L3 is retained literally even though
+orthonormal `V` makes it mathematically equal to L2, so Equation 11 double-counts
+the K-Means distance. The largest/last eigen direction, frozen greedy target,
+sequential batches, refresh interval 10, and 14,000-update cap are inherited
+from the validated DEKM release protocol.
+
+Before accepting a GPU result, run the TensorFlow protocol tests and audit the
+saved artifact:
+
+```bash
+uv run pytest -q tests/test_mvdec_preprocessing.py \
+  -k "literal_equation11 or public_reproduction_artifact"
+mvdec-audit-runs --root output/public_benchmark/mvdec-equation11
+```
+
+Use `notebooks/mvdec_2025_equation11_reuters_kaggle.ipynb` for the complete
+Kaggle workflow. Do not start seeds 43-44 until seed 42 passes both the
+TensorFlow tests and artifact audit and its loss trajectory contains no NaN or
+Inf values. A failed or weak literal run remains the literal baseline; any
+changed loss weight, architecture, or schedule must use a separate ablation
+protocol rather than silently changing this contract.
+
 For the separate MvDEC 2025 public reproduction experiment, first validate
 seed 42 only:
 

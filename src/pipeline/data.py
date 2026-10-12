@@ -44,6 +44,9 @@ PUBLIC_ENCODER_BOTTLENECK_METHOD = (
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_DIRECT_JOINT_HEAD_METHOD = "MvDEC-2025-View2-direct-joint-head-ablation"
+LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
+LITERAL_EQUATION11_OBJECTIVE = "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4"
+LITERAL_EQUATION11_METHOD = "MvDEC-2025-Eq11-literal"
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -51,18 +54,21 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
     ),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    LITERAL_EQUATION11_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_METHOD,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_METHOD,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_METHOD,
+    LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_METHOD,
 }
 PUBLIC_PROTOCOL_FUSIONS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
+    LITERAL_EQUATION11_PROTOCOL_ID: FUSION_ENCODER_AVERAGE,
 }
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -324,14 +330,16 @@ def _validate_public_protocol_contract(
     protocol_id = best_result.get("protocol_id")
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
-    expected_objective = (
-        PRIMARY_MVDEC_OBJECTIVE
-        if is_dekm_consistent
-        else PUBLIC_REPRODUCTION_OBJECTIVE
-    )
+    is_literal_equation11 = protocol_id == LITERAL_EQUATION11_PROTOCOL_ID
+    if is_literal_equation11:
+        expected_objective = LITERAL_EQUATION11_OBJECTIVE
+    elif is_dekm_consistent:
+        expected_objective = PRIMARY_MVDEC_OBJECTIVE
+    else:
+        expected_objective = PUBLIC_REPRODUCTION_OBJECTIVE
     expected_l4_reduction = (
         "sum_squared_dimensions_then_mean_batch"
-        if is_dekm_consistent
+        if is_dekm_consistent or is_literal_equation11
         else "mean_squared_dimensions_per_sample_sum_batch_gradient"
     )
     expected_pretrain_reduction = (
@@ -342,7 +350,7 @@ def _validate_public_protocol_contract(
     expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
     expected_refinement_objective = (
         "joint_reconstruction_plus_greedy"
-        if is_dekm_consistent
+        if is_dekm_consistent or is_literal_equation11
         else "release_reconstruction_plus_greedy_mse"
     )
     expected_batching_policy = (
@@ -355,20 +363,59 @@ def _validate_public_protocol_contract(
         if is_dekm_consistent
         else "initial_100_then_twice_previous_n_iter"
     )
-    expected_loss_terms = {
-        "L1_reconstruction": {"weight": 1.0, "optimized": True},
-        "L2_kmeans": {"weight": 0.0, "optimized": False},
-        "L3_scatter_trace": {
-            "weight": 0.0,
-            "optimized": False,
-            "mathematically_equivalent_to_L2": True,
-        },
-        "L4_greedy": {
-            "weight": 1.0,
-            "optimized": True,
-            "reduction": expected_l4_reduction,
-        },
-    }
+    if is_literal_equation11:
+        expected_loss_terms = {
+            "L1_reconstruction": {
+                "weight": 1.0,
+                "optimized": True,
+                "definition": (
+                    "mean_batch(||x-xhat_view1||^2 + ||x-xhat_view2||^2)"
+                ),
+                "reduction": "sum_squared_dimensions_then_mean_batch",
+                "source_classification": "paper_explicit",
+            },
+            "L2_kmeans": {
+                "weight": 1.0,
+                "optimized": True,
+                "definition": "mean_batch(||h-u_assignment||^2)",
+                "reduction": "sum_squared_dimensions_then_mean_batch",
+                "source_classification": "paper_explicit",
+            },
+            "L3_scatter_trace": {
+                "weight": 1.0,
+                "optimized": True,
+                "mathematically_equivalent_to_L2": True,
+                "definition": "mean_batch(||(h-u_assignment)V||^2)",
+                "reduction": "sum_squared_dimensions_then_mean_batch",
+                "source_classification": "paper_explicit",
+                "double_counting_note": (
+                    "With orthonormal V this equals L2, so literal Eq. 11 "
+                    "counts the same distance twice."
+                ),
+            },
+            "L4_greedy": {
+                "weight": 1.0,
+                "optimized": True,
+                "reduction": "sum_squared_dimensions_then_mean_batch",
+                "definition": "mean_batch(||Y_prime-hV||^2)",
+                "source_classification": "paper_explicit",
+            },
+        }
+    else:
+        expected_loss_terms = {
+            "L1_reconstruction": {"weight": 1.0, "optimized": True},
+            "L2_kmeans": {"weight": 0.0, "optimized": False},
+            "L3_scatter_trace": {
+                "weight": 0.0,
+                "optimized": False,
+                "mathematically_equivalent_to_L2": True,
+            },
+            "L4_greedy": {
+                "weight": 1.0,
+                "optimized": True,
+                "reduction": expected_l4_reduction,
+            },
+        }
     expected_schedule = {
         "scope": "public_datasets_only",
         "pretraining": {
@@ -395,8 +442,8 @@ def _validate_public_protocol_contract(
     }
     expected_loss_weights = {
         "reconstruction": 1.0,
-        "kmeans": 0.0,
-        "scatter_trace_diagnostic": 0.0,
+        "kmeans": 1.0 if is_literal_equation11 else 0.0,
+        "scatter_trace_diagnostic": 1.0 if is_literal_equation11 else 0.0,
         "greedy": 1.0,
     }
     training_steps_completed = int(best_result.get("training_steps_completed", -1))
@@ -456,6 +503,19 @@ def _validate_public_protocol_contract(
                 float(stopping.get("assignment_change_tolerance", np.nan)),
                 0.001,
             ),
+            is_literal_equation11
+            and not contract.get("decision_provenance"),
+            is_literal_equation11
+            and {
+                item.get("classification")
+                for item in contract.get("decision_provenance", {}).values()
+            }
+            - {
+                "paper_explicit",
+                "dekm_inherited",
+                "implementation_assumption",
+                "ablation",
+            },
             any(best_result.get(name) is None for name in metric_names),
             not np.isclose(
                 float(best_result.get("acc", np.nan)),
