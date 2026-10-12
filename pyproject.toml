@@ -29,11 +29,16 @@ mvdec-without-ffs = "pipeline.private_without_ffs:main"
 mvdec-ffs = "pipeline.private_ffs:main"
 mvdec-intuitive = "pipeline.private_intuitive:main"
 mvdec-public-matrix = "pipeline.public_reproduction_matrix:main"
+dekm-reproduce = "representation_learning.DEKM_dense:main"
 
 [dependency-groups]
 dev = [
     "pytest",
     "ruff",
+]
+dekm = [
+    "gdown",
+    "tensorflow>=2.16",
 ]
 
 [build-system]
@@ -56,4 +61,3 @@ quote-style = "double"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

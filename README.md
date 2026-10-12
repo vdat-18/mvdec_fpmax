@@ -190,41 +190,54 @@ the MvDEC 2025 reference to the "last dimension"; its separate statement that
 the smallest eigenvalue is least informative is treated as an internal paper
 inconsistency rather than the repository default.
 
-### Public text benchmark from the DEKM release
+### Reproduce DEKM 2021 first
 
-REUTERS, 20NEWS, and RCV1 use the existing files under
-`external_repos/DEKM/datasets/` as the single source of truth. These commands
-do not read or regenerate `data/public/processed/`. Every saved run records a
-source fingerprint, seed, canonical row index, cluster assignment, ACC, and
-NMI.
+The first milestone is an isolated reproduction of the official DEKM release on
+REUTERS. Do not start MvDEC or the enhancement stages until this baseline has
+been validated. The runner preserves the released dense architecture, 200-epoch
+autoencoder pretraining, dynamic K-Means refreshes, frozen greedy target, and
+last/largest eigen direction while supporting current Kaggle TensorFlow.
 
-Run K-Means with the same explicit seeds used by the deep methods:
+Download the exact files linked by the official DEKM Google Drive folder:
 
 ```bash
-uv run python scripts/run_public_kmeans_baseline.py \
-  --source dekm-release \
-  --datasets REUTERS 20NEWS RCV1 \
-  --seeds 42 43 44 \
-  --output output/public_benchmark/kmeans/kmeans_baseline.xlsx \
-  --force
+uv sync --group dekm
+uv run python scripts/fetch_dekm_release.py --datasets REUTERS
 ```
 
-Run DEKM and MvDEC once per dataset. `--seed 42 --runs 3` produces seeds
-42, 43, and 44 for both methods:
+Run a short local smoke test only when TensorFlow is available. Full training is
+intended for a Kaggle GPU:
 
 ```bash
-uv run python src/representation_learning/DEKM_dense.py REUTERS \
-  --seed 42 --runs 3 \
+dekm-reproduce REUTERS \
+  --seed 42 \
+  --runs 1 \
+  --require-gpu \
   --dataset-root external_repos/DEKM/datasets \
   --output-dir output/public_benchmark/dekm
-
-uv run python src/representation_learning/MVDEC_dense.py REUTERS \
-  --seed 42 --runs 3 \
-  --protocol mvdec_dekm_consistent_v1 \
-  --dataset-root external_repos/DEKM/datasets \
-  --public-output-dir output/public_benchmark/mvdec
 ```
 
+For Kaggle, enable both **GPU** and **Internet**, then run
+`notebooks/dekm_2021_reuters_kaggle.ipynb`. The notebook clones the `dev`
+branch, downloads the official REUTERS arrays, runs seed 42, displays the
+manifest and summary, and creates a result ZIP. Validate seed 42 before running
+seeds 43 and 44.
+
+The DEKM paper reports these three-run reference averages; a single deterministic
+seed is not expected to match an average exactly:
+
+| Dataset | ACC | NMI |
+| --- | ---: | ---: |
+| REUTERS | 76.28% | 59.06% |
+| 20NEWS | 41.08% | 40.28% |
+| RCV1 | 67.15% | 46.18% |
+
+Each completed seed writes a manifest, assignments, training log, embedding
+artifact, and model weights under
+`output/public_benchmark/dekm/<dataset>/dekm_2021_released_code_v1/<config_hash_12>/seed_<seed>/`.
+Generated `output/` data and downloaded datasets are intentionally ignored by
+Git. The RCV1 release contains only split indices, so its run additionally
+requires the scikit-learn RCV1 cache.
 For the separate MvDEC 2025 public reproduction experiment, first validate
 seed 42 only:
 
@@ -749,4 +762,3 @@ release metadata for DOI generation.
 ## License
 
 This repository is released under the MIT License. See `LICENSE` for details.
-
