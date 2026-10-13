@@ -27,6 +27,7 @@ from pipeline.mvdec_contract import (
     EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID,
     EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
     FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     VIEW2_ARCHITECTURE_ID,
@@ -86,11 +87,15 @@ PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
     "mvdec_2025_view2_encoder_bottleneck_v1"
 )
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
+PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID = (
+    "mvdec_2025_view2_direct_23_split_l2norm_average_v1"
+)
 PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
     {
         PUBLIC_REPRODUCTION_PROTOCOL_ID,
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
         *EQUATION11_PROTOCOL_IDS,
     }
 )
@@ -104,6 +109,7 @@ PROTOCOL_IDS = (
     PUBLIC_REPRODUCTION_PROTOCOL_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
+    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
@@ -434,6 +440,20 @@ PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL = replace(
     view2_architecture_id=VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
 )
 
+PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL = replace(
+    PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+    protocol_id=PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
+    claim_scope=(
+        "MvDEC 2025 scale-sensitivity diagnostic using per-sample L2-normalized "
+        "View1/View2 latents before Eq. 4 averaging; ablation, not an exact-paper "
+        "claim"
+    ),
+    architecture_source=(
+        "MvDEC 2025 Fig. 2 direct View2 head with scale-balanced latent average"
+    ),
+    fusion_contract=FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+)
+
 
 LITERAL_EQUATION11_PROTOCOL = replace(
     PUBLIC_REPRODUCTION_PROTOCOL,
@@ -663,6 +683,9 @@ PUBLIC_PROTOCOLS = {
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: PUBLIC_ENCODER_BOTTLENECK_PROTOCOL,
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL,
+    PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
+        PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL
+    ),
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_PROTOCOL,
     EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID: (
         EQUATION11_SMALLEST_FROZEN_PROTOCOL
@@ -953,6 +976,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return "MvDEC-2025-View2-encoder-bottleneck-ablation"
     if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID:
         return "MvDEC-2025-View2-direct-joint-head-ablation"
+    if protocol.protocol_id == PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID:
+        return "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
     if protocol.protocol_id == LITERAL_EQUATION11_PROTOCOL_ID:
         return 'MvDEC-2025-Eq11-literal'
     if protocol.protocol_id == PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID:
@@ -1040,6 +1065,17 @@ def reconstruction_output(view_output):
     return view_output[:, -input_shape:]
 
 
+def l2_normalize_latent(latent: np.ndarray | tf.Tensor):
+    """L2-normalize each latent row while preserving zero vectors."""
+
+    if isinstance(latent, np.ndarray):
+        return tf.math.l2_normalize(
+            tf.convert_to_tensor(latent),
+            axis=1,
+        ).numpy()
+    return tf.math.l2_normalize(latent, axis=1)
+
+
 def fused_latent_embedding(
     view1_output,
     view2_output,
@@ -1051,6 +1087,10 @@ def fused_latent_embedding(
     h_view2 = latent_embedding(view2_output)
     if fusion_contract == FUSION_ENCODER_AVERAGE:
         return (h_view1 + h_view2) / 2
+    if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
+        return (
+            l2_normalize_latent(h_view1) + l2_normalize_latent(h_view2)
+        ) / 2
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
 
 
@@ -1574,6 +1614,10 @@ def save_airpollution_mvdec_artifact(
     fusion_expressions = {
         FUSION_ENCODER_AVERAGE: (
             "h_fused = (view1_latent + view2_latent) / 2"
+        ),
+        FUSION_ENCODER_L2_NORMALIZED_AVERAGE: (
+            "h_fused = (L2_normalize(view1_latent) + "
+            "L2_normalize(view2_latent)) / 2"
         ),
     }
     fusion_expression = fusion_expressions[protocol.fusion_contract]

@@ -6,8 +6,14 @@ import pandas as pd
 import pytest
 
 from config import H_FUSED_COLUMNS
+from pipeline import data as data_module
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
-from pipeline.data import _validate_airpollution_preprocessing, load_mvdec_result
+from pipeline.data import (
+    _validate_airpollution_preprocessing,
+    _validate_mvdec2025_contract,
+    load_mvdec_result,
+)
+from pipeline.mvdec_contract import FUSION_ENCODER_L2_NORMALIZED_AVERAGE
 
 
 def _normalized_file_sha256(path) -> str:
@@ -204,6 +210,42 @@ def test_load_mvdec_result_rejects_unexpected_mvdec2025_layout(tmp_path):
 
     with pytest.raises(ValueError, match="view_output_layout"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+def test_l2_normalized_average_contract_is_validated_without_tensorflow(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        data_module,
+        "_validate_mvdec_protocol_contract",
+        lambda _result: None,
+    )
+    monkeypatch.setattr(
+        data_module,
+        "_validate_mvdec_run_manifest",
+        lambda _result, _path: None,
+    )
+    h_view1 = np.array([[3.0, 4.0], [0.0, 0.0]], dtype=np.float32)
+    h_view2 = np.array([[0.0, 2.0], [0.0, 0.0]], dtype=np.float32)
+    expected = np.array([[0.3, 0.9], [0.0, 0.0]], dtype=np.float32)
+    artifact = {
+        "protocol_id": "mvdec_2025_view2_direct_23_split_l2norm_average_v1",
+        "view_output_layout": "eq5_compatible_2_plus_2000",
+        "h_view1": h_view1,
+        "h_view2": h_view2,
+        "fusion_dim": 2,
+        "fusion_contract": FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    }
+
+    _validate_mvdec2025_contract(artifact, expected, tmp_path / "artifact.pkl")
+
+    with pytest.raises(ValueError, match="does not match"):
+        _validate_mvdec2025_contract(
+            artifact,
+            expected + 0.01,
+            tmp_path / "artifact.pkl",
+        )
 
 
 def test_load_mvdec_result_validates_tiki_source_order_across_line_endings(

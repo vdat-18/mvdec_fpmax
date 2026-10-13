@@ -165,6 +165,49 @@ actual upstream revision and SHA-256 separately, but code review must not cite
 `external_repos/DEKM/DEKM_dense.py` as the untouched official implementation.
 
 
+### F10 - MvDEC Table 1 conflicts with its dataset names and inherited controls
+
+MvDEC Table 1 prints public sample counts of `210`, `2000`, and `10 000` for
+REUTERS-10K, 20NEWS, and RCV1-10K respectively. The first two counts conflict
+with both the dataset names and DEKM 2021 (`10,000`, `18,846`, `10,000`). At the
+same time, MvDEC Table 2 copies the DEKM_F values exactly into Proposed View1.
+The paper gives no subset indices or sampling rule.
+
+This creates two non-equivalent interpretations: Table 1 contains typographical
+errors, or MvDEC used undisclosed reduced subsets for at least REUTERS/20NEWS.
+The current 10,000-row REUTERS contract follows the dataset name, DEKM source,
+and copied View1 baseline. Any reduced-sample run must be labeled a sensitivity
+experiment, because choosing a favorable 210-row subset by labels would be
+invalid test-set tuning.
+
+### F11 - The paper defines incompatible fusion tensors
+
+Equation 4 averages equal-width encoder embeddings. Figure 1 instead draws an
+`AVG` after two 23-wide air-pollution outputs, while Figure 2 draws a final
+concatenation of two 23-wide outputs into 46 dimensions. For text input width
+2,000, the analogous full outputs would be 2,010 dimensions per view, not the
+10-dimensional embeddings used in Equation 4.
+
+The existing latent-average implementation is equation-faithful. The completed
+20-dimensional latent-concatenation ablation tested a different hypothesis and
+cannot close the Figure 2 full-output-concatenation branch. That branch remains
+low priority because the paper never says the 46-wide tensor is sent to K-means
+and it mixes reconstruction coordinates into the clustering representation.
+
+### F12 - View-scale imbalance is the strongest remaining bounded hypothesis
+
+The direct-head REUTERS diagnostic found mean latent row norms around `0.705`
+for View1 versus `0.046` for View2, with View2 total variance over 400 times
+smaller. The fused assignments therefore nearly duplicate View1. This explains
+why changing average to latent concatenation did not approach Table 2.
+
+A single preregistered scale-sensitivity protocol is justified before broader
+search: per-sample L2-normalize each 10-dimensional latent and then apply the
+paper's Equation 4 average. It changes only fusion geometry, uses no labels, and
+keeps dataset, architecture, objective, schedule, seed, and evaluator fixed. It
+is an ablation, not an exact-paper claim.
+
+
 ## Required implementation order
 
 1. Freeze the dataset scope to REUTERS and RCV1 in the cloud notebook only;
