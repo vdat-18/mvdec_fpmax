@@ -240,3 +240,36 @@ paper/source contradictions plus undocumented historical randomness,
 preprocessing order, dependency behavior, or model-selection details. Running
 seeds 43-44 would quantify variance but would not resolve that missing contract,
 so no additional GPU runs are justified at this stage.
+
+
+## REUTERS paper-text diagnostic result
+
+Kaggle Version 1 (`scriptVersionId=358020636`) completed successfully on two
+T4 GPUs using training commit `69a91371f7e7f11ad6956a7daf3fc2255f4b7843`.
+The bounded `paper-text-full-batch-2021` run stopped by assignment tolerance
+after 13 refreshes / 120 refinement steps and 111.284053 seconds. REUTERS seed
+42 produced ACC `0.7563` and NMI `0.5845111843402694`.
+
+Against the DEKM_F paper row (ACC `0.7642`, NMI `0.5999`), the diagnostic is
+lower by `0.79` percentage points ACC and `1.538882` percentage points NMI.
+Against the released-source seed-42 control (ACC `0.7557`, NMI `0.593243`), it
+is higher by only `0.06` percentage points ACC but lower by `0.873182`
+percentage points NMI. The paper-text settings therefore do not provide a
+consistent improvement over the released-source contract on REUTERS.
+
+The artifact audit passed. The REUTERS source SHA-256 is
+`427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b`.
+The 10,000 saved assignments independently recompute to ACC `0.7563` and NMI
+`0.5845111843402694`; `diagnostic.csv`, `diagnostic.json`, and the manifest
+agree; and every manifest-declared output hash matches. The result ZIP SHA-256
+is `158cdd9a27a714a8a764a79b527bd6988a79996740745eb8041b11c480f4303d`.
+The downloaded audit bundle is stored under
+`artifacts/kaggle/dekm-f-2021-reuters-paper-text-seed42/version-1-358020636`.
+
+Combined with the RCV1 diagnostic, this closes the DEKM paper-text branch. The
+released source and the paper prose are both defensible contracts, but neither
+reproduces every table entry, and switching to the prose contract does not
+systematically close the gap. More DEKM seeds would measure stochastic variance
+without recovering the missing historical contract. The next useful work is to
+make MvDEC View 1 exactly reuse the frozen DEKM_F control, then isolate View 2,
+fusion, and Equation 11 loss scaling as separate named ablations.
