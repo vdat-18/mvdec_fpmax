@@ -350,3 +350,30 @@ Commit `550d6c8` pins the diagnostic notebook to that fix. Ruff passed and the
 full CPU test suite reports `157 passed, 72 skipped`; the skips require a local
 TensorFlow installation. Kaggle RCV1 Version 4 was launched with GPU and
 Internet enabled and is being monitored.
+
+RCV1 Kaggle Version 5 completed successfully using the corrected literal paper
+normalization. The Kaggle-runtime source SHA-256 is
+`305877a57be6f4984b4f890d1b4809bf631582116e7a1c23045ae93a540574d6`;
+the previously recorded local-runtime hash differs because the selected RCV1
+columns are ordered differently across NumPy/scikit-learn versions. Seed 42
+stopped by assignment tolerance after 17 refreshes / 160 refinement steps and
+121.690796 seconds, with ACC `0.4174` and NMI `0.15222196301955926`.
+
+Against the paper row (ACC `0.6212`, NMI `0.3598`), this is lower by `20.38`
+and `20.757804` percentage points. Against released-source seed 42 (ACC
+`0.7404`, NMI `0.5058763446541975`), it is lower by `32.30` and `35.365438`
+percentage points. Independent recomputation from all 10,000 assignments
+matches exactly; the normalization identity, source hash, and every
+manifest-declared output hash pass. The ZIP is valid and has SHA-256
+`56178e997be7f6f526865c16906b06511f225e5254bca57f723a3e07f4a53505`.
+The downloaded bundle is stored under
+`artifacts/kaggle/dekm-f-2021-rcv1-paper-text-seed42/version-5-corrected`.
+
+The corrected REUTERS and RCV1 results agree on the audit conclusion: applying
+the paper's normalization sentence literally to the released DEKM training
+implementation makes performance dramatically worse, not closer to the paper.
+Therefore the paper prose and executable release are inconsistent or omit a
+material compensating detail. Running seeds 43-44 on this literal branch is not
+justified. Future MvDEC work should keep the released-source-compatible DEKM_F
+protocol as a separately named baseline and treat literal paper normalization
+as a failed diagnostic ablation, not as the canonical reproduction protocol.
