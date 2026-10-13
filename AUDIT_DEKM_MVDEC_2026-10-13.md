@@ -205,3 +205,38 @@ paper-text settings (`glorot_uniform`, symmetric `eigh`, full-dataset
 refinement, assignment tolerance `0.001`) while retaining deterministic seeding
 for auditability. Seeds 43-44 will not be launched unless this one diagnostic is
 materially closer to the DEKM_F paper row than the released-source seed-42 run.
+
+
+## RCV1 paper-text diagnostic result
+
+Kaggle Version 1 (`scriptVersionId=358003532`) completed successfully on two
+T4 GPUs using training commit `69a91371f7e7f11ad6956a7daf3fc2255f4b7843`.
+The bounded `paper-text-full-batch-2021` run stopped by assignment tolerance
+after 15 refreshes / 140 refinement steps and 112.430485 seconds. RCV1 seed 42
+produced ACC `0.6917` and NMI `0.4958711118536992`.
+
+Against the DEKM_F paper row (ACC `0.6212`, NMI `0.3598`), the diagnostic is
+still higher by `+7.05` percentage points ACC and `+13.607111` percentage
+points NMI. Against the released-source seed-42 control (ACC `0.7404`, NMI
+`0.5058763446541975`), the paper-text changes lower ACC by `4.87` percentage
+points and NMI by `1.000523` percentage points. The ACC gap therefore moves
+materially toward the paper, but the NMI gap barely moves and remains too large
+to call this a reproduction.
+
+The artifact audit passed. The source SHA-256 is the canonical Kaggle-runtime
+RCV1 value
+`083201cff76ee4952531472fcd630bd6366ca9b2a34ec08a3092c6f4f1aef90c`.
+The 10,000 saved assignments independently recompute to ACC `0.6917` and NMI
+`0.4958711118536992`; `diagnostic.csv`, `diagnostic.json`, and the manifest
+agree; and every manifest-declared output hash matches. The result ZIP SHA-256
+is `825093151b5c092ab7dfc13958e11a7e81e0ceb50bf9e5dd834c277af1baadc5`.
+The downloaded audit bundle is stored under
+`artifacts/kaggle/dekm-f-2021-rcv1-paper-text-seed42/version-1-358003532`.
+
+Conclusion: the implementation now cleanly isolates the paper-text differences,
+and those differences explain part of the released-source discrepancy, but they
+do not reproduce the paper. The remaining mismatch is most consistent with the
+paper/source contradictions plus undocumented historical randomness,
+preprocessing order, dependency behavior, or model-selection details. Running
+seeds 43-44 would quantify variance but would not resolve that missing contract,
+so no additional GPU runs are justified at this stage.
