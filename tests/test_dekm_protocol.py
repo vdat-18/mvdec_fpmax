@@ -15,6 +15,7 @@ from representation_learning.DEKM_dense import (
 from representation_learning.dekm_protocol import (
     DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
+    DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_RELEASE_2021_PROTOCOL_ID,
     DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
     DekmConfig,
@@ -116,6 +117,23 @@ def test_official_source_minibatch_protocol_uses_256_rows() -> None:
     assert config.refinement_batch_size == 256
     assert config.contract()["refinement"]["batching"] == "sequential_wraparound"
     assert method_name(config) == "DEKM"
+
+
+def test_paper_text_full_batch_protocol_is_isolated_from_source_contract() -> None:
+    config = build_config(
+        config_args(dataset="RCV1", protocol="paper-text-full-batch-2021")
+    )
+
+    assert config.protocol_id == DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID
+    assert config.kernel_initializer == "glorot_uniform"
+    assert config.eigen_solver == "symmetric_eigh"
+    assert config.kmeans_random_state == "seeded"
+    assert config.deterministic_runtime is True
+    assert config.data_shuffle == "direct_seed"
+    assert config.refinement_batch_size == 10_000
+    assert config.assignment_change_tolerance == 0.001
+    assert config.contract()["refinement"]["batching"] == "full_dataset_each_update"
+    assert method_name(config) == "DEKM_F_PAPER_TEXT"
 
 
 def test_config_validation_rejects_invalid_values() -> None:

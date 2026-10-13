@@ -30,6 +30,7 @@ mvdec-ffs = "pipeline.private_ffs:main"
 mvdec-intuitive = "pipeline.private_intuitive:main"
 mvdec-public-matrix = "pipeline.public_reproduction_matrix:main"
 dekm-reproduce = "representation_learning.DEKM_dense:main"
+dekm-audit-rcv1 = "pipeline.rcv1_reproduction_audit:main"
 
 [dependency-groups]
 dev = [

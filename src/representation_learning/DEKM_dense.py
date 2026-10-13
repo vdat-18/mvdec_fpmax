@@ -31,6 +31,7 @@ from pipeline.public_data import PublicDataset, load_dekm_public_dataset
 from representation_learning.dekm_protocol import (
     DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
+    DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_RELEASE_2021_PROTOCOL_ID,
     DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
     DekmConfig,
@@ -81,6 +82,7 @@ def parse_args() -> argparse.Namespace:
             "release-2021",
             "release-minibatch-2021",
             "full-batch-2021",
+            "paper-text-full-batch-2021",
         ),
         default="modern-deterministic",
     )
@@ -135,9 +137,10 @@ def enable_tensorflow_determinism(tf: Any) -> None:
 def method_name(config: DekmConfig) -> str:
     """Return the paper method label represented by one DEKM protocol."""
 
-    return (
-        "DEKM_F" if config.protocol_id == DEKM_FULL_BATCH_2021_PROTOCOL_ID else "DEKM"
-    )
+    return {
+        DEKM_FULL_BATCH_2021_PROTOCOL_ID: "DEKM_F",
+        DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID: "DEKM_F_PAPER_TEXT",
+    }.get(config.protocol_id, "DEKM")
 
 
 def build_config(args: argparse.Namespace) -> DekmConfig:
@@ -181,6 +184,26 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
                 args.assignment_tolerance
                 if args.assignment_tolerance is not None
                 else 0.005
+            ),
+            **common,
+        )
+    elif args.protocol == "paper-text-full-batch-2021":
+        config = DekmConfig(
+            protocol_id=DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
+            kernel_initializer="glorot_uniform",
+            eigen_solver="symmetric_eigh",
+            kmeans_random_state="seeded",
+            deterministic_runtime=True,
+            data_shuffle="direct_seed",
+            refinement_batch_size=(
+                args.batch_size
+                if args.batch_size is not None
+                else PUBLIC_DATASET_SAMPLE_COUNTS[args.dataset]
+            ),
+            assignment_change_tolerance=(
+                args.assignment_tolerance
+                if args.assignment_tolerance is not None
+                else 0.001
             ),
             **common,
         )

@@ -45,6 +45,7 @@ external_repos/DEKM/log_history/
 
 # Experiment outputs are regenerated locally or on Kaggle.
 output/
+artifacts/
 
 # Downloaded public experiment datasets
 data/public/raw/
