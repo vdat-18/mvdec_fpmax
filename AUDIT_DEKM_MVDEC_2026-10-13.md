@@ -165,3 +165,43 @@ A result should be called a match only if:
 - `src/representation_learning/utils.py`
 - `MVDEC_PAPER_CODE_AUDIT.md`
 - `MVDEC_REUTERS_ARCHITECTURE_DIAGNOSIS.md`
+
+
+## Post-run RCV1 provenance audit
+
+The completed Kaggle DEKM_F run was independently checked against a freshly
+built local scikit-learn RCV1 cache. The split is structurally valid: 9,000 test
+rows plus 1,000 validation rows, 10,000 unique rows, no overlap, and exactly
+2,500 samples in each of CCAT/ECAT/GCAT/MCAT. All three saved assignment files
+contain the canonical true labels, and their ACC/NMI values recompute exactly.
+There is no evidence of label leakage, incorrect metric calculation, or a wrong
+RCV1 subset.
+
+The byte-level source hash is runtime-sensitive. Under NumPy 2.1.3 and
+scikit-learn 1.6.1, the local loader reproduces the Kaggle hash exactly:
+`083201cff76ee4952531472fcd630bd6366ca9b2a34ec08a3092c6f4f1aef90c`.
+Under NumPy 2.4.6 and scikit-learn 1.9.0, it produces
+`e03069e5dd5841ede5915267228c7d8222b63620e8946d7b3eba2fd667692743`.
+The selected top-2,000 original feature IDs are identical in both environments,
+but `numpy.argpartition` returns them in a different column order; only 74 of
+2,000 positions coincide. Row normalization also differs at floating-point
+roundoff scale (maximum absolute difference `1.1920929e-07`). Thus the hash
+mismatch does not mean different documents, labels, or selected vocabulary, but
+it proves that the released preprocessing is not byte-reproducible across
+NumPy versions. The neural network can still be seed-sensitive to this column
+permutation because fixed initialized weights are attached to different input
+coordinates.
+
+A raw-data K-Means control with `n_init=10` gives the same result under both
+runtime families for seed 42: ACC `0.6100`, NMI `0.409672`. Seeds 43 and 44 give
+ACC `0.6103`/`0.6106` and NMI `0.410413`/`0.416054`. These are already well above
+DEKM Table III's K-Means reference of ACC `0.5196`, NMI `0.3135`. Therefore the
+paper table cannot be treated as an exact executable oracle under the released
+loader without the authors' missing run-selection/randomness details and the
+historical dependency stack.
+
+The next experiment is intentionally bounded to RCV1 seed 42. It uses the
+paper-text settings (`glorot_uniform`, symmetric `eigh`, full-dataset
+refinement, assignment tolerance `0.001`) while retaining deterministic seeding
+for auditability. Seeds 43-44 will not be launched unless this one diagnostic is
+materially closer to the DEKM_F paper row than the released-source seed-42 run.
