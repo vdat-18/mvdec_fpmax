@@ -198,14 +198,17 @@ been validated. The runner exposes explicit, immutable protocols:
 
 - `modern-deterministic`: Xavier initialization, symmetric eigendecomposition,
   seeded K-Means, 0.1% stopping tolerance, and deterministic TensorFlow ops.
-- `release-minibatch-2021`: the official source behavior: uniform
-  initialization, `np.linalg.eig`, global-RNG K-Means, 0.5% stopping tolerance,
-  and 256-row refinement batches.
-- `full-batch-2021`: the DEKM_F control, identical to the official source
-  behavior except that every refinement update uses the complete dataset.
-- `release-2021`: retained only to preserve the identity of historical
-  artifacts. Its REUTERS default was 10,000 rows and must not be described as
-  the official mini-batch protocol in new audits.
+- `release-2021`: the paper-era repository behavior at commit `129b7d0`:
+  uniform initialization, `np.linalg.eig`, global-RNG K-Means, 0.5% stopping
+  tolerance, 10,000-row REUTERS refinement, and 256-row refinement elsewhere.
+- `release-minibatch-2021`: the later repository behavior after the June 2024
+  edit that commented out the REUTERS `batch_size=10000` override. It uses
+  256-row refinement for every text dataset and is not the source state that
+  accompanied the 2021 paper.
+- `full-batch-2021`: the DEKM_F control inferred from the paper, with every
+  refinement update using the complete dataset. For REUTERS this is identical
+  to the paper-era released source; for RCV1 it is an explicit batch-only
+  variant because the repository does not provide a DEKM_F command.
 
 The release-derived protocols are seeded by the wrapper so runs can be audited,
 but execute on the current TensorFlow/scikit-learn runtime. They are not bitwise
@@ -223,7 +226,7 @@ intended for a Kaggle GPU:
 
 ```bash
 dekm-reproduce REUTERS \
-  --protocol release-minibatch-2021 \
+  --protocol release-2021 \
   --seed 42 \
   --runs 3 \
   --require-gpu \

@@ -49,8 +49,12 @@ from representation_learning.dekm_protocol import (
 )
 
 OFFICIAL_REPOSITORY = "https://github.com/spdj2271/DEKM"
-OFFICIAL_SOURCE_REVISION = "e58f506922137abe2905aa0e4eb04a6bf952e80d"
-OFFICIAL_DENSE_SHA256 = (
+PAPER_ERA_SOURCE_REVISION = "129b7d08b545f02d920ccff0948ec44b654b3158"
+PAPER_ERA_DENSE_SHA256 = (
+    "1298eff9d4de23f75dccc8a341945f98e908521cf100c440b43a6521d78e5185"
+)
+LATEST_AUDITED_SOURCE_REVISION = "e58f506922137abe2905aa0e4eb04a6bf952e80d"
+LATEST_AUDITED_DENSE_SHA256 = (
     "8536630e35b05e5ad8cd0f9235c2012537f31e5b3b2a5b3313ee1c246cb3dec9"
 )
 DETERMINISTIC_RUNTIME_POLICY = "keras_seeded_tf_deterministic_v1"
@@ -616,8 +620,14 @@ def run_one_seed(
         "method": method_name(config),
         "protocol_id": config.protocol_id,
         "official_repository": OFFICIAL_REPOSITORY,
-        "official_source_revision": OFFICIAL_SOURCE_REVISION,
-        "official_dense_sha256": OFFICIAL_DENSE_SHA256,
+        "official_repository_paper_era_revision": PAPER_ERA_SOURCE_REVISION,
+        "official_repository_paper_era_dense_sha256": PAPER_ERA_DENSE_SHA256,
+        "official_repository_latest_audited_revision": (
+            LATEST_AUDITED_SOURCE_REVISION
+        ),
+        "official_repository_latest_audited_dense_sha256": (
+            LATEST_AUDITED_DENSE_SHA256
+        ),
         "seed": seed,
         "config": asdict(config),
         "config_hash": config_hash(config),

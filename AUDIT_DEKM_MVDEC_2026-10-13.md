@@ -27,21 +27,27 @@ normalization, not another multi-seed MvDEC run.
 
 ## Findings
 
-### F0 - The historical REUTERS control was mislabeled at the batch-policy level
+### F0 - Confirmed: the paper-era source and the current source use different REUTERS batches
 
-The official DEKM repository currently sets `batch_size = 256`; the nearby
-`# batch_size=10000` line is commented out. The historical local
-`release-2021` wrapper instead defaulted REUTERS to a 10,000-row refinement
-batch. Its metrics are valid and close to the DEKM row, but its schedule is
-full-batch-like and therefore cannot simultaneously serve as a clean official
-mini-batch DEKM control.
-
-The audit now preserves that legacy protocol identity and introduces two
-separate contracts: `release-minibatch-2021` for the official 256-row source
-behavior and `full-batch-2021` for DEKM_F. The official repository revision
-checked on 2026-10-13 was `e58f506922137abe2905aa0e4eb04a6bf952e80d`; the
-SHA-256 of its `DEKM_dense.py` was
+The initial audit inspected only the repository's 2025 head and therefore drew
+an incomplete conclusion. Git history shows that the paper-era dense runner at
+commit `129b7d08b545f02d920ccff0948ec44b654b3158` explicitly set
+`batch_size=10000` for REUTERS. Its byte-exact `DEKM_dense.py` SHA-256 is
+`1298eff9d4de23f75dccc8a341945f98e908521cf100c440b43a6521d78e5185`.
+On 2024-06-04, commit `d15eecec87ebd663fbad17c11ad38dc675120e47`
+commented out only that override, causing REUTERS to inherit the global
+256-row batch. The later audited head
+`e58f506922137abe2905aa0e4eb04a6bf952e80d` retains the 2024 behavior; its
+`DEKM_dense.py` SHA-256 is
 `8536630e35b05e5ad8cd0f9235c2012537f31e5b3b2a5b3313ee1c246cb3dec9`.
+
+Consequently, the historical `release-2021` wrapper is not merely a local
+mislabelling: its dataset-specific batch policy reproduces the paper-era source
+state. The `release-minibatch-2021` protocol represents the later 2024+ source
+state and the paper's general mini-batch prose, while `full-batch-2021` is the
+explicit DEKM_F interpretation. For REUTERS, paper-era DEKM and DEKM_F are
+operationally indistinguishable at the batch-policy level; for RCV1 they remain
+separate because the paper-era source uses 256-row refinement.
 
 ### F1 - The current MvDEC run is a compound interpretation, not the paper
 
@@ -420,3 +426,22 @@ material compensating detail. Running seeds 43-44 on this literal branch is not
 justified. Future MvDEC work should keep the released-source-compatible DEKM_F
 protocol as a separately named baseline and treat literal paper normalization
 as a failed diagnostic ablation, not as the canonical reproduction protocol.
+
+## Paper-era source-history correction and next DEKM gate
+
+A complete text extraction of the nine-page paper confirms the following
+explicit statements: DEKM uses mini-batch representation updates; DEKM_F changes
+the representation update to full batch; text inputs satisfy the stated RMS
+normalization; stopping occurs below 0.1% assignment changes; and Table III is
+the average of three runs. The executable 2021 source conflicts with two of
+those statements: it uses unit-L2 text normalization and a 0.5% stopping
+threshold. It also special-cases REUTERS to a 10,000-row refinement batch.
+
+This source history changes the experiment order. REUTERS has already passed the
+paper-era source gate: the three-seed `release-2021` mean is ACC `0.760433` and
+NMI `0.591668`, close to the paper's DEKM row ACC `0.7628` and NMI `0.5906`.
+The next non-redundant diagnostic is therefore RCV1 seed 42 under the same
+paper-era `release-2021` contract, where the source uses the intended 256-row
+mini-batch. Its target is the DEKM row ACC `0.6715`, NMI `0.4618`; it must not be
+compared to the DEKM_F row ACC `0.6212`, NMI `0.3598`. Only after that control
+should a one-factor 0.1%-stopping variant be considered.

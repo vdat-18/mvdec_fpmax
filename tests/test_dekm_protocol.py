@@ -8,6 +8,10 @@ import pytest
 from pipeline.public_data import PAPER_RMS_NORMALIZATION, RELEASE_L2_NORMALIZATION
 from representation_learning.DEKM_dense import (
     DETERMINISTIC_RUNTIME_POLICY,
+    LATEST_AUDITED_DENSE_SHA256,
+    LATEST_AUDITED_SOURCE_REVISION,
+    PAPER_ERA_DENSE_SHA256,
+    PAPER_ERA_SOURCE_REVISION,
     build_config,
     enable_tensorflow_determinism,
     method_name,
@@ -45,6 +49,20 @@ def config_args(**overrides: object) -> SimpleNamespace:
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_source_provenance_distinguishes_paper_era_from_latest_audit() -> None:
+    assert PAPER_ERA_SOURCE_REVISION == "129b7d08b545f02d920ccff0948ec44b654b3158"
+    assert PAPER_ERA_DENSE_SHA256 == (
+        "1298eff9d4de23f75dccc8a341945f98e908521cf100c440b43a6521d78e5185"
+    )
+    assert LATEST_AUDITED_SOURCE_REVISION == (
+        "e58f506922137abe2905aa0e4eb04a6bf952e80d"
+    )
+    assert LATEST_AUDITED_DENSE_SHA256 == (
+        "8536630e35b05e5ad8cd0f9235c2012537f31e5b3b2a5b3313ee1c246cb3dec9"
+    )
+    assert PAPER_ERA_SOURCE_REVISION != LATEST_AUDITED_SOURCE_REVISION
 
 
 def test_modern_protocol_defaults_are_explicit() -> None:
