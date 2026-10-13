@@ -12,6 +12,7 @@ from representation_learning.DEKM_dense import (
     LATEST_AUDITED_SOURCE_REVISION,
     PAPER_ERA_DENSE_SHA256,
     PAPER_ERA_SOURCE_REVISION,
+    PAPER_ERA_UTILS_SHA256,
     build_config,
     enable_tensorflow_determinism,
     method_name,
@@ -56,6 +57,9 @@ def test_source_provenance_distinguishes_paper_era_from_latest_audit() -> None:
     assert PAPER_ERA_SOURCE_REVISION == "129b7d08b545f02d920ccff0948ec44b654b3158"
     assert PAPER_ERA_DENSE_SHA256 == (
         "1298eff9d4de23f75dccc8a341945f98e908521cf100c440b43a6521d78e5185"
+    )
+    assert PAPER_ERA_UTILS_SHA256 == (
+        "93b18e8b09559b2ddd74fe631e44670ead935e7dd962502e5aa0d0d2b22f4451"
     )
     assert LATEST_AUDITED_SOURCE_REVISION == (
         "e58f506922137abe2905aa0e4eb04a6bf952e80d"
