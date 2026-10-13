@@ -12,6 +12,9 @@ from scipy.optimize import linear_sum_assignment
 DEKM_MODERN_PROTOCOL_ID = "dekm_modern_deterministic_v1"
 DEKM_RELEASE_2021_PROTOCOL_ID = "dekm_2021_release_seeded_modern_runtime_v1"
 DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID = "dekm_2021_official_source_minibatch_v2"
+DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID = (
+    "dekm_2021_20news_sklearn18846_seeded_modern_runtime_v1"
+)
 DEKM_FULL_BATCH_2021_PROTOCOL_ID = "dekm_f_2021_official_source_full_batch_v1"
 DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID = (
     "dekm_f_2021_paper_text_seeded_modern_runtime_v1"
@@ -58,6 +61,7 @@ class DekmConfig:
             DEKM_MODERN_PROTOCOL_ID,
             DEKM_RELEASE_2021_PROTOCOL_ID,
             DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
+            DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID,
             DEKM_FULL_BATCH_2021_PROTOCOL_ID,
             DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
         }:

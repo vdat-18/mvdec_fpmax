@@ -18,6 +18,7 @@ from representation_learning.DEKM_dense import (
     runtime_metadata,
 )
 from representation_learning.dekm_protocol import (
+    DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID,
     DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
     DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
@@ -108,6 +109,25 @@ def test_release_2021_non_reuters_and_cli_overrides() -> None:
 
     assert config.refinement_batch_size == 512
     assert config.assignment_change_tolerance == 0.01
+
+
+def test_20news_sklearn_protocol_is_source_faithful() -> None:
+    config = build_config(
+        config_args(dataset="20NEWS", protocol="release-2021-sklearn-20news")
+    )
+
+    assert config.protocol_id == DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID
+    assert config.refinement_batch_size == 256
+    assert config.input_normalization == RELEASE_L2_NORMALIZATION
+    assert config.kernel_initializer == "uniform"
+    assert config.eigen_solver == "general_eig"
+
+
+def test_20news_sklearn_protocol_rejects_other_datasets() -> None:
+    with pytest.raises(ValueError, match="valid only for 20NEWS"):
+        build_config(
+            config_args(dataset="RCV1", protocol="release-2021-sklearn-20news")
+        )
 
 
 @pytest.mark.parametrize(

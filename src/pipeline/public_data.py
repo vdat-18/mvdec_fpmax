@@ -26,6 +26,7 @@ class PublicDataset:
     X: np.ndarray
     y: np.ndarray
     source_sha256: str
+    source_id: str
 
 
 PUBLIC_DATASET_SPECS = {
@@ -36,6 +37,9 @@ PUBLIC_DATASET_SPECS = {
 RELEASE_L2_NORMALIZATION = "release_l2_unit_norm"
 PAPER_RMS_NORMALIZATION = "paper_mean_squared_norm_one"
 TEXT_NORMALIZATION_MODES = {RELEASE_L2_NORMALIZATION, PAPER_RMS_NORMALIZATION}
+TWENTY_NEWS_RELEASE_NPZ = "dekm_google_drive_npz_18057"
+TWENTY_NEWS_SKLEARN_SOURCE = "sklearn_fetch_20newsgroups_all_tfidf2000_18846"
+TWENTY_NEWS_SOURCES = {TWENTY_NEWS_RELEASE_NPZ, TWENTY_NEWS_SKLEARN_SOURCE}
 
 
 def _normalize_rows(values: np.ndarray, mode: str) -> np.ndarray:
@@ -120,6 +124,25 @@ def _load_20news(
     return _normalize_rows(X, normalization), y
 
 
+def _load_20news_sklearn(normalization: str) -> tuple[np.ndarray, np.ndarray]:
+    """Reproduce the 20NEWS loader executed by the official DEKM source."""
+
+    from sklearn.datasets import fetch_20newsgroups
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    try:
+        dataset = fetch_20newsgroups(subset="all", download_if_missing=False)
+    except (OSError, ValueError) as error:
+        msg = (
+            "The official DEKM 20NEWS path requires the scikit-learn "
+            "20 Newsgroups cache. Fetch it before starting the run."
+        )
+        raise RuntimeError(msg) from error
+    X = TfidfVectorizer(max_features=2000).fit_transform(dataset.data).toarray()
+    y = np.asarray(dataset.target, dtype=np.int32)
+    return _normalize_rows(X, normalization), y
+
+
 def _load_rcv1(dataset_dir: Path, normalization: str) -> tuple[np.ndarray, np.ndarray]:
     """Apply the released DEKM RCV1 split and feature-selection contract."""
 
@@ -172,11 +195,14 @@ def load_dekm_public_dataset(
     name: str,
     dataset_root: Path,
     normalization: str = RELEASE_L2_NORMALIZATION,
+    twenty_news_source: str = TWENTY_NEWS_RELEASE_NPZ,
 ) -> PublicDataset:
     """Load one canonical dataset under an explicit text-normalization contract."""
 
     if normalization not in TEXT_NORMALIZATION_MODES:
         raise ValueError(f"Unsupported DEKM text normalization: {normalization!r}.")
+    if twenty_news_source not in TWENTY_NEWS_SOURCES:
+        raise ValueError(f"Unsupported DEKM 20NEWS source: {twenty_news_source!r}.")
     normalized_name = name.upper()
     if normalized_name not in PUBLIC_DATASET_SPECS:
         msg = f"Unsupported DEKM public dataset: {name!r}."
@@ -185,10 +211,16 @@ def load_dekm_public_dataset(
     dataset_dir = root / normalized_name
     if normalized_name == "REUTERS":
         X, y = _load_reuters(dataset_dir, normalization)
+        source_id = "dekm_google_drive_reuters_10k"
     elif normalized_name == "20NEWS":
-        X, y = _load_20news(dataset_dir, normalization)
+        if twenty_news_source == TWENTY_NEWS_SKLEARN_SOURCE:
+            X, y = _load_20news_sklearn(normalization)
+        else:
+            X, y = _load_20news(dataset_dir, normalization)
+        source_id = twenty_news_source
     else:
         X, y = _load_rcv1(dataset_dir, normalization)
+        source_id = "dekm_google_drive_indices_sklearn_rcv1"
 
     spec = PUBLIC_DATASET_SPECS[normalized_name]
     if X.ndim != 2 or X.shape[1] != spec.n_features:
@@ -211,4 +243,5 @@ def load_dekm_public_dataset(
         X=X,
         y=y,
         source_sha256=_array_sha256(X, y),
+        source_id=source_id,
     )

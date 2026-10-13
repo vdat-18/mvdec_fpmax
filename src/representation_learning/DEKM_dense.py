@@ -30,10 +30,13 @@ from pipeline.public_artifacts import (
 from pipeline.public_data import (
     PAPER_RMS_NORMALIZATION,
     RELEASE_L2_NORMALIZATION,
+    TWENTY_NEWS_RELEASE_NPZ,
+    TWENTY_NEWS_SKLEARN_SOURCE,
     PublicDataset,
     load_dekm_public_dataset,
 )
 from representation_learning.dekm_protocol import (
+    DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID,
     DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
     DEKM_PAPER_TEXT_FULL_BATCH_2021_PROTOCOL_ID,
@@ -90,6 +93,7 @@ def parse_args() -> argparse.Namespace:
             "modern-deterministic",
             "release-2021",
             "release-minibatch-2021",
+            "release-2021-sklearn-20news",
             "full-batch-2021",
             "paper-text-full-batch-2021",
         ),
@@ -165,11 +169,15 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
     if args.protocol in {
         "release-2021",
         "release-minibatch-2021",
+        "release-2021-sklearn-20news",
         "full-batch-2021",
     }:
+        if args.protocol == "release-2021-sklearn-20news" and args.dataset != "20NEWS":
+            raise ValueError("release-2021-sklearn-20news is valid only for 20NEWS.")
         protocol_id = {
             "release-2021": DEKM_RELEASE_2021_PROTOCOL_ID,
             "release-minibatch-2021": DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
+            "release-2021-sklearn-20news": (DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID),
             "full-batch-2021": DEKM_FULL_BATCH_2021_PROTOCOL_ID,
         }[args.protocol]
         default_batch_size = {
@@ -177,6 +185,7 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
             # original identity. New audits should use one of the explicit modes.
             "release-2021": 10_000 if args.dataset == "REUTERS" else 256,
             "release-minibatch-2021": 256,
+            "release-2021-sklearn-20news": 256,
             "full-batch-2021": PUBLIC_DATASET_SAMPLE_COUNTS[args.dataset],
         }[args.protocol]
         config = DekmConfig(
@@ -590,6 +599,7 @@ def run_one_seed(
             "refreshes_completed": result.refreshes_completed,
             "stop_reason": result.stop_reason,
             "row_indices": np.arange(len(labels), dtype=int),
+            "source_id": dataset.source_id,
         }
     )
     write_public_artifact(artifact, artifact_path)
@@ -622,9 +632,7 @@ def run_one_seed(
         "official_repository": OFFICIAL_REPOSITORY,
         "official_repository_paper_era_revision": PAPER_ERA_SOURCE_REVISION,
         "official_repository_paper_era_dense_sha256": PAPER_ERA_DENSE_SHA256,
-        "official_repository_latest_audited_revision": (
-            LATEST_AUDITED_SOURCE_REVISION
-        ),
+        "official_repository_latest_audited_revision": (LATEST_AUDITED_SOURCE_REVISION),
         "official_repository_latest_audited_dense_sha256": (
             LATEST_AUDITED_DENSE_SHA256
         ),
@@ -632,6 +640,7 @@ def run_one_seed(
         "config": asdict(config),
         "config_hash": config_hash(config),
         "source_sha256": dataset.source_sha256,
+        "source_id": dataset.source_id,
         "n_samples": len(dataset.X),
         "n_features": dataset.X.shape[1],
         "n_clusters": dataset.spec.n_clusters,
@@ -662,6 +671,7 @@ def run_one_seed(
         "n_features": dataset.X.shape[1],
         "n_clusters": dataset.spec.n_clusters,
         "source_sha256": dataset.source_sha256,
+        "source_id": dataset.source_id,
         "acc": metrics.acc,
         "nmi": metrics.nmi,
         "steps_completed": result.steps_completed,
@@ -694,6 +704,11 @@ def main() -> None:
         args.dataset,
         args.dataset_root,
         normalization=config.input_normalization,
+        twenty_news_source=(
+            TWENTY_NEWS_SKLEARN_SOURCE
+            if config.protocol_id == DEKM_20NEWS_SKLEARN_2021_PROTOCOL_ID
+            else TWENTY_NEWS_RELEASE_NPZ
+        ),
     )
     hash_prefix = config_hash(config)[:12]
     config_root = (
@@ -743,6 +758,7 @@ def main() -> None:
                     if len(combined) > 1
                     else 0.0,
                     "source_sha256": dataset.source_sha256,
+                    "source_id": dataset.source_id,
                 }
             ]
         )

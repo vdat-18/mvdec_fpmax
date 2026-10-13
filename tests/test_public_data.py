@@ -6,6 +6,7 @@ import pytest
 from pipeline.public_data import (
     PAPER_RMS_NORMALIZATION,
     RELEASE_L2_NORMALIZATION,
+    TWENTY_NEWS_SKLEARN_SOURCE,
     load_dekm_public_dataset,
 )
 
@@ -82,6 +83,49 @@ def test_20news_release_loader_uses_local_npz_files_only(tmp_path) -> None:
     np.testing.assert_array_equal(dataset.y, np.arange(20))
     np.testing.assert_allclose(dataset.X[:10, 0], 1.0)
     np.testing.assert_allclose(dataset.X[10:, 1], 1.0)
+    assert dataset.source_id == "dekm_google_drive_npz_18057"
+
+
+def test_20news_official_source_loader_uses_sklearn_contract(
+    tmp_path, monkeypatch
+) -> None:
+    """The paper-count path must execute the official sklearn/Tfidf loader."""
+
+    class Dataset:
+        data = [f"document {index}" for index in range(20)]
+        target = np.arange(20, dtype=np.int32)
+
+    class FakeVectorizer:
+        def __init__(self, *, max_features):
+            assert max_features == 2000
+
+        def fit_transform(self, documents):
+            from scipy import sparse
+
+            assert documents == Dataset.data
+            matrix = np.zeros((20, 2000), dtype=np.float64)
+            matrix[np.arange(20), np.arange(20)] = 1.0
+            return sparse.csr_matrix(matrix)
+
+    def fake_fetch(*, subset, download_if_missing):
+        assert subset == "all"
+        assert download_if_missing is False
+        return Dataset()
+
+    monkeypatch.setattr("sklearn.datasets.fetch_20newsgroups", fake_fetch)
+    monkeypatch.setattr(
+        "sklearn.feature_extraction.text.TfidfVectorizer", FakeVectorizer
+    )
+    dataset = load_dekm_public_dataset(
+        "20NEWS",
+        tmp_path,
+        twenty_news_source=TWENTY_NEWS_SKLEARN_SOURCE,
+    )
+
+    assert dataset.X.shape == (20, 2000)
+    np.testing.assert_array_equal(dataset.y, Dataset.target)
+    np.testing.assert_allclose(np.linalg.norm(dataset.X, axis=1), 1.0)
+    assert dataset.source_id == TWENTY_NEWS_SKLEARN_SOURCE
 
 
 def test_rcv1_loader_fails_fast_when_local_sklearn_cache_is_unreadable(
