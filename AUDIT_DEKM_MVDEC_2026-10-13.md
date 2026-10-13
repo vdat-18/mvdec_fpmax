@@ -311,3 +311,42 @@ normalization, not the paper formula, so it does not close the paper-text branch
 The next useful experiment is the corrected paper-normalized seed-42 DEKM_F
 control. Only after that control should MvDEC preserve standalone DEKM_F as its
 View1 baseline and isolate View2, fusion, and Equation 11 as named ablations.
+
+## Corrected paper-normalized seed-42 diagnostics
+
+The corrected loader now implements the paper statement `(1/d)||x_i||^2 = 1`
+as row norm `sqrt(d)` and records
+`input_normalization=paper_mean_squared_norm_one`. This is a materially
+different experiment from the earlier hybrid diagnostics, which accidentally
+retained released unit-L2 normalization.
+
+REUTERS Kaggle Version 2 completed on two T4 GPUs using commit
+`27549ca943d27819bcf8247bb49cef85c9987255`. The exact source SHA-256 is
+`7eb3f41aca38ffb93c104eef261adc3273d1da57c3750e04c92a67e335d423a1`.
+Seed 42 stopped by assignment tolerance after 14 refreshes / 130 refinement
+steps and 108.702019 seconds, with ACC `0.5101` and NMI
+`0.21382318689551078`. Independent recomputation from all 10,000 saved
+assignments matches exactly, and every manifest-declared artifact hash passes.
+The ZIP SHA-256 is
+`6ad1dac99a72f0a8b060dc2b837bd05167951e72898ac2c63d2c9bd7cbdf86d5`;
+the downloaded bundle is under
+`artifacts/kaggle/dekm-f-2021-reuters-paper-text-seed42/version-2-corrected`.
+
+This corrected result is *farther* from the DEKM_F paper row (ACC `0.7642`, NMI
+`0.5999`) by `-25.41` and `-38.607681` percentage points, respectively. It is
+also far below the released-source seed-42 control (ACC `0.7557`, NMI
+`0.593243`). Therefore the paper's normalization sentence cannot be combined
+literally with the released training implementation to reproduce Table III.
+The earlier unit-L2 hybrid result was much closer, which is strong evidence
+that the paper prose and released executable protocol are inconsistent or
+incomplete. Seeds 43-44 are not justified for this corrected branch.
+
+RCV1 corrected Version 3 failed before training because Google Drive throttled
+the official `test` split-index file; this was an input retrieval failure, not
+an OOM or model failure. Commit `d2a39fcd312b27c00866fa8cd6a84300f3c18b16`
+adds byte-exact bundled fallbacks for the two small official RCV1 split files,
+verifies their canonical SHA-256 values, and records the retrieval path.
+Commit `550d6c8` pins the diagnostic notebook to that fix. Ruff passed and the
+full CPU test suite reports `157 passed, 72 skipped`; the skips require a local
+TensorFlow installation. Kaggle RCV1 Version 4 was launched with GPU and
+Internet enabled and is being monitored.
