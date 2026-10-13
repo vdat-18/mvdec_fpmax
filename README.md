@@ -378,8 +378,10 @@ The `23` in the protocol name records the Air Pollution Fig. 2 layout
 (`10 + 13`). For public 2,000-dimensional inputs the same contract creates a
 `10 + 2,000` joint head and persists the resolved dimensions in the manifest.
 
-For the preregistered three-dataset validation, use
-`notebooks/mvdec_2025_three_datasets_kaggle.ipynb`. It runs the paper-resolved
+For the preregistered three-dataset validation, use either
+`notebooks/mvdec_2025_three_datasets_kaggle.ipynb` on Kaggle or
+`notebooks/mvdec_2025_three_datasets_colab.ipynb` on Google Colab. It runs
+the paper-resolved
 full-batch protocol on REUTERS-10K, 20NEWS, and RCV1-10K for seeds 42-44,
 continues after a failed combination, and writes per-run and aggregate CSVs.
 The aggregate uses the DEKM-compatible mean and sample standard deviation as
