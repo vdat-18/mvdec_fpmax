@@ -445,3 +445,25 @@ paper-era `release-2021` contract, where the source uses the intended 256-row
 mini-batch. Its target is the DEKM row ACC `0.6715`, NMI `0.4618`; it must not be
 compared to the DEKM_F row ACC `0.6212`, NMI `0.3598`. Only after that control
 should a one-factor 0.1%-stopping variant be considered.
+## RCV1 paper-era DEKM seed-42 result
+
+Kaggle Version 1 completed the full training run under the paper-era
+`release-2021` contract before the notebook failed in post-training JSON
+serialization. The failure was caused by writing NumPy scalar values directly
+with `json.dumps`; it did not affect model training or persisted run artifacts.
+
+RCV1 seed 42 used unit-L2 input, `uniform` initialization, `np.linalg.eig`,
+256-row refinement, and the released 0.5% stopping threshold. It stopped after
+13 refreshes / 120 refinement steps in 65.072040 seconds with ACC `0.6782` and
+NMI `0.4827423550817702`. Against the paper's three-run DEKM row, ACC `0.6715`
+and NMI `0.4618`, the seed is higher by `0.67` and `2.094236` percentage points.
+This is close enough to establish that the paper-era RCV1 DEKM implementation
+is in the published result range, while retaining the caveat that one seeded run
+cannot reproduce a three-run average exactly.
+
+Independent recomputation from all 10,000 assignment rows matches the manifest
+exactly. The artifact, assignments, final weights, pretrain weights, and training
+log SHA-256 values all match their manifest declarations. The post-training
+notebook fix casts NumPy scalars to Python numeric types before JSON output; a
+new Kaggle version is required only to produce the final diagnostic JSON, ZIP,
+and `.sha256`, not to re-establish the training metric.
