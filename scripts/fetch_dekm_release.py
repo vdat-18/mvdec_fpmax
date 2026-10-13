@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Final
 
 from config import DEKM_DATASET_DIR
 
 SOURCE_FOLDER_ID: Final = "1raiYP1joy8gtsHXYcW5EuNtECSPRu37v"
+REPOSITORY_ROOT: Final = Path(__file__).resolve().parents[1]
 DATASET_FILES: Final = {
     "REUTERS": {
         "10k_feature.npy": "1SYqb-FLU4XO67RT29Z3-7fC3uXfCXpYp",
@@ -27,6 +29,15 @@ DATASET_FILES: Final = {
         "validation": "1d-ZJ5SxneLkTYiRUAQ5y1Ov0ZGuAyLvQ",
     },
 }
+CANONICAL_SHA256: Final = {
+    ("RCV1", "test"): (
+        "26c22ad47eda2c283a5481c2f705da61f862c0b7b457941a1564b07f605133bf"
+    ),
+    ("RCV1", "validation"): (
+        "a1a689eb7f808e80d57dab694e57d98fe92a9ba3ef2b787e7f33547a03e9cf92"
+    ),
+}
+BUNDLED_FALLBACK_ROOT: Final = REPOSITORY_ROOT / "data/public/dekm_release"
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,18 +72,47 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download_file(gdown, file_id: str, destination: Path, force: bool) -> None:
+def download_file(
+    gdown,
+    file_id: str,
+    destination: Path,
+    force: bool,
+    *,
+    fallback_path: Path | None = None,
+    expected_sha256: str | None = None,
+) -> str:
     if destination.exists() and destination.stat().st_size > 0 and not force:
-        return
+        if expected_sha256 is not None and sha256(destination) != expected_sha256:
+            raise RuntimeError(f"Hash mismatch for existing DEKM file {destination}.")
+        return "existing"
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.download")
     if temporary.exists():
         temporary.unlink()
-    result = gdown.download(id=file_id, output=str(temporary), quiet=False)
+    try:
+        result = gdown.download(id=file_id, output=str(temporary), quiet=False)
+    except Exception as error:  # gdown exposes multiple transport exception types.
+        print(f"Google Drive download failed for {destination.name}: {error}")
+        result = None
     if result is None or not temporary.exists() or temporary.stat().st_size == 0:
         temporary.unlink(missing_ok=True)
-        raise RuntimeError(f"Failed to download DEKM file {destination.name}.")
+        if fallback_path is None or not fallback_path.is_file():
+            raise RuntimeError(f"Failed to download DEKM file {destination.name}.")
+        if expected_sha256 is None or sha256(fallback_path) != expected_sha256:
+            raise RuntimeError(
+                f"Bundled fallback failed verification for {destination.name}."
+            )
+        shutil.copyfile(fallback_path, temporary)
+        retrieval = "bundled_canonical_copy"
+    else:
+        retrieval = "google_drive"
+    if expected_sha256 is not None and sha256(temporary) != expected_sha256:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Hash mismatch for downloaded DEKM file {destination.name}."
+        )
     temporary.replace(destination)
+    return retrieval
 
 
 def main() -> None:
@@ -88,9 +128,19 @@ def main() -> None:
         records = {}
         for filename, file_id in DATASET_FILES[dataset].items():
             destination = root / dataset / filename
-            download_file(gdown, file_id, destination, args.force)
+            expected_sha256 = CANONICAL_SHA256.get((dataset, filename))
+            fallback_path = BUNDLED_FALLBACK_ROOT / dataset / filename
+            retrieval = download_file(
+                gdown,
+                file_id,
+                destination,
+                args.force,
+                fallback_path=fallback_path,
+                expected_sha256=expected_sha256,
+            )
             records[filename] = {
                 "google_drive_file_id": file_id,
+                "retrieval": retrieval,
                 "bytes": destination.stat().st_size,
                 "sha256": sha256(destination),
             }
