@@ -917,6 +917,15 @@ def resolve_cli_mvdec_protocol(
     )
 
 
+def apply_resolved_cli_protocol(args, protocol: MvdecProtocol) -> None:
+    """Write resolved named-protocol values back to omitted CLI fields."""
+
+    args.lambda_kmeans = protocol.kmeans_weight
+    args.lambda_greedy = protocol.greedy_weight
+    args.greedy_eigen_direction = protocol.greedy_eigen_direction
+    args.greedy_target_mode = protocol.greedy_target_mode
+
+
 def protocol_contract_sha256(contract: dict[str, object]) -> str:
     """Hash the canonical resolved protocol contract stored in an artifact."""
 
@@ -3045,6 +3054,7 @@ if __name__ == '__main__':
         args.greedy_eigen_direction,
         args.greedy_target_mode,
     )
+    apply_resolved_cli_protocol(args, protocol)
     lambda_reconstruction = protocol.reconstruction_weight
     lambda_kmeans = protocol.kmeans_weight
     lambda_orthonormal = protocol.scatter_trace_weight

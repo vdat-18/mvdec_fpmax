@@ -1,6 +1,7 @@
 import importlib
 import pickle
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -709,6 +710,26 @@ def test_cli_named_protocol_uses_locked_defaults_when_overrides_omitted(
     )
 
     assert protocol == mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL
+
+
+def test_resolved_cli_protocol_updates_omitted_runtime_fields(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    args = SimpleNamespace(
+        lambda_kmeans=None,
+        lambda_greedy=None,
+        greedy_eigen_direction=None,
+        greedy_target_mode=None,
+    )
+
+    mvdec.apply_resolved_cli_protocol(
+        args,
+        mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+    )
+
+    assert args.lambda_kmeans == 1.0
+    assert args.lambda_greedy == 1.0
+    assert args.greedy_eigen_direction == 'smallest'
+    assert args.greedy_target_mode == 'selected_dimension_only'
 
 
 def test_cli_named_protocol_still_rejects_explicit_override(monkeypatch):
