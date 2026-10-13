@@ -858,6 +858,65 @@ def resolve_mvdec_protocol(
     return resolved
 
 
+def resolve_cli_mvdec_protocol(
+    protocol_id: str,
+    kmeans_weight: float | None,
+    greedy_weight: float | None,
+    eigen_direction: str | None,
+    target_mode: str | None,
+) -> MvdecProtocol:
+    """Apply named-protocol defaults when CLI overrides are omitted."""
+
+    named_protocol = (
+        PRIMARY_MVDEC_PROTOCOL
+        if protocol_id == PRIMARY_PROTOCOL_ID
+        else PUBLIC_PROTOCOLS.get(protocol_id)
+    )
+    if named_protocol is not None:
+        kmeans_weight = (
+            named_protocol.kmeans_weight
+            if kmeans_weight is None
+            else kmeans_weight
+        )
+        greedy_weight = (
+            named_protocol.greedy_weight
+            if greedy_weight is None
+            else greedy_weight
+        )
+        eigen_direction = (
+            named_protocol.greedy_eigen_direction
+            if eigen_direction is None
+            else eigen_direction
+        )
+        target_mode = (
+            named_protocol.greedy_target_mode
+            if target_mode is None
+            else target_mode
+        )
+    else:
+        kmeans_weight = (
+            DEFAULT_LAMBDA_KMEANS if kmeans_weight is None else kmeans_weight
+        )
+        greedy_weight = (
+            DEFAULT_LAMBDA_GREEDY if greedy_weight is None else greedy_weight
+        )
+        eigen_direction = (
+            DEFAULT_GREEDY_EIGEN_DIRECTION
+            if eigen_direction is None
+            else eigen_direction
+        )
+        target_mode = (
+            DEFAULT_GREEDY_TARGET_MODE if target_mode is None else target_mode
+        )
+    return resolve_mvdec_protocol(
+        protocol_id,
+        kmeans_weight,
+        greedy_weight,
+        eigen_direction,
+        target_mode,
+    )
+
+
 def protocol_contract_sha256(contract: dict[str, object]) -> str:
     """Hash the canonical resolved protocol contract stored in an artifact."""
 
@@ -2942,7 +3001,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--greedy-eigen-direction',
         choices=GREEDY_EIGEN_DIRECTIONS,
-        default=DEFAULT_GREEDY_EIGEN_DIRECTION,
+        default=None,
         help=(
             'Largest is the DEKM-consistent last/least-informative direction; '
             'use --protocol custom for smallest-eigen sensitivity runs.'
@@ -2951,7 +3010,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--greedy-target-mode',
         choices=GREEDY_TARGET_MODES,
-        default=DEFAULT_GREEDY_TARGET_MODE,
+        default=None,
         help=(
             'Frozen snapshot matches the released DEKM implementation; use '
             '--protocol custom for selected-dimension-only ablations.'
@@ -2960,7 +3019,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--lambda-kmeans',
         type=float,
-        default=DEFAULT_LAMBDA_KMEANS,
+        default=None,
         help=(
             'L2 K-means weight. The primary protocol fixes it at 0 because '
             'DEKM 2021 selects greedy last-direction refinement and L3 is '
@@ -2970,7 +3029,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--lambda-greedy',
         type=float,
-        default=DEFAULT_LAMBDA_GREEDY,
+        default=None,
         help=(
             'L4 greedy weight, fixed at 1 by the primary protocol. Use '
             '--protocol custom to ablate it.'
@@ -2979,7 +3038,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.runs < 1:
         raise ValueError('--runs must be at least 1')
-    protocol = resolve_mvdec_protocol(
+    protocol = resolve_cli_mvdec_protocol(
         args.protocol,
         args.lambda_kmeans,
         args.lambda_greedy,

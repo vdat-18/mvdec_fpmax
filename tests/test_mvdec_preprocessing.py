@@ -695,6 +695,35 @@ def test_named_equation11_ambiguity_protocols_are_immutable(
         )
 
 
+def test_cli_named_protocol_uses_locked_defaults_when_overrides_omitted(
+    monkeypatch,
+):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_cli_mvdec_protocol(
+        mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+        kmeans_weight=None,
+        greedy_weight=None,
+        eigen_direction=None,
+        target_mode=None,
+    )
+
+    assert protocol == mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL
+
+
+def test_cli_named_protocol_still_rejects_explicit_override(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    with pytest.raises(ValueError, match="immutable"):
+        mvdec.resolve_cli_mvdec_protocol(
+            mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+            kmeans_weight=None,
+            greedy_weight=None,
+            eigen_direction="largest",
+            target_mode=None,
+        )
+
+
 def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
