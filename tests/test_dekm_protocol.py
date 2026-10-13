@@ -9,11 +9,14 @@ from representation_learning.DEKM_dense import (
     DETERMINISTIC_RUNTIME_POLICY,
     build_config,
     enable_tensorflow_determinism,
+    method_name,
     runtime_metadata,
 )
 from representation_learning.dekm_protocol import (
+    DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
     DEKM_RELEASE_2021_PROTOCOL_ID,
+    DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
     DekmConfig,
     assignment_change_count,
     build_frozen_greedy_target,
@@ -83,6 +86,36 @@ def test_release_2021_non_reuters_and_cli_overrides() -> None:
 
     assert config.refinement_batch_size == 512
     assert config.assignment_change_tolerance == 0.01
+
+
+@pytest.mark.parametrize(
+    ("dataset", "expected_samples"),
+    [("REUTERS", 10_000), ("20NEWS", 18_846), ("RCV1", 10_000)],
+)
+def test_full_batch_protocol_uses_the_complete_dataset(
+    dataset: str,
+    expected_samples: int,
+) -> None:
+    config = build_config(config_args(dataset=dataset, protocol="full-batch-2021"))
+
+    assert config.protocol_id == DEKM_FULL_BATCH_2021_PROTOCOL_ID
+    assert config.refinement_batch_size == expected_samples
+    assert config.kernel_initializer == "uniform"
+    assert config.eigen_solver == "general_eig"
+    assert config.assignment_change_tolerance == 0.005
+    assert config.contract()["refinement"]["batching"] == ("full_dataset_each_update")
+    assert method_name(config) == "DEKM_F"
+
+
+def test_official_source_minibatch_protocol_uses_256_rows() -> None:
+    config = build_config(
+        config_args(dataset="REUTERS", protocol="release-minibatch-2021")
+    )
+
+    assert config.protocol_id == DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID
+    assert config.refinement_batch_size == 256
+    assert config.contract()["refinement"]["batching"] == "sequential_wraparound"
+    assert method_name(config) == "DEKM"
 
 
 def test_config_validation_rejects_invalid_values() -> None:

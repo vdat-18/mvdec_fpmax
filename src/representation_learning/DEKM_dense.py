@@ -29,8 +29,10 @@ from pipeline.public_artifacts import (
 )
 from pipeline.public_data import PublicDataset, load_dekm_public_dataset
 from representation_learning.dekm_protocol import (
+    DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
     DEKM_RELEASE_2021_PROTOCOL_ID,
+    DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
     DekmConfig,
     assignment_change_count,
     build_frozen_greedy_target,
@@ -41,7 +43,16 @@ from representation_learning.dekm_protocol import (
 )
 
 OFFICIAL_REPOSITORY = "https://github.com/spdj2271/DEKM"
+OFFICIAL_SOURCE_REVISION = "e58f506922137abe2905aa0e4eb04a6bf952e80d"
+OFFICIAL_DENSE_SHA256 = (
+    "8536630e35b05e5ad8cd0f9235c2012537f31e5b3b2a5b3313ee1c246cb3dec9"
+)
 DETERMINISTIC_RUNTIME_POLICY = "keras_seeded_tf_deterministic_v1"
+PUBLIC_DATASET_SAMPLE_COUNTS = {
+    "REUTERS": 10_000,
+    "20NEWS": 18_846,
+    "RCV1": 10_000,
+}
 
 
 @dataclass(frozen=True)
@@ -65,7 +76,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("dataset", choices=("REUTERS", "20NEWS", "RCV1"))
     parser.add_argument(
         "--protocol",
-        choices=("modern-deterministic", "release-2021"),
+        choices=(
+            "modern-deterministic",
+            "release-2021",
+            "release-minibatch-2021",
+            "full-batch-2021",
+        ),
         default="modern-deterministic",
     )
     parser.add_argument("--runs", type=int, default=1)
@@ -116,6 +132,14 @@ def enable_tensorflow_determinism(tf: Any) -> None:
     tf.config.experimental.enable_op_determinism()
 
 
+def method_name(config: DekmConfig) -> str:
+    """Return the paper method label represented by one DEKM protocol."""
+
+    return (
+        "DEKM_F" if config.protocol_id == DEKM_FULL_BATCH_2021_PROTOCOL_ID else "DEKM"
+    )
+
+
 def build_config(args: argparse.Namespace) -> DekmConfig:
     """Build the selected modern or release-faithful DEKM contract."""
 
@@ -126,20 +150,32 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
         "max_refinement_steps": args.max_refinement_steps,
         "initial_kmeans_n_init": args.initial_kmeans_n_init,
     }
-    if args.protocol == "release-2021":
+    if args.protocol in {
+        "release-2021",
+        "release-minibatch-2021",
+        "full-batch-2021",
+    }:
+        protocol_id = {
+            "release-2021": DEKM_RELEASE_2021_PROTOCOL_ID,
+            "release-minibatch-2021": DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
+            "full-batch-2021": DEKM_FULL_BATCH_2021_PROTOCOL_ID,
+        }[args.protocol]
+        default_batch_size = {
+            # Retain the historical contract so existing artifacts keep their
+            # original identity. New audits should use one of the explicit modes.
+            "release-2021": 10_000 if args.dataset == "REUTERS" else 256,
+            "release-minibatch-2021": 256,
+            "full-batch-2021": PUBLIC_DATASET_SAMPLE_COUNTS[args.dataset],
+        }[args.protocol]
         config = DekmConfig(
-            protocol_id=DEKM_RELEASE_2021_PROTOCOL_ID,
+            protocol_id=protocol_id,
             kernel_initializer="uniform",
             eigen_solver="general_eig",
             kmeans_random_state="global",
             deterministic_runtime=False,
             data_shuffle="release_random_0_99",
             refinement_batch_size=(
-                args.batch_size
-                if args.batch_size is not None
-                else 10_000
-                if args.dataset == "REUTERS"
-                else 256
+                args.batch_size if args.batch_size is not None else default_batch_size
             ),
             assignment_change_tolerance=(
                 args.assignment_tolerance
@@ -499,7 +535,7 @@ def run_one_seed(
 
     artifact = build_public_artifact(
         dataset=dataset.spec.name,
-        method="DEKM",
+        method=method_name(config),
         n_clusters=dataset.spec.n_clusters,
         random_seed=seed,
         source_sha256=dataset.source_sha256,
@@ -525,7 +561,7 @@ def run_one_seed(
     write_public_assignments(
         public_assignment_frame(
             dataset=dataset.spec.name,
-            method="DEKM",
+            method=method_name(config),
             labels=labels,
             true_labels=dataset.y,
             random_seed=seed,
@@ -546,9 +582,11 @@ def run_one_seed(
         "schema_version": 1,
         "status": "complete",
         "dataset": dataset.spec.name,
-        "method": "DEKM",
+        "method": method_name(config),
         "protocol_id": config.protocol_id,
         "official_repository": OFFICIAL_REPOSITORY,
+        "official_source_revision": OFFICIAL_SOURCE_REVISION,
+        "official_dense_sha256": OFFICIAL_DENSE_SHA256,
         "seed": seed,
         "config": asdict(config),
         "config_hash": config_hash(config),
@@ -575,7 +613,7 @@ def run_one_seed(
     )
     return {
         "dataset": dataset.spec.name,
-        "method": "DEKM",
+        "method": method_name(config),
         "protocol_id": config.protocol_id,
         "config_hash": config_hash(config),
         "seed": seed,
@@ -647,7 +685,7 @@ def main() -> None:
             [
                 {
                     "dataset": dataset.spec.name,
-                    "method": "DEKM",
+                    "method": method_name(config),
                     "protocol_id": config.protocol_id,
                     "config_hash": config_hash(config),
                     "completed_runs": len(combined),

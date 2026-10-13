@@ -11,6 +11,8 @@ from scipy.optimize import linear_sum_assignment
 
 DEKM_MODERN_PROTOCOL_ID = "dekm_modern_deterministic_v1"
 DEKM_RELEASE_2021_PROTOCOL_ID = "dekm_2021_release_seeded_modern_runtime_v1"
+DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID = "dekm_2021_official_source_minibatch_v2"
+DEKM_FULL_BATCH_2021_PROTOCOL_ID = "dekm_f_2021_official_source_full_batch_v1"
 DEKM_RELEASED_PROTOCOL_ID = DEKM_MODERN_PROTOCOL_ID
 
 
@@ -51,6 +53,8 @@ class DekmConfig:
         if self.protocol_id not in {
             DEKM_MODERN_PROTOCOL_ID,
             DEKM_RELEASE_2021_PROTOCOL_ID,
+            DEKM_RELEASE_MINIBATCH_2021_PROTOCOL_ID,
+            DEKM_FULL_BATCH_2021_PROTOCOL_ID,
         }:
             raise ValueError(f"Unsupported DEKM protocol: {self.protocol_id}.")
         if self.kernel_initializer not in {"glorot_uniform", "uniform"}:
@@ -84,7 +88,11 @@ class DekmConfig:
             "refinement": {
                 "objective": "frozen_transformed_embedding_mse",
                 "optimizer": "adam_default",
-                "batching": "sequential_wraparound",
+                "batching": (
+                    "full_dataset_each_update"
+                    if self.protocol_id == DEKM_FULL_BATCH_2021_PROTOCOL_ID
+                    else "sequential_wraparound"
+                ),
                 "eigenvalue_order": "ascending",
                 "eigen_solver": self.eigen_solver,
                 "greedy_eigen_direction": "largest_last",
