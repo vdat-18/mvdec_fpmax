@@ -467,3 +467,75 @@ log SHA-256 values all match their manifest declarations. The post-training
 notebook fix casts NumPy scalars to Python numeric types before JSON output; a
 new Kaggle version is required only to produce the final diagnostic JSON, ZIP,
 and `.sha256`, not to re-establish the training metric.
+
+## Final DEKM three-dataset matrix (Kaggle Version 3)
+
+Kaggle notebook `vandatzz/dekm-2021-three-datasets-seeds-42-44`
+completed all nine DEKM runs for REUTERS, 20NEWS, and RCV1 with seeds 42-44.
+The matrix uses protocol `dekm_2021_release_seeded_modern_runtime_v1`: the
+paper-era source revision `129b7d08b545f02d920ccff0948ec44b654b3158`, unit-L2
+text inputs, `uniform` initialization, `np.linalg.eig`, global-RNG KMeans, a
+0.5% assignment-change tolerance, a 10,000-row REUTERS refinement batch, and
+256-row 20NEWS/RCV1 refinement batches. This is the released executable
+contract, not the literal paper-normalization diagnostic that failed above.
+
+| Dataset | Seed | ACC | NMI | Runtime (s) |
+|---|---:|---:|---:|---:|
+| REUTERS | 42 | 0.750700 | 0.564252 | 79.859545 |
+| REUTERS | 43 | 0.811600 | 0.591986 | 78.127474 |
+| REUTERS | 44 | 0.750400 | 0.582769 | 75.894423 |
+| 20NEWS | 42 | 0.330675 | 0.385879 | 525.713042 |
+| 20NEWS | 43 | 0.386941 | 0.413640 | 432.297452 |
+| 20NEWS | 44 | 0.363959 | 0.396981 | 492.205840 |
+| RCV1 | 42 | 0.622000 | 0.357271 | 67.209147 |
+| RCV1 | 43 | 0.695900 | 0.452162 | 63.070797 |
+| RCV1 | 44 | 0.795800 | 0.568830 | 63.785561 |
+
+| Dataset | ACC mean +/- sample std | Paper ACC | Delta | NMI mean +/- sample std | Paper NMI | Delta | Mean runtime (s) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| REUTERS | 0.770900 +/- 0.035248 | 0.7628 | +0.810000 pp | 0.579669 +/- 0.014124 | 0.5906 | -1.093082 pp | 77.960481 |
+| 20NEWS | 0.360525 +/- 0.028290 | 0.4108 | -5.027500 pp | 0.398834 +/- 0.013973 | 0.4027 | -0.386643 pp | 483.405444 |
+| RCV1 | 0.704567 +/- 0.087224 | 0.6715 | +3.306667 pp | 0.459421 +/- 0.105966 | 0.4618 | -0.237930 pp | 64.688502 |
+
+REUTERS is the closest overall reproduction: both means remain near Table III,
+although the three seeds show a moderate ACC spread and the mean NMI is about
+1.09 percentage points low. Seed 43 is best on both metrics (ACC `0.8116`, NMI
+`0.5919864290624995`).
+
+RCV1 matches the paper NMI mean closely, but its ACC mean is 3.31 percentage
+points higher and both metrics are highly seed-sensitive. Seed 44 is best (ACC
+`0.7958`, NMI `0.5688295871925617`), while seed 42 is below the paper ACC and
+NMI. The paper's three-run aggregate is therefore plausible under the released
+contract, but the unspecified random seeds materially limit exact
+reproducibility.
+
+20NEWS matches the paper NMI mean closely but not ACC: mean ACC is 5.03
+percentage points lower. Seed 43 is best (ACC `0.386941352384117`, NMI
+`0.4136402686952982`). The official downloaded release files used here contain
+18,057 rows, whereas an earlier repository test/prose expectation recorded
+18,846 rows. This unresolved sample-provenance discrepancy is a material audit
+finding and a credible contributor to the ACC gap; it must be resolved before
+claiming an exact 20NEWS reproduction. It should not be hidden by selecting a
+favorable seed or changing the metric implementation.
+
+The independent artifact verification passed all gates: exactly nine unique
+runs; all manifests complete; every manifest-declared SHA-256 valid; ACC/NMI
+recomputed from every assignment file; run and aggregate summaries exact;
+sample standard deviations use `ddof=1`; the ZIP is structurally valid; and its
+summary files byte-match the downloaded copies. `failures.json` is `[]`; there
+were no OOMs. Dataset source hashes are REUTERS
+`427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b`,
+20NEWS `03cde55305da6465da88be6e3d148904ca51598d9b9023faa898fbc51dd3872c`,
+and RCV1 `083201cff76ee4952531472fcd630bd6366ca9b2a34ec08a3092c6f4f1aef90c`.
+The result ZIP SHA-256 is
+`05443c7992348c9546406695c8f41ea4ff95743ae1dedb45b280bd1297bd211e`.
+The durable local bundle, including the ZIP, checksum, Kaggle log, summary
+files, failures file, and independent verification report, is stored under
+`artifacts/kaggle/dekm-2021-three-datasets-seeds42-44/version-3`.
+
+The final audit conclusion is therefore not that all three datasets match
+exactly. REUTERS matches well; RCV1 matches NMI but exposes large seed
+sensitivity; and 20NEWS retains a material ACC gap plus an unresolved row-count
+provenance mismatch. Further DEKM experiments should first identify the exact
+20NEWS corpus/split used for Table III rather than sweep training
+hyperparameters against a potentially different sample set.
