@@ -292,10 +292,11 @@ def package_run(
     run_dir = Path(manifest_path_value).parent.resolve()
     try:
         archive_name = run_dir.relative_to(PROJECT_DIR.resolve())
-    except ValueError as error:
-        raise ValueError(
-            f"MvDEC run directory must be below the project root: {run_dir}"
-        ) from error
+    except ValueError:
+        # Cloud notebooks keep generated outputs beside the cloned repository.
+        # Each run has its own archive, so the run directory name is sufficient
+        # to provide a portable, non-absolute archive root without collisions.
+        archive_name = Path(run_dir.name)
 
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_archive = archive_path.with_name(f"{archive_path.name}.tmp")

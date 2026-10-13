@@ -60,6 +60,36 @@ def test_package_run_writes_portable_archive_and_checksum(
     assert "output/public/seed_42/artifact.pkl" in names
 
 
+def test_package_run_supports_output_outside_project_root(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Cloud output directories may be siblings of the cloned repository."""
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    run_dir = tmp_path / "cloud-output" / "seed_42"
+    run_dir.mkdir(parents=True)
+    manifest_path = run_dir / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    (run_dir / "artifact.pkl").write_bytes(b"artifact")
+    monkeypatch.setattr(matrix, "PROJECT_DIR", project_dir)
+
+    archive_path = tmp_path / "archives" / "run.tar.gz"
+    checksum_path = archive_path.with_suffix(".gz.sha256")
+    matrix.package_run(
+        {"_manifest_path": str(manifest_path)},
+        archive_path,
+        checksum_path,
+    )
+
+    assert matrix.checksum_matches(archive_path, checksum_path)
+    with tarfile.open(archive_path, "r:gz") as archive:
+        names = archive.getnames()
+    assert "seed_42/manifest.json" in names
+    assert "seed_42/artifact.pkl" in names
+
+
 def test_run_training_redirects_verbose_child_output(
     tmp_path: Path,
     monkeypatch,
