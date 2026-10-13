@@ -29,6 +29,7 @@ class DekmConfig:
     kmeans_random_state: str = "seeded"
     deterministic_runtime: bool = True
     data_shuffle: str = "direct_seed"
+    input_normalization: str = "release_l2_unit_norm"
     pretrain_epochs: int = 200
     pretrain_batch_size: int = 256
     refinement_batch_size: int = 256
@@ -69,6 +70,11 @@ class DekmConfig:
             raise ValueError("Unsupported DEKM K-Means random-state policy.")
         if self.data_shuffle not in {"direct_seed", "release_random_0_99"}:
             raise ValueError("Unsupported DEKM data-shuffle policy.")
+        if self.input_normalization not in {
+            "release_l2_unit_norm",
+            "paper_mean_squared_norm_one",
+        }:
+            raise ValueError("Unsupported DEKM input-normalization policy.")
         if not 0 <= self.assignment_change_tolerance < 1:
             msg = "assignment_change_tolerance must be in the range [0, 1)."
             raise ValueError(msg)
@@ -83,6 +89,9 @@ class DekmConfig:
                 "decoder_units": [2000, 500, 500],
                 "hidden_activation": "relu",
                 "kernel_initializer": self.kernel_initializer,
+            },
+            "preprocessing": {
+                "input_normalization": self.input_normalization,
             },
             "pretraining": {
                 "objective": "reconstruction_mse_mean_dimensions",

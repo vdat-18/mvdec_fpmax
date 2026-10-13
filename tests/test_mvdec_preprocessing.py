@@ -539,6 +539,10 @@ def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
     )
 
     assert protocol == mvdec.LITERAL_EQUATION11_PROTOCOL
+    assert protocol.input_normalization == "paper_mean_squared_norm_one"
+    assert contract["preprocessing"]["input_normalization"] == (
+        "paper_mean_squared_norm_one"
+    )
     assert protocol.view2_architecture_id == (
         mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
     )
@@ -751,7 +755,7 @@ def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
     contract = mvdec.LITERAL_EQUATION11_PROTOCOL.manifest_contract(0.001)
 
     assert mvdec.protocol_contract_sha256(contract) == (
-        '97825bcfc9af8637de0959f082576a75f746a4e696ae114f501832adb6bdf651'
+        'f09877f8db424c00eaaa46be036d9aa4cdd4223bf90afc3290cb5445d0a5324f'
     )
     assert contract['schedule']['refinement'] == {
         'objective': 'joint_reconstruction_plus_greedy',
@@ -784,7 +788,7 @@ def test_literal_equation11_resolved_config_hash_is_unchanged(monkeypatch):
     )
 
     assert canonical_config_hash(config) == (
-        '65c72cd56cfd16fc1ea3f5259b12fad4e4f583a497414b4bd089baf328acd0f7'
+        '5bc0498e77dfaaee404c989ed249610ac438b642053fb0b2e40c702157cc3d45'
     )
     assert 'refinement_batch_size_policy' not in config
     assert 'resolved_refinement_batch_size' not in config

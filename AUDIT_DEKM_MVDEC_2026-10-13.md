@@ -11,14 +11,19 @@ Kaggle numbers are a faithful MvDEC reproduction.
 
 ## Executive verdict
 
-The low Kaggle result is not evidence that the datasets are intrinsically hard
-or that more seeds will fix the problem. The run used the repository's
-`mvdec_2025_paper_resolved_full_batch_v1` interpretation. That protocol changes
-three unresolved choices at once: smallest eigen-direction, selected-dimension
-only target, and full-dataset refinement. The MvDEC paper does not provide
-pseudocode or source code that fixes those choices, and the DEKM 2021 release
-uses a different greedy target and mini-batch schedule. Therefore the run was
-not an apples-to-apples test of either paper.
+The audit found one confirmed preprocessing bug in the reproduction contract:
+the so-called `paper-text-full-batch-2021` diagnostics still passed every text
+row through the released source's unit-L2 normalization. The DEKM paper instead
+states `(1/d)||x_i||_2^2 approximately 1`, which requires row norm `sqrt(d)`.
+The released REUTERS array already satisfies the paper formula before the loader
+renormalizes it. Therefore the completed REUTERS/RCV1 "paper-text" diagnostics
+did not actually test the paper preprocessing and cannot close that branch.
+
+The low MvDEC Kaggle result is also not evidence that more seeds will fix the
+problem. Its protocol changes several unresolved choices at once, while MvDEC
+provides no executable source or complete text-dataset View2 contract. The next
+valid experiment is a bounded seed-42 DEKM_F control with the corrected paper
+normalization, not another multi-seed MvDEC run.
 
 ## Findings
 
@@ -70,20 +75,19 @@ The repository contains both implementations, but the correct order must be:
 Without this ladder, a failed MvDEC run mixes data, architecture, objective,
 refinement schedule, and model-selection differences.
 
-### F3 - MvDEC Eq. 11 scaling is a high-risk implementation mismatch
+### F3 - MvDEC Eq. 11 has a paper-level scaling hazard, not a hidden mean/sum bug
 
-The paper writes all four terms as sums over samples. The current joint-loss
-path in `MVDEC_dense.py` computes per-batch means while summing dimensions for
-some terms. In particular, reconstruction, K-Means, and orthonormal terms use
-`squared_euclidean_per_sample` followed by `reduce_mean`, while the selected
-Greedy term uses a mean over one coordinate.
+The current literal Eq. 11 path consistently sums squared dimensions and then
+averages over the batch for L1/L2/L3/L4. The batch mean is a common scalar and
+does not change their relative weighting. However, the paper assigns unit weight
+to terms with very different dimensionalities: L1 contains two 2,000-dimensional
+reconstructions, while L2/L3/L4 operate in a 10-dimensional latent space. L3 is
+also mathematically equal to L2 when V is orthonormal, so the literal objective
+double-counts the same cluster distance.
 
-This makes the relative weights of L1/L2/L3/L4 depend on input width and batch
-size. For REUTERS/RCV1, the 2,000-dimensional reconstruction term can dominate
-the one-dimensional greedy term even though Eq. 11 gives each term unit weight.
-This must be resolved with an explicit reduction contract before treating Eq. 11
-as paper-faithful. The release-faithful DEKM MSE path is a separate valid
-control, not a substitute for Eq. 11.
+Thus the implementation is literal, but the objective can still be dominated by
+reconstruction. Any normalized or reweighted objective is an ablation, not an
+exact implementation of Eq. 11, and must use a separate protocol identity.
 
 ### F4 - The View 2 definition is under-specified and is the largest MvDEC risk
 
@@ -98,7 +102,7 @@ assumption, not an established paper fact. Existing diagnostics show View 1 is
 near the paper while View 2 is far below it, so this ambiguity is a stronger
 candidate than random seed variation.
 
-### F5 - The primary MvDEC metric is not the paper's undocumented ?best? rule
+### F5 - The primary MvDEC metric is not the paper's undocumented "best" rule
 
 The paper reports ?best performance metrics? but gives no seed list,
 checkpoint-selection rule, or run count. The repository reports all explicit
@@ -107,13 +111,27 @@ are diagnostics. This is methodologically correct for a reproducible study, but
 it means exact Table 2 matching cannot be claimed without the authors' selection
 rule.
 
-### F6 - Data preprocessing is consistent with the released DEKM text loader
+### F6 - Confirmed: the paper-text protocol used the wrong normalization
 
-`src/pipeline/public_data.py` and `external_repos/DEKM/utils.py` both L2-normalize
-rows and use the released REUTERS arrays / RCV1 split and top-2,000 feature
-contract. This is not currently the leading suspected bug. The MvDEC paper's
-REUTERS sample-count text is inconsistent with the DEKM benchmark; the canonical
-10,000-row DEKM release is the defensible choice.
+The released source divides every text row by its L2 norm, producing
+`||x_i||_2 = 1`. The DEKM paper visually and unambiguously states
+`(1/d)||x_i||_2^2 approximately 1`, producing `||x_i||_2 = sqrt(d)`. For
+2,000-dimensional text, the two contracts differ by a factor of `sqrt(2000) =
+44.721...` in input magnitude.
+
+The released REUTERS `10k_feature.npy` already has row norm `44.721...` and mean
+squared feature norm exactly `1.0`. The old loader renormalized it to row norm
+`1.0` and mean squared norm `0.0005`. The completed paper-text artifacts use hash
+`427993db...`, proving that they used the released unit-L2 contract. The corrected
+paper-normalized REUTERS fingerprint is
+`7eb3f41aca38ffb93c104eef261adc3273d1da57c3750e04c92a67e335d423a1`.
+
+This is a confirmed protocol bug because `paper-text-full-batch-2021` changed the
+initializer, eigensolver, batch size, tolerance, and seeding but silently kept the
+source normalization. The loader and protocol contracts now expose separate
+`release_l2_unit_norm` and `paper_mean_squared_norm_one` modes. Existing
+paper-text results remain valid artifacts, but they must be relabeled as hybrid
+training diagnostics rather than paper-faithful preprocessing tests.
 
 ### F7 - DEKM protocol variants must not be mixed
 
@@ -124,23 +142,47 @@ comparison, use `--protocol release-minibatch-2021` for DEKM and
 retained only so existing artifacts are not silently reinterpreted; the modern
 contract remains a deterministic engineering regression test.
 
+### F8 - MvDEC View1 is not a DEKM_F parity check after joint training
+
+`model_view1` has the DEKM-style architecture, but the reported View1 embedding
+is evaluated after the joint MvDEC optimizer has updated View1 together with
+View2 and the fused objective. Therefore a final MvDEC `view1_acc` is not the
+same experiment as a frozen standalone DEKM_F run. Table 2 duplicates the DEKM_F
+values exactly in the Proposed View1 columns, but the paper does not state that
+it reran or jointly refined View1.
+
+Before judging fusion, the code must preserve a standalone DEKM_F artifact as
+the View1 control and report the post-joint View1 result under a different name.
+Exact equality between the current final View1 metric and DEKM_F is not a valid
+invariant.
+
+### F9 - The checked-in `external_repos/DEKM` tree is a local fork, not pristine source
+
+Git history shows local 2026 changes from `uniform` to `glorot_uniform`, from
+`np.linalg.eig` to symmetric `eigh`, from tolerance `0.005` to `0.001`, and the
+addition of deterministic seeding. The reproducible runner correctly pins the
+actual upstream revision and SHA-256 separately, but code review must not cite
+`external_repos/DEKM/DEKM_dense.py` as the untouched official implementation.
+
+
 ## Required implementation order
 
 1. Freeze the dataset scope to REUTERS and RCV1 in the cloud notebook only;
    leave the loader capable of handling 20NEWS but do not launch it.
 2. Run no MvDEC training yet.
-3. Verify the DEKM 2021 release control on both datasets, including exact source
-   hashes, row counts, class counts, normalization, and three-run mean/std.
-4. Verify DEKM_F separately by changing only the refinement batch policy.
+3. Preserve the completed released-source controls, but do not reinterpret them
+   as paper-preprocessing runs.
+4. Run one corrected paper-normalized DEKM_F seed-42 diagnostic per dataset. Only
+   expand to seeds 43-44 if the correction materially improves paper agreement.
 5. Add a two-view model with the DEKM release objective and schedule. Compare
    View 1, View 2, and fused results separately.
 6. Add MvDEC Eq. 11 terms with an explicit reduction/weight contract and test
    each term in isolation. Do not silently reuse the release MSE scaling.
 7. Evaluate the eigen-direction and target choices as a 2x2 ablation, not as a
-   single ?paper-resolved? run.
+   single "paper-resolved" run.
 8. Only after these controls pass, launch the two-dataset multi-seed Kaggle run.
 
-## Acceptance criteria for ?match?
+## Acceptance criteria for "match"
 
 A result should be called a match only if:
 
@@ -151,7 +193,7 @@ A result should be called a match only if:
   tolerance, before judging View 2 or fusion.
 - Every MvDEC ambiguity is isolated in a named protocol.
 - Metrics are reported per seed and as mean plus sample standard deviation.
-- ?Best? values are labeled sensitivity diagnostics, not silently substituted
+- "Best" values are labeled sensitivity diagnostics, not silently substituted
   for the primary aggregate.
 
 ## Files reviewed
@@ -233,13 +275,11 @@ is `825093151b5c092ab7dfc13958e11a7e81e0ceb50bf9e5dd834c277af1baadc5`.
 The downloaded audit bundle is stored under
 `artifacts/kaggle/dekm-f-2021-rcv1-paper-text-seed42/version-1-358003532`.
 
-Conclusion: the implementation now cleanly isolates the paper-text differences,
-and those differences explain part of the released-source discrepancy, but they
-do not reproduce the paper. The remaining mismatch is most consistent with the
-paper/source contradictions plus undocumented historical randomness,
-preprocessing order, dependency behavior, or model-selection details. Running
-seeds 43-44 would quantify variance but would not resolve that missing contract,
-so no additional GPU runs are justified at this stage.
+Correction after the full audit: this result did not isolate all paper-text
+differences because the loader still applied released unit-L2 normalization.
+It is a valid hybrid diagnostic, but it cannot decide whether the paper's RMS-like
+text scaling closes the RCV1 gap. Seeds 43-44 remain unjustified until one
+corrected paper-normalized seed-42 run is evaluated.
 
 
 ## REUTERS paper-text diagnostic result
@@ -266,10 +306,8 @@ is `158cdd9a27a714a8a764a79b527bd6988a79996740745eb8041b11c480f4303d`.
 The downloaded audit bundle is stored under
 `artifacts/kaggle/dekm-f-2021-reuters-paper-text-seed42/version-1-358020636`.
 
-Combined with the RCV1 diagnostic, this closes the DEKM paper-text branch. The
-released source and the paper prose are both defensible contracts, but neither
-reproduces every table entry, and switching to the prose contract does not
-systematically close the gap. More DEKM seeds would measure stochastic variance
-without recovering the missing historical contract. The next useful work is to
-make MvDEC View 1 exactly reuse the frozen DEKM_F control, then isolate View 2,
-fusion, and Equation 11 loss scaling as separate named ablations.
+Correction after the full audit: this result also used released unit-L2
+normalization, not the paper formula, so it does not close the paper-text branch.
+The next useful experiment is the corrected paper-normalized seed-42 DEKM_F
+control. Only after that control should MvDEC preserve standalone DEKM_F as its
+View1 baseline and isolate View2, fusion, and Equation 11 as named ablations.

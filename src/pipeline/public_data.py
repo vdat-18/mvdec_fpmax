@@ -33,15 +33,24 @@ PUBLIC_DATASET_SPECS = {
     "20NEWS": PublicDatasetSpec("20NEWS", "20NEWS", 20, 2000),
     "RCV1": PublicDatasetSpec("RCV1", "RCV1-10K", 4, 2000),
 }
+RELEASE_L2_NORMALIZATION = "release_l2_unit_norm"
+PAPER_RMS_NORMALIZATION = "paper_mean_squared_norm_one"
+TEXT_NORMALIZATION_MODES = {RELEASE_L2_NORMALIZATION, PAPER_RMS_NORMALIZATION}
 
 
-def _normalize_rows(values: np.ndarray) -> np.ndarray:
-    """Apply the L2 row normalization used by the released DEKM loader."""
+def _normalize_rows(values: np.ndarray, mode: str) -> np.ndarray:
+    """Apply one explicit released-source or paper text normalization."""
 
+    if mode not in TEXT_NORMALIZATION_MODES:
+        raise ValueError(f"Unsupported DEKM text normalization: {mode!r}.")
     matrix = np.asarray(values, dtype=np.float32)
     norms = np.linalg.norm(matrix, ord=2, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    return matrix / norms
+    nonzero = norms[:, 0] != 0
+    normalized = np.zeros_like(matrix)
+    normalized[nonzero] = matrix[nonzero] / norms[nonzero]
+    if mode == PAPER_RMS_NORMALIZATION:
+        normalized *= np.sqrt(matrix.shape[1])
+    return normalized
 
 
 def _load_dense_npz(path: Path) -> np.ndarray:
@@ -82,7 +91,9 @@ def _array_sha256(*arrays: np.ndarray) -> str:
     return digest.hexdigest()
 
 
-def _load_reuters(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_reuters(
+    dataset_dir: Path, normalization: str
+) -> tuple[np.ndarray, np.ndarray]:
     """Load Reuters arrays distributed by the DEKM code release."""
 
     x_path = dataset_dir / "10k_feature.npy"
@@ -92,10 +103,12 @@ def _load_reuters(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
         raise FileNotFoundError(msg)
     X = np.load(x_path, allow_pickle=False).astype(np.float32)
     y = np.load(y_path, allow_pickle=False).reshape(-1).astype(np.int32)
-    return _normalize_rows(X), y
+    return _normalize_rows(X, normalization), y
 
 
-def _load_20news(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_20news(
+    dataset_dir: Path, normalization: str
+) -> tuple[np.ndarray, np.ndarray]:
     """Load and concatenate the train/test arrays from the DEKM release."""
 
     train_x = _load_dense_npz(dataset_dir / "train_data.npz")
@@ -104,10 +117,10 @@ def _load_20news(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
     test_y = _load_dense_npz(dataset_dir / "test_label.npz")
     X = np.concatenate([train_x, test_x]).astype(np.float32)
     y = np.concatenate([train_y, test_y]).reshape(-1).astype(np.int32)
-    return _normalize_rows(X), y
+    return _normalize_rows(X, normalization), y
 
 
-def _load_rcv1(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_rcv1(dataset_dir: Path, normalization: str) -> tuple[np.ndarray, np.ndarray]:
     """Apply the released DEKM RCV1 split and feature-selection contract."""
 
     from sklearn.datasets import fetch_rcv1
@@ -152,12 +165,18 @@ def _load_rcv1(dataset_dir: Path) -> tuple[np.ndarray, np.ndarray]:
             )
             raise ValueError(msg)
         labels.append(matching[0])
-    return _normalize_rows(X), np.asarray(labels, dtype=np.int32)
+    return _normalize_rows(X, normalization), np.asarray(labels, dtype=np.int32)
 
 
-def load_dekm_public_dataset(name: str, dataset_root: Path) -> PublicDataset:
-    """Load one canonical DEKM public dataset without regenerating its files."""
+def load_dekm_public_dataset(
+    name: str,
+    dataset_root: Path,
+    normalization: str = RELEASE_L2_NORMALIZATION,
+) -> PublicDataset:
+    """Load one canonical dataset under an explicit text-normalization contract."""
 
+    if normalization not in TEXT_NORMALIZATION_MODES:
+        raise ValueError(f"Unsupported DEKM text normalization: {normalization!r}.")
     normalized_name = name.upper()
     if normalized_name not in PUBLIC_DATASET_SPECS:
         msg = f"Unsupported DEKM public dataset: {name!r}."
@@ -165,11 +184,11 @@ def load_dekm_public_dataset(name: str, dataset_root: Path) -> PublicDataset:
     root = Path(dataset_root).resolve()
     dataset_dir = root / normalized_name
     if normalized_name == "REUTERS":
-        X, y = _load_reuters(dataset_dir)
+        X, y = _load_reuters(dataset_dir, normalization)
     elif normalized_name == "20NEWS":
-        X, y = _load_20news(dataset_dir)
+        X, y = _load_20news(dataset_dir, normalization)
     else:
-        X, y = _load_rcv1(dataset_dir)
+        X, y = _load_rcv1(dataset_dir, normalization)
 
     spec = PUBLIC_DATASET_SPECS[normalized_name]
     if X.ndim != 2 or X.shape[1] != spec.n_features:

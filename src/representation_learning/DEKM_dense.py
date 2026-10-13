@@ -27,7 +27,12 @@ from pipeline.public_artifacts import (
     write_public_assignments,
     write_public_frame,
 )
-from pipeline.public_data import PublicDataset, load_dekm_public_dataset
+from pipeline.public_data import (
+    PAPER_RMS_NORMALIZATION,
+    RELEASE_L2_NORMALIZATION,
+    PublicDataset,
+    load_dekm_public_dataset,
+)
 from representation_learning.dekm_protocol import (
     DEKM_FULL_BATCH_2021_PROTOCOL_ID,
     DEKM_MODERN_PROTOCOL_ID,
@@ -177,6 +182,7 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
             kmeans_random_state="global",
             deterministic_runtime=False,
             data_shuffle="release_random_0_99",
+            input_normalization=RELEASE_L2_NORMALIZATION,
             refinement_batch_size=(
                 args.batch_size if args.batch_size is not None else default_batch_size
             ),
@@ -195,6 +201,7 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
             kmeans_random_state="seeded",
             deterministic_runtime=True,
             data_shuffle="direct_seed",
+            input_normalization=PAPER_RMS_NORMALIZATION,
             refinement_batch_size=(
                 args.batch_size
                 if args.batch_size is not None
@@ -215,6 +222,7 @@ def build_config(args: argparse.Namespace) -> DekmConfig:
             kmeans_random_state="seeded",
             deterministic_runtime=True,
             data_shuffle="direct_seed",
+            input_normalization=RELEASE_L2_NORMALIZATION,
             refinement_batch_size=(
                 args.batch_size if args.batch_size is not None else 256
             ),
@@ -672,7 +680,11 @@ def main() -> None:
     if args.require_gpu and not runtime["gpu_devices"]:
         raise RuntimeError("--require-gpu was set, but TensorFlow found no GPU.")
 
-    dataset = load_dekm_public_dataset(args.dataset, args.dataset_root)
+    dataset = load_dekm_public_dataset(
+        args.dataset,
+        args.dataset_root,
+        normalization=config.input_normalization,
+    )
     hash_prefix = config_hash(config)[:12]
     config_root = (
         args.output_dir / dataset.spec.name.lower() / config.protocol_id / hash_prefix

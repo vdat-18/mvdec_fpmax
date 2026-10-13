@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from pipeline.public_data import PAPER_RMS_NORMALIZATION, RELEASE_L2_NORMALIZATION
 from representation_learning.DEKM_dense import (
     DETERMINISTIC_RUNTIME_POLICY,
     build_config,
@@ -55,6 +56,7 @@ def test_modern_protocol_defaults_are_explicit() -> None:
     assert config.kmeans_random_state == "seeded"
     assert config.deterministic_runtime is True
     assert config.data_shuffle == "direct_seed"
+    assert config.input_normalization == RELEASE_L2_NORMALIZATION
     assert config.refinement_batch_size == 256
     assert config.assignment_change_tolerance == 0.001
 
@@ -69,6 +71,7 @@ def test_release_2021_reuters_defaults_match_released_code() -> None:
     assert config.kmeans_random_state == "global"
     assert config.deterministic_runtime is False
     assert config.data_shuffle == "release_random_0_99"
+    assert config.input_normalization == RELEASE_L2_NORMALIZATION
     assert config.refinement_batch_size == 10_000
     assert config.assignment_change_tolerance == 0.005
     assert contract["architecture"]["kernel_initializer"] == "uniform"
@@ -130,9 +133,13 @@ def test_paper_text_full_batch_protocol_is_isolated_from_source_contract() -> No
     assert config.kmeans_random_state == "seeded"
     assert config.deterministic_runtime is True
     assert config.data_shuffle == "direct_seed"
+    assert config.input_normalization == PAPER_RMS_NORMALIZATION
     assert config.refinement_batch_size == 10_000
     assert config.assignment_change_tolerance == 0.001
     assert config.contract()["refinement"]["batching"] == "full_dataset_each_update"
+    assert config.contract()["preprocessing"]["input_normalization"] == (
+        PAPER_RMS_NORMALIZATION
+    )
     assert method_name(config) == "DEKM_F_PAPER_TEXT"
 
 
@@ -142,6 +149,9 @@ def test_config_validation_rejects_invalid_values() -> None:
 
     with pytest.raises(ValueError, match="range"):
         DekmConfig(assignment_change_tolerance=1.0).validate()
+
+    with pytest.raises(ValueError, match="input-normalization"):
+        DekmConfig(input_normalization="unknown").validate()
 
 
 def test_config_hash_is_stable_and_sensitive_to_runtime_values() -> None:

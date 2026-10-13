@@ -48,7 +48,11 @@ from pipeline.public_artifacts import (
     write_public_assignments,
     write_public_frame,
 )
-from pipeline.public_data import load_dekm_public_dataset
+from pipeline.public_data import (
+    PAPER_RMS_NORMALIZATION,
+    RELEASE_L2_NORMALIZATION,
+    load_dekm_public_dataset,
+)
 
 ds_name = 'AIRPOLLUTION'
 input_shape = 13
@@ -184,6 +188,7 @@ class MvdecProtocol:
     kmeans_n_init_policy: str
     pretrain_loss_reduction: str
     pretrain_shuffle_buffer: int | None
+    input_normalization: str = RELEASE_L2_NORMALIZATION
     decision_provenance: tuple[tuple[str, str, str], ...] = ()
 
     def manifest_contract(self, tolerance: float) -> dict[str, object]:
@@ -197,6 +202,9 @@ class MvdecProtocol:
                 "view2": self.view2_architecture_id,
             },
             "refinement_source": self.refinement_source,
+            "preprocessing": {
+                "input_normalization": self.input_normalization,
+            },
             "objective": {
                 "name": final_training_objective(self),
                 "loss_terms": {
@@ -449,6 +457,7 @@ LITERAL_EQUATION11_PROTOCOL = replace(
     greedy_weight=1.0,
     l4_reduction=L4_REDUCTION,
     refinement_objective=JOINT_REFINEMENT_OBJECTIVE,
+    input_normalization=PAPER_RMS_NORMALIZATION,
     decision_provenance=(
         (
             'view1_autoencoder',
@@ -3115,7 +3124,11 @@ if __name__ == '__main__':
     public_dataset = (
         None
         if ds_name in UNLABELED_DATASETS
-        else load_dekm_public_dataset(ds_name, args.dataset_root)
+        else load_dekm_public_dataset(
+            ds_name,
+            args.dataset_root,
+            normalization=protocol.input_normalization,
+        )
     )
     run_metrics = []
     config_dirs = set()

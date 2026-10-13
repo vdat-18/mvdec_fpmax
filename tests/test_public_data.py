@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from pipeline.public_data import load_dekm_public_dataset
+from pipeline.public_data import (
+    PAPER_RMS_NORMALIZATION,
+    RELEASE_L2_NORMALIZATION,
+    load_dekm_public_dataset,
+)
 
 
 def test_reuters_release_loader_preserves_rows_and_normalizes(tmp_path) -> None:
@@ -25,6 +29,37 @@ def test_reuters_release_loader_preserves_rows_and_normalizes(tmp_path) -> None:
     np.testing.assert_array_equal(first.y, y)
     assert first.source_sha256 == second.source_sha256
     assert first.spec.n_clusters == 4
+
+
+def test_reuters_paper_normalization_preserves_mean_squared_norm(tmp_path) -> None:
+    """The paper contract requires ||x||^2 / d = 1, not unit L2 norm."""
+
+    dataset_dir = tmp_path / "REUTERS"
+    dataset_dir.mkdir()
+    X = np.zeros((4, 2000), dtype=np.float32)
+    X[:, 0] = [1.0, 2.0, 3.0, 4.0]
+    X[:, 1] = [0.0, 2.0, 4.0, 6.0]
+    y = np.array([0, 1, 2, 3], dtype=np.int32)
+    np.save(dataset_dir / "10k_feature.npy", X)
+    np.save(dataset_dir / "10k_target.npy", y)
+
+    paper = load_dekm_public_dataset(
+        "REUTERS", tmp_path, normalization=PAPER_RMS_NORMALIZATION
+    )
+    released = load_dekm_public_dataset(
+        "REUTERS", tmp_path, normalization=RELEASE_L2_NORMALIZATION
+    )
+
+    np.testing.assert_allclose(
+        np.sum(paper.X * paper.X, axis=1) / paper.X.shape[1], 1.0, rtol=1e-6
+    )
+    np.testing.assert_allclose(np.linalg.norm(released.X, axis=1), 1.0)
+    assert paper.source_sha256 != released.source_sha256
+
+
+def test_loader_rejects_unknown_normalization(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Unsupported DEKM text normalization"):
+        load_dekm_public_dataset("REUTERS", tmp_path, normalization="unknown")
 
 
 def test_20news_release_loader_uses_local_npz_files_only(tmp_path) -> None:
