@@ -981,11 +981,46 @@ def test_weak_alignment_protocol_changes_only_alignment_weight(monkeypatch):
     assert strong_contract["schedule"] == weak_contract["schedule"]
 
 
+def test_no_alignment_protocol_changes_only_alignment_weight(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    weak = mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    disabled = mvdec.ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL
+    weak_contract = weak.manifest_contract(0.001)
+    disabled_contract = disabled.manifest_contract(0.001)
+
+    assert disabled.alignment_weight == 0.0
+    assert disabled.protocol_id == (
+        mvdec.ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    )
+    assert disabled_contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ] == {
+        "weight": 0.0,
+        "optimized": False,
+        "definition": (
+            "mean_batch(||L2_normalize(h_view1) - "
+            "L2_normalize(h_view2)||^2)"
+        ),
+    }
+    ignored_fields = {
+        "protocol_id",
+        "claim_scope",
+        "refinement_source",
+        "alignment_weight",
+    }
+    for field in weak.__dataclass_fields__:
+        if field not in ignored_fields:
+            assert getattr(disabled, field) == getattr(weak, field)
+    assert weak_contract["schedule"] == disabled_contract["schedule"]
+
+
 @pytest.mark.parametrize(
     "protocol_name",
     [
         "ALIGNED_BALANCED_FULL_BATCH_PROTOCOL",
         "ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
+        "ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL",
     ],
 )
 def test_aligned_balanced_artifact_contract_passes_loader_validation(

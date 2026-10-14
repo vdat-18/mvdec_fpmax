@@ -15,6 +15,7 @@ from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_PROTOCOL_IDS,
     ALIGNED_BALANCED_PROTOCOL_SETTINGS,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -68,6 +69,9 @@ ALIGNED_BALANCED_METHOD = "MvDEC-2025-aligned-balanced-full-batch"
 ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD = (
     "MvDEC-2025-aligned-balanced-alignment-005-full-batch"
 )
+ALIGNED_BALANCED_NO_ALIGNMENT_METHOD = (
+    "MvDEC-2025-aligned-balanced-alignment-000-full-batch"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -103,6 +107,9 @@ PUBLIC_PROTOCOL_METHODS = {
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_METHOD,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD
+    ),
+    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        ALIGNED_BALANCED_NO_ALIGNMENT_METHOD
     ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
@@ -422,7 +429,7 @@ def _validate_public_protocol_contract(
             },
             "L5_cross_view_alignment": {
                 "weight": alignment_weight,
-                "optimized": True,
+                "optimized": alignment_weight > 0,
                 "definition": (
                     "mean_batch(||L2_normalize(h_view1) - "
                     "L2_normalize(h_view2)||^2)"

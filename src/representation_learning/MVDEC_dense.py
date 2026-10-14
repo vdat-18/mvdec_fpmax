@@ -21,6 +21,7 @@ from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_PROTOCOL_IDS,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
@@ -761,6 +762,21 @@ ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
+    protocol_id=ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Seed-42 ablation of the aligned-balanced diagnostic with cross-view '
+        'alignment disabled; not an exact paper reproduction'
+    ),
+    refinement_source=(
+        'Minimal post-audit ablation of the aligned-balanced full-batch '
+        'diagnostic; all settings except alignment weight remain fixed'
+    ),
+    alignment_weight=0.0,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -793,6 +809,9 @@ PUBLIC_PROTOCOLS = {
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    ),
+    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL
     ),
 }
 
@@ -1079,6 +1098,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-aligned-balanced-full-batch'
     if protocol.protocol_id == ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-aligned-balanced-alignment-005-full-batch'
+    if protocol.protocol_id == ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-aligned-balanced-alignment-000-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -1872,7 +1893,7 @@ def save_airpollution_mvdec_artifact(
                 "greedy": protocol.greedy_weight,
                 **(
                     {"cross_view_alignment": protocol.alignment_weight}
-                    if protocol.alignment_weight > 0
+                    if protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
                     else {}
                 ),
             },
