@@ -109,6 +109,18 @@ These controls are diagnostics only and must not be labeled official MvDEC resul
 
 Under summed dimensional scaling, 2,000-dimensional reconstruction again contributes about 99.84%-99.88% of the total objective. The weighted alignment contribution is only 0.15-0.17, smaller than L2 and negligible relative to L1. Alignment weight 0.05 is therefore not scale-compatible with the legacy objective and cannot prevent latent sign reversal.
 
+## Post-run metadata audit
+
+A repository audit after this run found a metadata-only bug in public protocols. The saved `refinement_epochs_completed` field divided optimizer updates by `batches_per_epoch`; because this ablation is full batch, the artifacts recorded 1540, 2010, and 1500 instead of the actual 154, 201, and 150 completed ten-update KMeans refresh windows. Training behavior, weights, assignments, ACC/NMI, stopping decisions, and the scientific conclusion are unaffected. The training logs already identify the correct `paper_step9_after_release_update_window_*` cadence.
+
+The code fix preserves legacy artifact loading but makes new artifacts explicit:
+
+- Public protocols store `refinement_progress_unit=kmeans_refresh_windows` and compute progress as `training_steps_completed // update_interval`.
+- Private protocols store `refinement_progress_unit=dataset_epochs` and retain dataset-epoch counting.
+- The writer rejects inconsistent progress metadata, and the loader rejects incorrect new metadata while accepting old artifacts that lack the unit field.
+
+For these Version 1 artifacts, `training_steps_completed` plus the fixed `update_interval=10` is the authoritative progress source. The "Update windows" values in this report are already the corrected values.
+
 ## Reproducibility note
 
 - Saved-assignment fused ACC/NMI is authoritative and exactly matches every manifest.

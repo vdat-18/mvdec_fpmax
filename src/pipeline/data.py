@@ -28,6 +28,7 @@ from pipeline.mvdec_contract import (
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS,
     REPRESENTATION_METRIC_SEMANTICS,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
@@ -539,6 +540,8 @@ def _validate_public_protocol_contract(
         expected_batches_per_epoch = (
             n_samples + expected_resolved_batch_size - 1
         ) // expected_resolved_batch_size
+    expected_update_interval = 10
+    expected_max_training_steps = 14_000
     expected_schedule = {
         "scope": "public_datasets_only",
         "pretraining": {
@@ -552,8 +555,8 @@ def _validate_public_protocol_contract(
             "batch_size": expected_batch_size,
             "batching_policy": expected_batching_policy,
             "kmeans_refresh_policy": "fixed_10_updates",
-            "update_interval": 10,
-            "max_training_steps": 14000,
+            "update_interval": expected_update_interval,
+            "max_training_steps": expected_max_training_steps,
             "kmeans_n_init_policy": expected_kmeans_n_init_policy,
         },
         "final_evaluation": {
@@ -586,6 +589,20 @@ def _validate_public_protocol_contract(
         best_result.get("refinement_epochs_completed", -1)
     )
     stop_reason = best_result.get("stop_reason")
+    refinement_progress_unit = best_result.get("refinement_progress_unit")
+    if refinement_progress_unit is None:
+        expected_refinement_progress = training_steps_completed // max(
+            batches_per_epoch, 1
+        )
+    elif (
+        refinement_progress_unit
+        == REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS
+    ):
+        expected_refinement_progress = (
+            training_steps_completed // expected_update_interval
+        )
+    else:
+        expected_refinement_progress = -1
     metric_names = (
         "view1_acc",
         "view1_nmi",
@@ -633,8 +650,8 @@ def _validate_public_protocol_contract(
             config.get("batch_size") != expected_resolved_batch_size,
             config.get("kmeans_refresh_policy") != "fixed_10_updates",
             config.get("refinement_batching_policy") != expected_batching_policy,
-            config.get("update_interval") != 10,
-            config.get("max_training_steps") != 14000,
+            config.get("update_interval") != expected_update_interval,
+            config.get("max_training_steps") != expected_max_training_steps,
             config.get("kmeans_n_init_policy") != expected_kmeans_n_init_policy,
             config.get("pretrain_loss_reduction") != expected_pretrain_reduction,
             config.get("pretrain_shuffle_buffer") != expected_pretrain_shuffle_buffer,
@@ -647,13 +664,14 @@ def _validate_public_protocol_contract(
             n_samples < 1,
             batches_per_epoch != expected_batches_per_epoch,
             config.get("batches_per_epoch") != batches_per_epoch,
-            refinement_epochs_completed
-            != training_steps_completed // max(batches_per_epoch, 1),
+            refinement_epochs_completed != expected_refinement_progress,
             config.get("refinement_epochs_completed") != refinement_epochs_completed,
+            config.get("refinement_progress_unit") != refinement_progress_unit,
             config.get("stop_reason") != stop_reason,
-            not 0 <= training_steps_completed <= 14000,
+            not 0 <= training_steps_completed <= expected_max_training_steps,
             stop_reason not in {"converged_assignment", "max_epochs_reached"},
-            stop_reason == "max_epochs_reached" and training_steps_completed != 14000,
+            stop_reason == "max_epochs_reached"
+            and training_steps_completed != expected_max_training_steps,
             not np.isclose(
                 float(stopping.get("assignment_change_tolerance", np.nan)),
                 0.001,

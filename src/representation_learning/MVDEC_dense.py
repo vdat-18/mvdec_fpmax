@@ -37,6 +37,8 @@ from pipeline.mvdec_contract import (
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS,
+    REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS,
     REPRESENTATION_METRIC_SEMANTICS,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
@@ -1472,6 +1474,31 @@ def resolve_refinement_schedule(
     )
 
 
+def refinement_progress_unit(protocol: MvdecProtocol) -> str:
+    """Name the unit used by refinement_epochs_completed metadata."""
+
+    if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
+        return REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS
+    return REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS
+
+
+def completed_refinement_progress(
+    protocol: MvdecProtocol,
+    training_steps_completed: int,
+    schedule: RefinementSchedule,
+) -> int:
+    """Convert updates to the unit stored with the legacy epochs field."""
+
+    if training_steps_completed < 0:
+        raise ValueError('training_steps_completed must be non-negative.')
+    interval = (
+        schedule.kmeans_refresh_interval
+        if protocol.protocol_id in PUBLIC_PROTOCOL_IDS
+        else schedule.batches_per_epoch
+    )
+    return int(training_steps_completed) // interval
+
+
 def validate_max_refinement_epochs(max_refinement_epochs):
     if max_refinement_epochs < 1:
         raise ValueError('max_refinement_epochs must be at least 1.')
@@ -1745,6 +1772,16 @@ def save_airpollution_mvdec_artifact(
     )
     if batches_per_epoch != schedule.batches_per_epoch:
         raise ValueError("MvDEC artifact batch count does not match its protocol.")
+    if training_steps_completed is not None:
+        expected_refinement_progress = completed_refinement_progress(
+            protocol,
+            training_steps_completed,
+            schedule,
+        )
+        if refinement_epochs_completed != expected_refinement_progress:
+            raise ValueError(
+                "MvDEC refinement progress does not match completed training steps."
+            )
     if stop_reason not in TRAINING_STOP_REASONS:
         raise ValueError(f'Unsupported training stop reason: {stop_reason!r}.')
     greedy_eigen_position = (
@@ -1855,6 +1892,7 @@ def save_airpollution_mvdec_artifact(
         "batches_per_epoch": int(batches_per_epoch),
         "stop_reason": stop_reason,
         "refinement_epochs_completed": int(refinement_epochs_completed),
+        "refinement_progress_unit": refinement_progress_unit(protocol),
         "n_samples": int(h_fused.shape[0]),
         "n_features": int(input_shape),
         "n_classes": int(n_clusters) if true_labels is not None else None,
@@ -1878,6 +1916,7 @@ def save_airpollution_mvdec_artifact(
             "max_training_steps": int(schedule.max_training_steps),
             "stop_reason": stop_reason,
             "refinement_epochs_completed": int(refinement_epochs_completed),
+            "refinement_progress_unit": refinement_progress_unit(protocol),
             "assignment_change_tolerance": float(assignment_change_tolerance),
             "view1_latent_dim": int(hidden_units),
             "view2_latent_dim": int(hidden_units),
@@ -2765,12 +2804,12 @@ def train(
 
         if n_change_assignment <= len(x) * assignment_change_tolerance:
             stop_reason = 'converged_assignment'
-            refinement_epochs_completed = (
-                ite // batches_per_epoch
-                if protocol.protocol_id in PUBLIC_PROTOCOL_IDS
-                else ite // kmeans_refresh_interval
-            )
             training_steps_completed = ite
+            refinement_epochs_completed = completed_refinement_progress(
+                protocol,
+                training_steps_completed,
+                schedule,
+            )
             break
         if protocol.refinement_batching_policy == REFINEMENT_BATCHING_POLICY:
             idx = epoch_batches[index]
@@ -2986,6 +3025,7 @@ def train(
                 extra_fields={
                     **eigen_log_fields,
                     "refinement_epoch": refinement_epoch,
+                    "refinement_progress_unit": refinement_progress_unit(protocol),
                     "step9_metric_scope": metric_scope,
                     "step9_loss_scope": loss_scope,
                     "step9_loss_batches": len(epoch_batch_losses),
@@ -3003,7 +3043,11 @@ def train(
 
     if stop_reason == "max_epochs_reached":
         training_steps_completed = max_training_steps
-        refinement_epochs_completed = training_steps_completed // batches_per_epoch
+        refinement_epochs_completed = completed_refinement_progress(
+            protocol,
+            training_steps_completed,
+            schedule,
+        )
     resolved_final_view1_path = (
         Path(final_view1_path)
         if final_view1_path is not None
@@ -3021,6 +3065,8 @@ def train(
             f"phase:training_stop; stop_reason:{stop_reason}; "
             f"training_steps_completed:{training_steps_completed}; "
             f"max_training_steps:{max_training_steps}; "
+            f"refinement_epochs_completed:{refinement_epochs_completed}; "
+            f"refinement_progress_unit:{refinement_progress_unit(protocol)}; "
             f"time:{time.time() - train_start_time:.3f}"
         )
     else:
@@ -3028,6 +3074,7 @@ def train(
             f"phase:training_stop; stop_reason:{stop_reason}; "
             f"refinement_epochs_completed:{refinement_epochs_completed}; "
             f"max_refinement_epochs:{max_refinement_epochs}; "
+            f"refinement_progress_unit:{refinement_progress_unit(protocol)}; "
             f"time:{time.time() - train_start_time:.3f}"
         )
     print(stop_log_str)
@@ -3101,6 +3148,7 @@ def train(
         "batches_per_epoch": batches_per_epoch,
         "stop_reason": stop_reason,
         "refinement_epochs_completed": refinement_epochs_completed,
+        "refinement_progress_unit": refinement_progress_unit(protocol),
     }
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
         final_log_fields.update(

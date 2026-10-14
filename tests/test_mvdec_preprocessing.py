@@ -494,6 +494,48 @@ def test_primary_protocol_is_explicit_and_immutable(monkeypatch):
         )
 
 
+def test_refinement_progress_uses_refresh_windows_for_public_protocols(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    public_protocol = mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL
+    public_schedule = mvdec.resolve_refinement_schedule(
+        public_protocol,
+        n_samples=10_000,
+        current_batch_size=10_000,
+        max_refinement_epochs=1400,
+    )
+    fixed_batch_public_schedule = mvdec.resolve_refinement_schedule(
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+    private_schedule = mvdec.resolve_refinement_schedule(
+        mvdec.PRIMARY_MVDEC_PROTOCOL,
+        n_samples=10_000,
+        current_batch_size=256,
+        max_refinement_epochs=1400,
+    )
+
+    assert mvdec.refinement_progress_unit(public_protocol) == (
+        "kmeans_refresh_windows"
+    )
+    assert mvdec.completed_refinement_progress(
+        public_protocol, 1540, public_schedule
+    ) == 154
+    assert fixed_batch_public_schedule.batches_per_epoch == 40
+    assert mvdec.completed_refinement_progress(
+        mvdec.PUBLIC_REPRODUCTION_PROTOCOL, 1540, fixed_batch_public_schedule
+    ) == 154
+    assert mvdec.refinement_progress_unit(mvdec.PRIMARY_MVDEC_PROTOCOL) == (
+        "dataset_epochs"
+    )
+    assert mvdec.completed_refinement_progress(
+        mvdec.PRIMARY_MVDEC_PROTOCOL, 78, private_schedule
+    ) == 2
+    with pytest.raises(ValueError, match="non-negative"):
+        mvdec.completed_refinement_progress(public_protocol, -1, public_schedule)
+
+
 def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -1093,7 +1135,7 @@ def test_aligned_balanced_artifact_contract_passes_loader_validation(
         batches_per_epoch=1,
         max_refinement_epochs=1400,
         stop_reason="converged_assignment",
-        refinement_epochs_completed=30,
+        refinement_epochs_completed=3,
         preprocessing_metadata=None,
         true_labels=labels,
         source_sha256="a" * 64,
@@ -1851,36 +1893,45 @@ def test_public_reproduction_artifact_persists_view_metrics(
         h_view2,
         fusion_contract=protocol.fusion_contract,
     )
-    mvdec.save_airpollution_mvdec_artifact(
-        artifact_path=artifact_path,
-        h_view1=h_view1,
-        h_view2=h_view2,
-        h_fused=h_fused,
-        labels=labels,
-        score=0.5,
-        iteration=30,
-        orig_idx=shuffled_indices,
-        feature_columns=["a", "b"],
-        random_seed=42,
-        greedy_eigen_direction=eigen_direction,
-        greedy_target_mode=target_mode,
-        batches_per_epoch=1,
-        max_refinement_epochs=1400,
-        stop_reason="converged_assignment",
-        refinement_epochs_completed=30,
-        preprocessing_metadata=None,
-        true_labels=truth,
-        source_sha256="e" * 64,
-        source_id=provenance["source_id"],
-        training_commit=provenance["training_commit"],
-        external_metrics=metrics,
-        representation_external_metrics=representation_metrics,
-        training_steps_completed=30,
-        protocol=protocol,
-        run_id=run_id,
-        config_hash=config_hash,
-        refinement_batch_size=refinement_batch_size,
-    )
+    artifact_kwargs = {
+        "artifact_path": artifact_path,
+        "h_view1": h_view1,
+        "h_view2": h_view2,
+        "h_fused": h_fused,
+        "labels": labels,
+        "score": 0.5,
+        "iteration": 30,
+        "orig_idx": shuffled_indices,
+        "feature_columns": ["a", "b"],
+        "random_seed": 42,
+        "greedy_eigen_direction": eigen_direction,
+        "greedy_target_mode": target_mode,
+        "batches_per_epoch": 1,
+        "max_refinement_epochs": 1400,
+        "stop_reason": "converged_assignment",
+        "refinement_epochs_completed": 3,
+        "preprocessing_metadata": None,
+        "true_labels": truth,
+        "source_sha256": "e" * 64,
+        "source_id": provenance["source_id"],
+        "training_commit": provenance["training_commit"],
+        "external_metrics": metrics,
+        "representation_external_metrics": representation_metrics,
+        "training_steps_completed": 30,
+        "protocol": protocol,
+        "run_id": run_id,
+        "config_hash": config_hash,
+        "refinement_batch_size": refinement_batch_size,
+    }
+    mvdec.save_airpollution_mvdec_artifact(**artifact_kwargs)
+    with pytest.raises(ValueError, match="refinement progress"):
+        mvdec.save_airpollution_mvdec_artifact(
+            **{
+                **artifact_kwargs,
+                "artifact_path": tmp_path / "invalid_progress.pkl",
+                "refinement_epochs_completed": 30,
+            }
+        )
     manifest_payload = {
         "run_id": run_id,
         "status": "complete",
@@ -1901,17 +1952,41 @@ def test_public_reproduction_artifact_persists_view_metrics(
     assert loaded.raw["view2_nmi"] == 1.0
     assert loaded.raw["fused_acc"] == loaded.raw["acc"] == 1.0
     assert loaded.raw["training_steps_completed"] == 30
+    assert loaded.raw["refinement_epochs_completed"] == 3
+    assert loaded.raw["refinement_progress_unit"] == "kmeans_refresh_windows"
     assert loaded.raw["view2_architecture_id"] == expected_architecture
     assert loaded.raw["method_name"] == expected_method
     assert loaded.raw["fusion_contract"] == expected_fusion
 
     with artifact_path.open("rb") as file:
         artifact = pickle.load(file)
-    artifact["config"]["update_interval"] = 9
-    with artifact_path.open("wb") as file:
-        pickle.dump(artifact, file)
-    manifest_payload["output_sha256"]["artifact"] = file_sha256(artifact_path)
-    write_run_manifest(tmp_path / "manifest.json", manifest_payload)
+
+    def write_artifact(payload):
+        with artifact_path.open("wb") as file:
+            pickle.dump(payload, file)
+        manifest_payload["output_sha256"]["artifact"] = file_sha256(artifact_path)
+        write_run_manifest(tmp_path / "manifest.json", manifest_payload)
+
+    wrong_progress = pickle.loads(pickle.dumps(artifact))
+    wrong_progress["refinement_epochs_completed"] = 30
+    wrong_progress["config"]["refinement_epochs_completed"] = 30
+    write_artifact(wrong_progress)
+    with pytest.raises(ValueError, match="public artifact"):
+        load_mvdec_result(result_path=artifact_path, data_path=data_path)
+
+    legacy_artifact = pickle.loads(pickle.dumps(artifact))
+    legacy_artifact.pop("refinement_progress_unit")
+    legacy_artifact["config"].pop("refinement_progress_unit")
+    legacy_artifact["refinement_epochs_completed"] = 30
+    legacy_artifact["config"]["refinement_epochs_completed"] = 30
+    write_artifact(legacy_artifact)
+    legacy_loaded = load_mvdec_result(result_path=artifact_path, data_path=data_path)
+    assert legacy_loaded.raw["refinement_epochs_completed"] == 30
+    assert "refinement_progress_unit" not in legacy_loaded.raw
+
+    invalid_schedule = pickle.loads(pickle.dumps(artifact))
+    invalid_schedule["config"]["update_interval"] = 9
+    write_artifact(invalid_schedule)
     with pytest.raises(ValueError, match="public artifact"):
         load_mvdec_result(result_path=artifact_path, data_path=data_path)
 

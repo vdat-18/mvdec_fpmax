@@ -11,6 +11,8 @@ FUSION_ENCODER_AVERAGE = "mvdec2025_encoder_average"
 FUSION_ENCODER_L2_NORMALIZED_AVERAGE = "mvdec2025_encoder_l2_normalized_average"
 VIEW_INPUT_CONTRACT = "same_full_feature_matrix_both_views_v1"
 REPRESENTATION_METRIC_SEMANTICS = "jointly_trained_views_independent_kmeans_v1"
+REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS = "dataset_epochs"
+REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS = "kmeans_refresh_windows"
 
 
 LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
