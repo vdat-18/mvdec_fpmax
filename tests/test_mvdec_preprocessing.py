@@ -1480,6 +1480,16 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "selected_dimension_only",
             4,
         ),
+        (
+            "PAPER_INFORMED_FULL_BATCH_PROTOCOL",
+            "mvdec_2025_paper_informed_full_batch_v2",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-paper-informed-full-batch",
+            "mvdec2025_encoder_average",
+            "smallest",
+            "selected_dimension_only",
+            4,
+        ),
     ),
 )
 def test_public_reproduction_artifact_persists_view_metrics(

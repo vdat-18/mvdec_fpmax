@@ -489,6 +489,8 @@ def _validate_public_protocol_contract(
             "clustering": "independent_kmeans_n_init_100",
             "metrics": ["acc", "nmi"],
             "ground_truth_usage": "final_evaluation_only",
+            "metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
+            "view1_semantics": "jointly_trained_view1_not_dekm_f",
         },
     }
     if is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID:
