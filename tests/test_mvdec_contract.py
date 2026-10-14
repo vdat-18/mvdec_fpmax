@@ -11,6 +11,7 @@ from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
+    LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
@@ -51,6 +52,7 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
         ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 0.05,
         ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 0.0,
         LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 0.05,
+        LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 1.0,
     }
     assert ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES == {
         ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: "mean_squared_dimensions",
@@ -61,6 +63,9 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
             "mean_squared_dimensions"
         ),
         LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+            "sum_squared_dimensions"
+        ),
+        LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
             "sum_squared_dimensions"
         ),
     }

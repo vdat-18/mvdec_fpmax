@@ -33,6 +33,7 @@ from pipeline.mvdec_contract import (
     EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -796,6 +797,22 @@ LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
+    LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL,
+    protocol_id=LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Seed-42 ablation retaining restored old-v2 joint-loss dimensional '
+        'scaling while increasing cross-view alignment from 0.05 to 1.0; '
+        'not an exact paper reproduction'
+    ),
+    refinement_source=(
+        'Minimal post-audit ablation of the legacy-scaled full-batch '
+        'diagnostic; only cross-view alignment weight increases to 1.0'
+    ),
+    alignment_weight=1.0,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -834,6 +851,9 @@ PUBLIC_PROTOCOLS = {
     ),
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    ),
+    LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL
     ),
 }
 
@@ -1124,6 +1144,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-aligned-balanced-alignment-000-full-batch'
     if protocol.protocol_id == LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-legacy-scaled-alignment-005-full-batch'
+    if protocol.protocol_id == LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-legacy-scaled-alignment-100-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
