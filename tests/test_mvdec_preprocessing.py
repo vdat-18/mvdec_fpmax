@@ -1159,6 +1159,36 @@ def test_centered_alignment_protocol_changes_only_alignment_mode(monkeypatch):
         mvdec.replace(centered, alignment_mode="unknown_alignment")
 
 
+def test_centered_scale_matched_protocol_changes_only_alignment_weight(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    baseline = mvdec.LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    scaled = (
+        mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    )
+    baseline_contract = baseline.manifest_contract(0.001)
+    scaled_contract = scaled.manifest_contract(0.001)
+
+    assert scaled.alignment_weight == 100.0
+    assert scaled.alignment_mode == "full_batch_centered_row_l2"
+    assert scaled.protocol_id == (
+        mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    )
+    assert scaled_contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ]["weight"] == 100.0
+    ignored_fields = {
+        "protocol_id",
+        "claim_scope",
+        "refinement_source",
+        "alignment_weight",
+    }
+    for field in baseline.__dataclass_fields__:
+        if field not in ignored_fields:
+            assert getattr(scaled, field) == getattr(baseline, field)
+    assert baseline_contract["schedule"] == scaled_contract["schedule"]
+
+
 @pytest.mark.parametrize(
     "protocol_name",
     [
@@ -1168,6 +1198,7 @@ def test_centered_alignment_protocol_changes_only_alignment_mode(monkeypatch):
         "LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
         "LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL",
         "LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL",
+        "LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL",
     ],
 )
 def test_aligned_balanced_artifact_contract_passes_loader_validation(

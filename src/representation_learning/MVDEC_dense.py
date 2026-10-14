@@ -37,6 +37,7 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -847,6 +848,25 @@ LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL,
+    protocol_id=(
+        LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    ),
+    claim_scope=(
+        'Seed-42 corrected diagnostic matching centered alignment strength to '
+        'the 2,000-dimensional legacy reconstruction scale; not an exact '
+        'paper reproduction'
+    ),
+    refinement_source=(
+        'Controlled post-audit ablation of centered legacy-scaled alignment; '
+        'only alignment weight changes from 1.0 to 100.0, equivalent to '
+        'balanced weight 0.05 multiplied by 2,000 input dimensions'
+    ),
+    alignment_weight=100.0,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -891,6 +911,9 @@ PUBLIC_PROTOCOLS = {
     ),
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    ),
+    LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
     ),
 }
 
@@ -1188,6 +1211,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         == LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
     ):
         return 'MvDEC-2025-legacy-scaled-centered-alignment-100-full-batch'
+    if (
+        protocol.protocol_id
+        == LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    ):
+        return 'MvDEC-2025-legacy-scaled-centered-alignment-10000-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
