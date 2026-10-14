@@ -1,20 +1,37 @@
 # MvDEC 2025 Deep Paper-Code Audit (2026-10-14)
 
-## Decision
+## Current decision
+
+All code and notebook blockers C1-C6, stale-resume provenance, batch-count
+validation, and invalid-dataset fallback are remediated. The exact training code
+is commit `9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`. The canonical candidate protocol
+is `mvdec_2025_paper_informed_full_batch_v2`; historical P0 v1 artifacts remain
+unchanged and explicitly historical. The five MvDEC notebooks pin and verify the
+training commit. The three-dataset notebooks are fail-closed and stage 20NEWS
+seed 42, then 20NEWS seeds 43-44, REUTERS, and RCV1 last.
+
+Local validation after remediation: `155 passed, 74 skipped`; all skips are
+TensorFlow-dependent. MvDEC is code-ready, but it is **not statistically frozen
+as the canonical three-dataset protocol** until the pinned GPU matrix completes
+without protocol substitution. A full-batch OOM is a failed gate and must not
+trigger an automatic smaller-batch fallback.
 
 DEKM is closed and remains the canonical verified control defined in
 `DEKM_CANONICAL_BASELINE.md`. The repository contains no algorithm or protocol
 named `DEKC`; this audit interprets that spelling as DEKM.
 
-MvDEC is **not ready to be frozen as the canonical three-dataset protocol**.
 The existing REUTERS P0 artifacts remain valid for their recorded contract, but
-`mvdec_2025_paper_resolved_full_batch_v1` must currently be described as a
-paper-informed reconstruction, not an official, literal, or uniquely resolved
-implementation of MvDEC 2025.
+`mvdec_2025_paper_resolved_full_batch_v1` is a historical paper-informed
+reconstruction, not an official, literal, or uniquely resolved implementation
+of MvDEC 2025. No code-level release blocker remains; the next release gate is
+the pinned 20NEWS seed-42 GPU run against the canonical 18,846-row source.
 
-The immediate release blocker is the 20NEWS source contract: the MvDEC CLI still
-loads the 18,057-row release NPZ by default, while the frozen DEKM control and
-the official DEKM loader use the 18,846-row scikit-learn source path.
+## Original audit snapshot (pre-remediation)
+
+At audit time, MvDEC was not ready to be frozen because the CLI used the
+18,057-row release NPZ for 20NEWS while the frozen DEKM control and official
+DEKM loader used the 18,846-row scikit-learn source. The critical findings below
+describe that pre-remediation state and are retained as the audit trail.
 
 ## Scope and verification
 
@@ -32,7 +49,7 @@ statement, and references. The implementation review covered:
 - the focused MvDEC contract, loss, architecture, preprocessing, run, audit,
   reclustering, and public-matrix tests
 
-Validation on the current checkout:
+Validation during the original audit:
 
 - `uv run ruff check ...`: passed.
 - Focused MvDEC pytest suite: `28 passed, 74 skipped`.

@@ -219,14 +219,17 @@ reproductions of the unavailable Python 3.8 / TensorFlow 2.4.1 environment.
 
 ### Current MvDEC audit status
 
-MvDEC is not yet frozen as a canonical three-dataset protocol. The complete
-paper-code review and closure blockers are recorded in
-[`MVDEC_DEEP_AUDIT_2026-10-14.md`](MVDEC_DEEP_AUDIT_2026-10-14.md). In
-particular, do not launch a canonical 20NEWS run until the MvDEC loader is
-explicitly bound to the official 18,846-row scikit-learn source and the run
-manifest records and verifies its source identity. Existing REUTERS P0 results
-remain historical paper-informed reconstruction artifacts, not official or
-uniquely paper-resolved MvDEC results.
+The code-level closure blockers from the complete paper-code review are fixed in
+training commit `9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`; details remain in
+[`MVDEC_DEEP_AUDIT_2026-10-14.md`](MVDEC_DEEP_AUDIT_2026-10-14.md). Canonical
+20NEWS now uses the 18,846-row scikit-learn source, and source identity/hash,
+dimensions, training commit, view-input contract, and metric semantics are
+enforced across config, artifact, manifest, assignments, audit, summaries, and
+packages. The canonical candidate is
+`mvdec_2025_paper_informed_full_batch_v2`; the historical
+`mvdec_2025_paper_resolved_full_batch_v1` identity is retained without changing
+its recorded results. MvDEC is still not frozen statistically until the pinned,
+fail-closed GPU gate completes all three datasets and seeds 42-44.
 
 Download the exact files linked by the official DEKM Google Drive folder:
 
@@ -404,15 +407,14 @@ The `23` in the protocol name records the Air Pollution Fig. 2 layout
 (`10 + 13`). For public 2,000-dimensional inputs the same contract creates a
 `10 + 2,000` joint head and persists the resolved dimensions in the manifest.
 
-The tracked three-dataset Kaggle and Colab notebooks are historical experiment
-drivers and are not currently approved for a canonical run. They clone a moving
-branch, use the legacy 18,057-row 20NEWS source through the current MvDEC CLI,
-and can package a partial matrix after failures. The replacement workflow must
-pin a commit and first run a fail-closed official-source 20NEWS seed-42 gate.
-Only after that gate is independently audited may seeds 43-44 and RCV1 run.
-Primary reporting remains the DEKM-compatible mean and sample standard
-deviation; best ACC and best NMI are sensitivity-only because MvDEC reports
-"best performance" without disclosing a trial count or rule.
+The tracked three-dataset Kaggle and Colab notebooks now pin training commit
+`9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`, verify the checkout, and fail closed.
+They run canonical 20NEWS seed 42 first, authorize seeds 43-44 only after its
+source/provenance audit passes, run REUTERS next, and run RCV1 last. A failed or
+OOM full-batch run stops the notebook and is never silently replaced or packaged
+as success. Primary reporting remains the DEKM-compatible mean and sample
+standard deviation; best ACC and best NMI are sensitivity-only because MvDEC
+reports "best performance" without disclosing a trial count or rule.
 
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
