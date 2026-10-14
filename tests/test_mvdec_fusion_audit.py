@@ -17,8 +17,27 @@ def test_alignment_diagnostics_detects_opposite_latents() -> None:
     diagnostics = alignment_diagnostics(view1, -view1)
 
     assert diagnostics.paired_cosine_mean == pytest.approx(-1.0)
+    assert diagnostics.centered_paired_cosine_mean == pytest.approx(-1.0)
     assert diagnostics.fusion_retained_norm_mean == pytest.approx(0.0)
+    assert diagnostics.centered_fusion_retained_norm_mean == pytest.approx(0.0)
     assert diagnostics.same_coordinate_correlation_mean == pytest.approx(-1.0)
+
+
+def test_alignment_diagnostics_separates_shared_offset_from_structure() -> None:
+    centered = np.array(
+        [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]
+    )
+    shared_offset = np.array([10.0, 10.0])
+
+    diagnostics = alignment_diagnostics(
+        centered + shared_offset,
+        -centered + shared_offset,
+    )
+
+    assert diagnostics.mean_vector_cosine == pytest.approx(1.0)
+    assert diagnostics.paired_cosine_mean > 0.98
+    assert diagnostics.centered_paired_cosine_mean == pytest.approx(-1.0)
+    assert diagnostics.centered_fusion_retained_norm_mean == pytest.approx(0.0)
 
 
 def test_procrustes_control_recovers_rotated_latent() -> None:

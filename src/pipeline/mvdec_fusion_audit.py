@@ -28,9 +28,13 @@ class AlignmentDiagnostics:
     paired_cosine_q05: float
     paired_cosine_median: float
     paired_cosine_q95: float
+    mean_vector_cosine: float
+    centered_paired_cosine_mean: float
+    centered_paired_cosine_std: float
     fusion_retained_norm_mean: float
     fusion_retained_norm_q05: float
     fusion_retained_norm_median: float
+    centered_fusion_retained_norm_mean: float
     same_coordinate_correlation_mean: float
     strongest_cross_coordinate_abs_correlation_mean: float
 
@@ -51,6 +55,35 @@ def _row_l2_normalize(values: np.ndarray) -> np.ndarray:
     return np.divide(values, norms, out=np.zeros_like(values), where=norms > 0)
 
 
+def _paired_cosine(view1: np.ndarray, view2: np.ndarray) -> np.ndarray:
+    norm1 = np.linalg.norm(view1, axis=1)
+    norm2 = np.linalg.norm(view2, axis=1)
+    denominator = norm1 * norm2
+    return np.divide(
+        np.sum(view1 * view2, axis=1),
+        denominator,
+        out=np.zeros(len(view1), dtype=np.float64),
+        where=denominator > 0,
+    )
+
+
+def _retained_norm(view1: np.ndarray, view2: np.ndarray) -> np.ndarray:
+    norm1 = np.linalg.norm(view1, axis=1)
+    norm2 = np.linalg.norm(view2, axis=1)
+    component_norm_mean = (norm1 + norm2) / 2
+    return np.divide(
+        np.linalg.norm((view1 + view2) / 2, axis=1),
+        component_norm_mean,
+        out=np.zeros(len(view1), dtype=np.float64),
+        where=component_norm_mean > 0,
+    )
+
+
+def _vector_cosine(view1: np.ndarray, view2: np.ndarray) -> float:
+    denominator = np.linalg.norm(view1) * np.linalg.norm(view2)
+    return float(np.dot(view1, view2) / denominator) if denominator > 0 else 0.0
+
+
 def alignment_diagnostics(
     view1: np.ndarray,
     view2: np.ndarray,
@@ -61,23 +94,12 @@ def alignment_diagnostics(
     view2 = np.asarray(view2, dtype=np.float64)
     norm1 = np.linalg.norm(view1, axis=1)
     norm2 = np.linalg.norm(view2, axis=1)
-    denominator = norm1 * norm2
-    cosine = np.divide(
-        np.sum(view1 * view2, axis=1),
-        denominator,
-        out=np.zeros(len(view1), dtype=np.float64),
-        where=denominator > 0,
-    )
-    average_norm = np.linalg.norm((view1 + view2) / 2, axis=1)
-    component_norm_mean = (norm1 + norm2) / 2
-    retained_norm = np.divide(
-        average_norm,
-        component_norm_mean,
-        out=np.zeros(len(view1), dtype=np.float64),
-        where=component_norm_mean > 0,
-    )
+    cosine = _paired_cosine(view1, view2)
+    retained_norm = _retained_norm(view1, view2)
     centered1 = view1 - view1.mean(axis=0)
     centered2 = view2 - view2.mean(axis=0)
+    centered_cosine = _paired_cosine(centered1, centered2)
+    centered_retained_norm = _retained_norm(centered1, centered2)
     with np.errstate(invalid="ignore", divide="ignore"):
         correlations = np.corrcoef(centered1.T, centered2.T)
     width = view1.shape[1]
@@ -94,9 +116,13 @@ def alignment_diagnostics(
         paired_cosine_q05=float(np.quantile(cosine, 0.05)),
         paired_cosine_median=float(np.median(cosine)),
         paired_cosine_q95=float(np.quantile(cosine, 0.95)),
+        mean_vector_cosine=_vector_cosine(view1.mean(axis=0), view2.mean(axis=0)),
+        centered_paired_cosine_mean=float(centered_cosine.mean()),
+        centered_paired_cosine_std=float(centered_cosine.std()),
         fusion_retained_norm_mean=float(retained_norm.mean()),
         fusion_retained_norm_q05=float(np.quantile(retained_norm, 0.05)),
         fusion_retained_norm_median=float(np.median(retained_norm)),
+        centered_fusion_retained_norm_mean=float(centered_retained_norm.mean()),
         same_coordinate_correlation_mean=float(np.diag(cross_correlations).mean()),
         strongest_cross_coordinate_abs_correlation_mean=float(
             np.max(np.abs(cross_correlations), axis=1).mean()
