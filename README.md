@@ -192,9 +192,12 @@ inconsistency rather than the repository default.
 
 ### Reproduce DEKM 2021 first
 
-The first milestone is an isolated reproduction of the official DEKM release on
-REUTERS. Do not start MvDEC or the enhancement stages until this baseline has
-been validated. The runner exposes explicit, immutable protocols:
+The DEKM milestone is complete and frozen. The canonical three-seed baseline,
+dataset provenance, artifact checksums, and reopening policy are recorded in
+[`DEKM_CANONICAL_BASELINE.md`](DEKM_CANONICAL_BASELINE.md); the full investigation
+history remains in [`AUDIT_DEKM_MVDEC_2026-10-13.md`](AUDIT_DEKM_MVDEC_2026-10-13.md).
+New benchmark work should use these values and proceed to MvDEC rather than
+retuning DEKM. The runner continues to expose explicit, immutable protocols:
 
 - `modern-deterministic`: Xavier initialization, symmetric eigendecomposition,
   seeded K-Means, 0.1% stopping tolerance, and deterministic TensorFlow ops.
@@ -242,14 +245,19 @@ both papers, and creates a ZIP plus SHA-256 file. Use
 `--protocol modern-deterministic` only when exact replay on the same runtime is
 the primary engineering goal.
 
-The DEKM paper reports these three-run reference averages; a single deterministic
-seed is not expected to match an average exactly:
+The frozen baseline compares with the DEKM paper as follows. Values are means
+and sample standard deviations over seeds 42-44:
 
-| Dataset | ACC | NMI |
-| --- | ---: | ---: |
-| REUTERS | 76.28% | 59.06% |
-| 20NEWS | 41.08% | 40.28% |
-| RCV1 | 67.15% | 46.18% |
+| Dataset | Verified ACC | Paper ACC | Verified NMI | Paper NMI |
+| --- | ---: | ---: | ---: | ---: |
+| REUTERS | 77.0900% +/- 3.5248 pp | 76.28% | 57.9669% +/- 1.4124 pp | 59.06% |
+| 20NEWS | 40.2260% +/- 2.2039 pp | 41.08% | 43.4869% +/- 0.9363 pp | 40.27% |
+| RCV1 | 70.4567% +/- 8.7224 pp | 67.15% | 45.9421% +/- 10.5966 pp | 46.18% |
+
+REUTERS and RCV1 use `dekm_2021_release_seeded_modern_runtime_v1`. The
+canonical 20NEWS result uses the official 18,846-row scikit-learn loader path
+and `dekm_2021_20news_sklearn18846_seeded_modern_runtime_v1`; the older
+18,057-row NPZ audit is not the canonical 20NEWS baseline.
 
 Each completed seed writes a manifest, assignments, training log, embedding
 artifact, and model weights under
