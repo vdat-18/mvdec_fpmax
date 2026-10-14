@@ -539,3 +539,63 @@ sensitivity; and 20NEWS retains a material ACC gap plus an unresolved row-count
 provenance mismatch. Further DEKM experiments should first identify the exact
 20NEWS corpus/split used for Table III rather than sweep training
 hyperparameters against a potentially different sample set.
+
+## Official-source 20NEWS 18,846-row matrix (Kaggle Version 1)
+
+The final provenance correction executes the data path present in the official
+DEKM `utils.py`: `fetch_20newsgroups(subset="all")` followed by
+`TfidfVectorizer(max_features=2000)`. This produces 18,846 rows and 2,000
+features, rather than the unrelated 18,057-row Google Drive NPZ matrix used in
+the earlier three-dataset audit. The immutable protocol is
+`dekm_2021_20news_sklearn18846_seeded_modern_runtime_v1`; the training source is
+pinned to commit `f3aa64c0e976356964baafb8b26f57c6d92eead4`, the paper-era official
+revision is `129b7d08b545f02d920ccff0948ec44b654b3158`, and the paper-era
+`utils.py` SHA-256 is
+`93b18e8b09559b2ddd74fe631e44670ead935e7dd962502e5aa0d0d2b22f4451`.
+
+| Seed | ACC | NMI | Runtime (s) | Steps / refreshes |
+|---:|---:|---:|---:|---:|
+| 42 | 0.398387 | 0.445038 | 523.424347 | 680 / 69 |
+| 43 | 0.382415 | 0.426603 | 533.007332 | 740 / 75 |
+| 44 | 0.425979 | 0.432966 | 523.642151 | 850 / 86 |
+
+The three-run mean and sample standard deviation (`ddof=1`) are ACC
+`0.402260 +/- 0.022039` and NMI `0.434869 +/- 0.009363`, with mean runtime
+`526.691277` seconds. Relative to DEKM Table III (ACC `0.4108`, NMI `0.4027`),
+the mean differs by `-0.853957` percentage points ACC and `+3.216909`
+percentage points NMI. Relative to the earlier 18,057-row NPZ matrix (ACC
+`0.3605250041535138`, NMI `0.39883357051129753`), the correct source path
+improves the means by `+4.173542` and `+3.603551` percentage points,
+respectively. Seed 44 has the best ACC (`0.4259789875835721`), while seed 42
+has the best NMI (`0.445037746782372`).
+
+The earlier seed-42 gate produced ACC `0.37594184442321976` and NMI
+`0.4267817201249628` under the same named protocol and source hash. The matrix
+seed-42 rerun instead produced ACC `0.3983869256075559` and NMI
+`0.445037746782372`. This difference is expected evidence of the released
+contract's incomplete determinism: it intentionally preserves global-RNG
+K-Means, non-deterministic TensorFlow execution, and the historical shuffle
+policy. A numeric seed labels the run but does not make this paper-era contract
+bit-reproducible. Results must therefore be reported as the complete
+preregistered run set, never selected post hoc from repeated seed-42 attempts.
+
+Independent verification passed for all three runs. Every manifest is complete;
+all 18,846 assignment rows per seed independently reproduce ACC/NMI; every
+manifest-declared artifact hash matches; aggregate means and sample standard
+deviations recompute exactly; `failures.json` is empty; the ZIP passes its CRC
+check; and the top-level summaries and source audit byte-match the files inside
+the ZIP. The source-array SHA-256 is
+`fe15f52bffcfc3601a783d3c6343441620e93afb45c7ec50cdaba2b3fe0b2b50` and the
+ZIP SHA-256 is
+`b28f5a91bf971bc3820eeab5329b32577800f05d5ae3fde4a25dbb214f9b1e87`.
+The durable bundle, including the complete extracted runs, assignments,
+manifests, training logs, weights, source audit, Kaggle log, ZIP, checksum, and
+independent verification report, is stored under
+`artifacts/kaggle/dekm-2021-20news-official-source-seeds42-44/version-1`.
+
+This closes the 20NEWS row-count provenance issue. The official executable data
+path materially narrows the ACC gap and places the three-run mean within 0.86
+percentage points of Table III, while NMI is higher by 3.22 points. The remaining
+difference should be attributed primarily to the release's incomplete
+randomness/runtime specification rather than to the previously suspected corpus
+mismatch. No hyperparameter sweep is justified for this audit branch.
