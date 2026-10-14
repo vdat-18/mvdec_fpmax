@@ -1114,6 +1114,51 @@ def test_legacy_scaled_alignment_protocol_changes_only_alignment_weight(monkeypa
     assert weak_contract["schedule"] == strong_contract["schedule"]
 
 
+def test_centered_alignment_protocol_changes_only_alignment_mode(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    uncentered = mvdec.LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    centered = mvdec.LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    uncentered_contract = uncentered.manifest_contract(0.001)
+    centered_contract = centered.manifest_contract(0.001)
+
+    assert centered.alignment_weight == 1.0
+    assert centered.alignment_mode == "full_batch_centered_row_l2"
+    assert centered.protocol_id == (
+        mvdec.LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    )
+    assert centered_contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ]["definition"] == (
+        "mean_batch(||L2_normalize(h_view1-mean_batch(h_view1)) - "
+        "L2_normalize(h_view2-mean_batch(h_view2))||^2)"
+    )
+    assert uncentered_contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ]["definition"] == (
+        "mean_batch(||L2_normalize(h_view1) - "
+        "L2_normalize(h_view2)||^2)"
+    )
+    ignored_fields = {
+        "protocol_id",
+        "claim_scope",
+        "refinement_source",
+        "alignment_mode",
+    }
+    for field in uncentered.__dataclass_fields__:
+        if field not in ignored_fields:
+            assert getattr(centered, field) == getattr(uncentered, field)
+    assert uncentered_contract["schedule"] == centered_contract["schedule"]
+
+    with pytest.raises(ValueError, match="requires full-dataset batches"):
+        mvdec.replace(
+            centered,
+            refinement_batch_size_policy=mvdec.FIXED_256_BATCH_POLICY,
+        )
+    with pytest.raises(ValueError, match="Unsupported cross-view alignment mode"):
+        mvdec.replace(centered, alignment_mode="unknown_alignment")
+
+
 @pytest.mark.parametrize(
     "protocol_name",
     [
@@ -1122,6 +1167,7 @@ def test_legacy_scaled_alignment_protocol_changes_only_alignment_weight(monkeypa
         "ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL",
         "LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
         "LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL",
+        "LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL",
     ],
 )
 def test_aligned_balanced_artifact_contract_passes_loader_validation(
@@ -1184,6 +1230,16 @@ def test_aligned_balanced_artifact_contract_passes_loader_validation(
     with artifact_path.open("rb") as file:
         artifact = pickle.load(file)
     pipeline_data._validate_mvdec_protocol_contract(artifact)
+
+    if protocol.alignment_mode == mvdec.ALIGNMENT_UNCENTERED_ROW_L2:
+        legacy_artifact = pickle.loads(pickle.dumps(artifact))
+        legacy_artifact.pop("alignment_mode")
+        legacy_artifact["config"].pop("alignment_mode")
+        pipeline_data._validate_mvdec_protocol_contract(legacy_artifact)
+
+    artifact["config"]["alignment_mode"] = "unknown_alignment"
+    with pytest.raises(ValueError, match="immutable protocol"):
+        pipeline_data._validate_mvdec_protocol_contract(artifact)
 
 
 def test_aligned_balanced_loss_scaling_and_combination(monkeypatch):
@@ -1252,6 +1308,50 @@ def test_cross_view_alignment_is_directional_and_reaches_both_views(monkeypatch)
 
     assert all(gradient is not None for gradient in gradients)
     assert all(np.any(np.abs(gradient.numpy()) > 0) for gradient in gradients)
+
+
+def test_centered_alignment_detects_shared_offset_anti_alignment(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    tf = pytest.importorskip("tensorflow")
+    centered_structure = tf.constant(
+        [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]]
+    )
+    shared_offset = tf.constant([[1000.0, 1000.0]])
+    view1 = shared_offset + centered_structure
+    view2 = shared_offset - centered_structure
+
+    uncentered_loss = mvdec.cross_view_alignment_loss(
+        view1, view2, mvdec.ALIGNMENT_UNCENTERED_ROW_L2
+    )
+    centered_loss = mvdec.cross_view_alignment_loss(
+        view1, view2, mvdec.ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+    )
+
+    assert uncentered_loss.numpy() < 1e-5
+    assert centered_loss.numpy() == pytest.approx(4.0, abs=1e-6)
+
+
+def test_centered_alignment_has_finite_nonzero_gradients(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    tf = pytest.importorskip("tensorflow")
+    view1 = tf.Variable([[2.0, 0.0], [-1.0, 1.0], [0.0, -2.0]])
+    view2 = tf.Variable([[1.0, 1.0], [-2.0, 0.5], [0.5, -1.0]])
+
+    with tf.GradientTape() as tape:
+        loss = mvdec.cross_view_alignment_loss(
+            view1,
+            view2,
+            mvdec.ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+        )
+    gradients = tape.gradient(loss, [view1, view2])
+
+    assert np.isfinite(loss.numpy())
+    assert all(gradient is not None for gradient in gradients)
+    assert all(np.all(np.isfinite(gradient.numpy())) for gradient in gradients)
+    assert all(np.any(np.abs(gradient.numpy()) > 0) for gradient in gradients)
+
+    with pytest.raises(ValueError, match="Unsupported cross-view alignment mode"):
+        mvdec.cross_view_alignment_loss(view1, view2, "unknown_alignment")
 
 
 def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatch):

@@ -24,6 +24,8 @@ from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_PROTOCOL_IDS,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+    ALIGNMENT_UNCENTERED_ROW_L2,
     EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
@@ -34,6 +36,7 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -218,7 +221,25 @@ class MvdecProtocol:
     input_normalization: str = RELEASE_L2_NORMALIZATION
     decision_provenance: tuple[tuple[str, str, str], ...] = ()
     alignment_weight: float = 0.0
+    alignment_mode: str = ALIGNMENT_UNCENTERED_ROW_L2
     loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
+
+    def __post_init__(self) -> None:
+        valid_alignment_modes = {
+            ALIGNMENT_UNCENTERED_ROW_L2,
+            ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+        }
+        if self.alignment_mode not in valid_alignment_modes:
+            raise ValueError(
+                f'Unsupported cross-view alignment mode: {self.alignment_mode!r}.'
+            )
+        if (
+            self.alignment_mode == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+            and self.refinement_batch_size_policy != FULL_DATASET_BATCH_POLICY
+        ):
+            raise ValueError(
+                'Centered cross-view alignment requires full-dataset batches.'
+            )
 
     def manifest_contract(self, tolerance: float) -> dict[str, object]:
         """Return the explicit paper and optimization contract for artifacts."""
@@ -294,10 +315,7 @@ class MvdecProtocol:
             contract['objective']['loss_terms']['L5_cross_view_alignment'] = {
                 'weight': self.alignment_weight,
                 'optimized': self.alignment_weight > 0,
-                'definition': (
-                    'mean_batch(||L2_normalize(h_view1) - '
-                    'L2_normalize(h_view2)||^2)'
-                ),
+                'definition': alignment_loss_definition(self.alignment_mode),
             }
             contract['objective']['loss_scale_policy'] = self.loss_scale_policy
         if self.protocol_id in EQUATION11_PROTOCOL_IDS:
@@ -813,6 +831,22 @@ LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
+    LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL,
+    protocol_id=LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Seed-42 corrected diagnostic using full-batch mean-centered latent '
+        'alignment with restored old-v2 joint-loss dimensional scaling; not '
+        'an exact paper reproduction'
+    ),
+    refinement_source=(
+        'Controlled post-audit ablation of legacy-scaled alignment; only the '
+        'cross-view alignment definition changes to centered row-L2'
+    ),
+    alignment_mode=ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -854,6 +888,9 @@ PUBLIC_PROTOCOLS = {
     ),
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    ),
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL
     ),
 }
 
@@ -1146,6 +1183,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-legacy-scaled-alignment-005-full-batch'
     if protocol.protocol_id == LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-legacy-scaled-alignment-100-full-batch'
+    if (
+        protocol.protocol_id
+        == LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    ):
+        return 'MvDEC-2025-legacy-scaled-centered-alignment-100-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -1229,6 +1271,8 @@ def resolved_run_config(
                 ),
             }
         )
+    if protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS:
+        config["alignment_mode"] = protocol.alignment_mode
     if protocol.fusion_contract != FUSION_ENCODER_AVERAGE:
         config["fusion_contract"] = protocol.fusion_contract
     return config
@@ -1271,9 +1315,40 @@ def fused_latent_embedding(
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
 
 
-def cross_view_alignment_loss(view1_latent, view2_latent):
-    """Penalize directional disagreement between paired view latents."""
+def alignment_loss_definition(alignment_mode: str) -> str:
+    """Return the immutable mathematical definition for one alignment mode."""
 
+    if alignment_mode == ALIGNMENT_UNCENTERED_ROW_L2:
+        return (
+            'mean_batch(||L2_normalize(h_view1) - '
+            'L2_normalize(h_view2)||^2)'
+        )
+    if alignment_mode == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2:
+        return (
+            'mean_batch(||L2_normalize(h_view1-mean_batch(h_view1)) - '
+            'L2_normalize(h_view2-mean_batch(h_view2))||^2)'
+        )
+    raise ValueError(f'Unsupported cross-view alignment mode: {alignment_mode!r}.')
+
+
+def cross_view_alignment_loss(
+    view1_latent,
+    view2_latent,
+    alignment_mode: str = ALIGNMENT_UNCENTERED_ROW_L2,
+):
+    """Penalize paired latent disagreement under an explicit alignment mode."""
+
+    if alignment_mode == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2:
+        view1_latent = view1_latent - tf.reduce_mean(
+            view1_latent, axis=0, keepdims=True
+        )
+        view2_latent = view2_latent - tf.reduce_mean(
+            view2_latent, axis=0, keepdims=True
+        )
+    elif alignment_mode != ALIGNMENT_UNCENTERED_ROW_L2:
+        raise ValueError(
+            f'Unsupported cross-view alignment mode: {alignment_mode!r}.'
+        )
     normalized_view1 = l2_normalize_latent(view1_latent)
     normalized_view2 = l2_normalize_latent(view2_latent)
     return tf.reduce_mean(
@@ -1923,6 +1998,14 @@ def save_airpollution_mvdec_artifact(
         "greedy_eigen_direction": greedy_eigen_direction,
         "greedy_eigen_index": int(greedy_eigen_position),
         "greedy_target_mode": greedy_target_mode,
+        **(
+            {
+                "loss_scale_policy": protocol.loss_scale_policy,
+                "alignment_mode": protocol.alignment_mode,
+            }
+            if protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
+            else {}
+        ),
         "preprocessing": preprocessing_metadata,
         "config": {
             "seed": random_seed,
@@ -1981,7 +2064,10 @@ def save_airpollution_mvdec_artifact(
                 ),
             },
             **(
-                {"loss_scale_policy": protocol.loss_scale_policy}
+                {
+                    "loss_scale_policy": protocol.loss_scale_policy,
+                    "alignment_mode": protocol.alignment_mode,
+                }
                 if protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
                 else {}
             ),
@@ -2896,6 +2982,7 @@ def train(
                     cross_view_alignment_loss(
                         latent_embedding(y_pred1),
                         latent_embedding(y_pred2),
+                        protocol.alignment_mode,
                     )
                     if protocol.alignment_weight > 0
                     else tf.constant(0.0)

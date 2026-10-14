@@ -16,15 +16,19 @@ from pipeline.clustering import compute_gower_distance, compute_silhouette_diagn
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_PROTOCOL_ALIGNMENT_MODES,
     ALIGNED_BALANCED_PROTOCOL_IDS,
     ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES,
     ALIGNED_BALANCED_PROTOCOL_SETTINGS,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+    ALIGNMENT_UNCENTERED_ROW_L2,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -82,6 +86,9 @@ LEGACY_SCALED_WEAK_ALIGNMENT_METHOD = (
 LEGACY_SCALED_ALIGNMENT_METHOD = (
     "MvDEC-2025-legacy-scaled-alignment-100-full-batch"
 )
+LEGACY_SCALED_CENTERED_ALIGNMENT_METHOD = (
+    "MvDEC-2025-legacy-scaled-centered-alignment-100-full-batch"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -125,6 +132,9 @@ PUBLIC_PROTOCOL_METHODS = {
         LEGACY_SCALED_WEAK_ALIGNMENT_METHOD
     ),
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: LEGACY_SCALED_ALIGNMENT_METHOD,
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        LEGACY_SCALED_CENTERED_ALIGNMENT_METHOD
+    ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
     protocol_id: FUSION_ENCODER_AVERAGE for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
@@ -395,6 +405,18 @@ def _validate_public_protocol_contract(
     is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
     is_aligned_balanced = protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
     alignment_weight = ALIGNED_BALANCED_PROTOCOL_SETTINGS.get(protocol_id, 0.0)
+    expected_alignment_mode = ALIGNED_BALANCED_PROTOCOL_ALIGNMENT_MODES.get(
+        protocol_id
+    )
+    legacy_alignment_default = (
+        ALIGNMENT_UNCENTERED_ROW_L2
+        if expected_alignment_mode == ALIGNMENT_UNCENTERED_ROW_L2
+        else None
+    )
+    artifact_alignment_mode = best_result.get(
+        "alignment_mode", legacy_alignment_default
+    )
+    config_alignment_mode = config.get("alignment_mode", legacy_alignment_default)
     expected_loss_scale_policy = ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES.get(
         protocol_id
     )
@@ -448,7 +470,11 @@ def _validate_public_protocol_contract(
                 "weight": alignment_weight,
                 "optimized": alignment_weight > 0,
                 "definition": (
-                    "mean_batch(||L2_normalize(h_view1) - "
+                    "mean_batch(||L2_normalize(h_view1-mean_batch(h_view1)) - "
+                    "L2_normalize(h_view2-mean_batch(h_view2))||^2)"
+                    if expected_alignment_mode
+                    == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+                    else "mean_batch(||L2_normalize(h_view1) - "
                     "L2_normalize(h_view2)||^2)"
                 ),
             },
@@ -634,6 +660,16 @@ def _validate_public_protocol_contract(
                 config.get("loss_scale_policy") != expected_loss_scale_policy
                 if is_aligned_balanced
                 else "loss_scale_policy" in config
+            ),
+            (
+                artifact_alignment_mode != expected_alignment_mode
+                if is_aligned_balanced
+                else "alignment_mode" in best_result
+            ),
+            (
+                config_alignment_mode != expected_alignment_mode
+                if is_aligned_balanced
+                else "alignment_mode" in config
             ),
             contract.get("architecture", {}).get("view_input_contract")
             != VIEW_INPUT_CONTRACT,
