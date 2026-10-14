@@ -141,6 +141,38 @@ def test_reusable_complete_manifest_rejects_corrupt_outputs(
     assert reusable is None
 
 
+def test_summary_record_includes_all_representation_metrics(tmp_path: Path) -> None:
+    metrics = {
+        "acc": 0.8,
+        "nmi": 0.7,
+        "view1_acc": 0.6,
+        "view1_nmi": 0.5,
+        "view2_acc": 0.65,
+        "view2_nmi": 0.55,
+        "fused_acc": 0.8,
+        "fused_nmi": 0.7,
+    }
+    manifest = {
+        "dataset": "REUTERS",
+        "protocol_id": "protocol",
+        "seed": 42,
+        "run_id": "run",
+        "config_hash": "hash",
+        "training_commit": "a" * 40,
+        "source_id": "source",
+        "source_sha256": "b" * 64,
+        "n_samples": 10,
+        "n_features": 2,
+        "n_classes": 2,
+        "runtime_seconds": 1.0,
+        "metrics": metrics,
+    }
+
+    record = matrix.summary_record(manifest, tmp_path / "run.tar.gz", "digest")
+
+    assert {name: record[name] for name in metrics} == metrics
+
+
 def test_update_summary_upserts_one_run_identity(tmp_path: Path) -> None:
     """Resumed packaging must replace, rather than duplicate, a summary row."""
 

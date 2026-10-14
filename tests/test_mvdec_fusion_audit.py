@@ -1,0 +1,67 @@
+import pickle
+
+import numpy as np
+import pytest
+
+from pipeline.mvdec_fusion_audit import (
+    alignment_diagnostics,
+    audit_artifact,
+    diagnostic_representations,
+)
+
+
+def test_alignment_diagnostics_detects_opposite_latents() -> None:
+    view1 = np.array(
+        [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]
+    )
+    diagnostics = alignment_diagnostics(view1, -view1)
+
+    assert diagnostics.paired_cosine_mean == pytest.approx(-1.0)
+    assert diagnostics.fusion_retained_norm_mean == pytest.approx(0.0)
+    assert diagnostics.same_coordinate_correlation_mean == pytest.approx(-1.0)
+
+
+def test_procrustes_control_recovers_rotated_latent() -> None:
+    view1 = np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])
+    rotation = np.array([[0.0, -1.0], [1.0, 0.0]])
+    view2 = view1 @ rotation
+
+    representations = diagnostic_representations(view1, view2)
+
+    np.testing.assert_allclose(
+        representations["procrustes_aligned_average"],
+        view1,
+        atol=1e-12,
+    )
+
+
+def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
+    view1 = np.array([[-2.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    view2 = view1.copy()
+    artifact = {
+        "dataset": "TEST",
+        "protocol_id": "protocol",
+        "run_id": "run",
+        "training_commit": "a" * 40,
+        "source_id": "source",
+        "source_sha256": "b" * 64,
+        "config": {"seed": 42},
+        "n_clusters": 2,
+        "kmeans_n_init": 10,
+        "h_view1": view1,
+        "h_view2": view2,
+        "h_fused": (view1 + view2) / 2,
+        "true_labels": np.array([0, 0, 1, 1]),
+    }
+    artifact_path = tmp_path / "artifact.pkl"
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+
+    metrics, diagnostics = audit_artifact(artifact_path, tmp_path / "audit")
+
+    assert set(metrics["representation"]) >= {"view1", "view2", "fused"}
+    assert metrics.set_index("representation").loc["fused", "acc"] == 1.0
+    assert diagnostics.paired_cosine_mean == pytest.approx(1.0)
+    assert (tmp_path / "audit/test/view1_assignments.csv").is_file()
+    assert (tmp_path / "audit/test/view2_assignments.csv").is_file()
+    assert (tmp_path / "audit/test/fused_assignments.csv").is_file()
