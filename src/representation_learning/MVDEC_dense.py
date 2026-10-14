@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from scipy.optimize import linear_sum_assignment
+from sklearn import __version__ as sklearn_version
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from tensorflow.keras import layers
@@ -20,6 +21,8 @@ from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_PROTOCOL_IDS,
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
@@ -104,7 +107,7 @@ PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
-        ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+        *ALIGNED_BALANCED_PROTOCOL_IDS,
         *EQUATION11_PROTOCOL_IDS,
     }
 )
@@ -128,7 +131,7 @@ PROTOCOL_IDS = (
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
-    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    *ALIGNED_BALANCED_PROTOCOL_IDS,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -364,7 +367,7 @@ class MvdecProtocol:
             if (
                 self.protocol_id in EQUATION11_PROTOCOL_IDS
                 and self.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
-            ) or self.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+            ) or self.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS:
                 contract["schedule"]["refinement"]["batch_size_policy"] = (
                     self.refinement_batch_size_policy
                 )
@@ -742,6 +745,22 @@ ALIGNED_BALANCED_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL = replace(
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
+    protocol_id=ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Seed-42 ablation of the aligned-balanced diagnostic with only the '
+        'cross-view alignment weight reduced from 1.0 to 0.05; not an exact '
+        'paper reproduction'
+    ),
+    refinement_source=(
+        'Minimal post-audit ablation of the aligned-balanced full-batch '
+        'diagnostic; all settings except alignment weight remain fixed'
+    ),
+    alignment_weight=0.05,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -772,6 +791,9 @@ PUBLIC_PROTOCOLS = {
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_FULL_BATCH_PROTOCOL,
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    ),
 }
 
 
@@ -869,7 +891,7 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
-    if protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+    if protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS:
         return 'mvdec_aligned_balanced_l1_plus_l2_plus_l4_plus_l5'
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
@@ -1055,6 +1077,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-paper-informed-full-batch'
     if protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-aligned-balanced-full-batch'
+    if protocol.protocol_id == ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-aligned-balanced-alignment-005-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -1123,7 +1147,7 @@ def resolved_run_config(
     if (
         protocol.protocol_id in EQUATION11_PROTOCOL_IDS
         and protocol.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
-    ) or protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+    ) or protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS:
         if resolved_refinement_batch_size is None:
             raise ValueError(
                 'Named batch-policy protocols require a resolved batch size.'
@@ -1258,6 +1282,7 @@ def configure_deterministic_runtime(seed: int | None) -> dict[str, object]:
         'seed': int(seed),
         'tensorflow_version': tf.__version__,
         'numpy_version': np.__version__,
+        'scikit_learn_version': sklearn_version,
         'keras_session_reset': True,
         'tensorflow_op_determinism': True,
         'tf_data_deterministic': True,
@@ -1863,7 +1888,7 @@ def save_airpollution_mvdec_artifact(
     if (
         protocol.protocol_id in EQUATION11_PROTOCOL_IDS
         and protocol.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
-    ) or protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+    ) or protocol.protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS:
         batch_metadata = {
             'refinement_batch_size_policy': (
                 protocol.refinement_batch_size_policy

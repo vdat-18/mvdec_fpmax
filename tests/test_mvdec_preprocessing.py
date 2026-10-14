@@ -276,6 +276,7 @@ def test_deterministic_runtime_repeats_keras_initialization(monkeypatch):
 
     assert first_metadata == second_metadata
     assert first_metadata["policy"] == mvdec.DETERMINISTIC_RUNTIME_POLICY
+    assert first_metadata["scikit_learn_version"] == mvdec.sklearn_version
     for first, second in zip(first_weights, second_weights, strict=True):
         np.testing.assert_array_equal(first, second)
     with pytest.raises(ValueError, match="explicit seed"):
@@ -953,12 +954,47 @@ def test_aligned_balanced_protocol_is_explicit_full_batch_and_immutable(monkeypa
         )
 
 
+def test_weak_alignment_protocol_changes_only_alignment_weight(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    strong = mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL
+    weak = mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    strong_contract = strong.manifest_contract(0.001)
+    weak_contract = weak.manifest_contract(0.001)
+
+    assert weak.alignment_weight == 0.05
+    assert weak.protocol_id == (
+        mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    )
+    assert weak_contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ]["weight"] == 0.05
+    ignored_fields = {
+        "protocol_id",
+        "claim_scope",
+        "refinement_source",
+        "alignment_weight",
+    }
+    for field in strong.__dataclass_fields__:
+        if field not in ignored_fields:
+            assert getattr(weak, field) == getattr(strong, field)
+    assert strong_contract["schedule"] == weak_contract["schedule"]
+
+
+@pytest.mark.parametrize(
+    "protocol_name",
+    [
+        "ALIGNED_BALANCED_FULL_BATCH_PROTOCOL",
+        "ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
+    ],
+)
 def test_aligned_balanced_artifact_contract_passes_loader_validation(
     tmp_path,
     monkeypatch,
+    protocol_name,
 ):
     mvdec = _load_mvdec(monkeypatch)
-    protocol = mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL
+    protocol = getattr(mvdec, protocol_name)
     monkeypatch.setattr(mvdec, "lambda_reconstruction", 1.0)
     monkeypatch.setattr(mvdec, "lambda_kmeans", 1.0)
     monkeypatch.setattr(mvdec, "lambda_orthonormal", 0.0)
@@ -1038,6 +1074,16 @@ def test_aligned_balanced_loss_scaling_and_combination(monkeypatch):
     assert kmeans == 3.0
     assert scatter == 4.0
     assert total == 10.5
+
+    weak_total = mvdec.combine_joint_losses(
+        mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL,
+        reconstruction,
+        kmeans,
+        scatter,
+        2.0,
+        0.5,
+    )
+    assert weak_total == 10.025
 
     legacy_terms = mvdec.scale_joint_loss_terms(
         mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL,

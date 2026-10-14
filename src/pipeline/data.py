@@ -15,6 +15,9 @@ from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_PROTOCOL_IDS,
+    ALIGNED_BALANCED_PROTOCOL_SETTINGS,
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     FUSION_ENCODER_AVERAGE,
@@ -62,6 +65,9 @@ EQUATION11_AMBIGUITY_METHOD = "MvDEC-2025-Eq11-ambiguity-experiment"
 PAPER_RESOLVED_METHOD = "MvDEC-2025-paper-resolved-full-batch"
 PAPER_INFORMED_METHOD = "MvDEC-2025-paper-informed-full-batch"
 ALIGNED_BALANCED_METHOD = "MvDEC-2025-aligned-balanced-full-batch"
+ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD = (
+    "MvDEC-2025-aligned-balanced-alignment-005-full-batch"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -74,9 +80,10 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
         protocol_id: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
         for protocol_id in EQUATION11_PROTOCOL_IDS
     },
-    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: (
-        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
-    ),
+    **{
+        protocol_id: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+        for protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
+    },
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
@@ -94,6 +101,9 @@ PUBLIC_PROTOCOL_METHODS = {
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_METHOD,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_METHOD,
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_METHOD,
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD
+    ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
     protocol_id: FUSION_ENCODER_AVERAGE for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
@@ -362,7 +372,8 @@ def _validate_public_protocol_contract(
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
     is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
-    is_aligned_balanced = protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID
+    is_aligned_balanced = protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
+    alignment_weight = ALIGNED_BALANCED_PROTOCOL_SETTINGS.get(protocol_id, 0.0)
     if is_aligned_balanced:
         expected_objective = ALIGNED_BALANCED_OBJECTIVE
     elif is_equation11:
@@ -410,7 +421,7 @@ def _validate_public_protocol_contract(
                 "reduction": "sum_squared_dimensions_then_mean_batch",
             },
             "L5_cross_view_alignment": {
-                "weight": 1.0,
+                "weight": alignment_weight,
                 "optimized": True,
                 "definition": (
                     "mean_batch(||L2_normalize(h_view1) - "
@@ -545,7 +556,11 @@ def _validate_public_protocol_contract(
         "kmeans": 1.0 if is_equation11 or is_aligned_balanced else 0.0,
         "scatter_trace_diagnostic": 1.0 if is_equation11 else 0.0,
         "greedy": 1.0,
-        **({"cross_view_alignment": 1.0} if is_aligned_balanced else {}),
+        **(
+            {"cross_view_alignment": alignment_weight}
+            if is_aligned_balanced
+            else {}
+        ),
     }
     training_steps_completed = int(best_result.get("training_steps_completed", -1))
     batches_per_epoch = int(best_result.get("batches_per_epoch", 0))

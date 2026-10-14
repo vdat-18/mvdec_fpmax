@@ -5,6 +5,8 @@ import pytest
 from pipeline import data
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_PROTOCOL_SETTINGS,
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -40,12 +42,17 @@ def test_paper_informed_v2_preserves_historical_setting_without_overclaiming() -
     )
 
 
-def test_aligned_balanced_protocol_has_public_loader_contract() -> None:
-    assert data.PUBLIC_PROTOCOL_ARCHITECTURES[
-        ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID
-    ] == VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
-    assert ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID in data.PUBLIC_PROTOCOL_METHODS
-    assert ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID in data.PUBLIC_PROTOCOL_FUSIONS
+def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
+    assert ALIGNED_BALANCED_PROTOCOL_SETTINGS == {
+        ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: 1.0,
+        ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 0.05,
+    }
+    for protocol_id in ALIGNED_BALANCED_PROTOCOL_SETTINGS:
+        assert data.PUBLIC_PROTOCOL_ARCHITECTURES[protocol_id] == (
+            VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+        )
+        assert protocol_id in data.PUBLIC_PROTOCOL_METHODS
+        assert protocol_id in data.PUBLIC_PROTOCOL_FUSIONS
 
 
 def test_balanced_batch_count_matches_training_contract() -> None:
