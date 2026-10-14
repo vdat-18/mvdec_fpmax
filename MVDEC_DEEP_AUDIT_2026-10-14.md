@@ -4,13 +4,15 @@
 
 All code and notebook blockers C1-C6, stale-resume provenance, batch-count
 validation, and invalid-dataset fallback are remediated. The exact training code
-is commit `9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`. The canonical candidate protocol
+is commit `a4c82e584e8ee6d2429253fa0dd7590dae566946`. The canonical candidate protocol
 is `mvdec_2025_paper_informed_full_batch_v2`; historical P0 v1 artifacts remain
 unchanged and explicitly historical. The five MvDEC notebooks pin and verify the
 training commit. The three-dataset notebooks are fail-closed and stage 20NEWS
-seed 42, then 20NEWS seeds 43-44, REUTERS, and RCV1 last.
+seed 42, then 20NEWS seeds 43-44, REUTERS, and RCV1 last. Public artifact audit
+uses structural, provenance, assignment, and independently recomputed ACC/NMI
+checks without allocating the unrelated full pairwise Gower matrix.
 
-Local validation after remediation: `155 passed, 74 skipped`; all skips are
+Local validation after remediation: `157 passed, 74 skipped`; all skips are
 TensorFlow-dependent. MvDEC is code-ready, but it is **not statistically frozen
 as the canonical three-dataset protocol** until the pinned GPU matrix completes
 without protocol substitution. A full-batch OOM is a failed gate and must not

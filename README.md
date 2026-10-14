@@ -220,7 +220,7 @@ reproductions of the unavailable Python 3.8 / TensorFlow 2.4.1 environment.
 ### Current MvDEC audit status
 
 The code-level closure blockers from the complete paper-code review are fixed in
-training commit `9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`; details remain in
+training commit `a4c82e584e8ee6d2429253fa0dd7590dae566946`; details remain in
 [`MVDEC_DEEP_AUDIT_2026-10-14.md`](MVDEC_DEEP_AUDIT_2026-10-14.md). Canonical
 20NEWS now uses the 18,846-row scikit-learn source, and source identity/hash,
 dimensions, training commit, view-input contract, and metric semantics are
@@ -408,7 +408,7 @@ The `23` in the protocol name records the Air Pollution Fig. 2 layout
 `10 + 2,000` joint head and persists the resolved dimensions in the manifest.
 
 The tracked three-dataset Kaggle and Colab notebooks now pin training commit
-`9b63446a0dd535a8ab94afc1e5457ab1594fb9ef`, verify the checkout, and fail closed.
+`a4c82e584e8ee6d2429253fa0dd7590dae566946`, verify the checkout, and fail closed.
 They run canonical 20NEWS seed 42 first, authorize seeds 43-44 only after its
 source/provenance audit passes, run REUTERS next, and run RCV1 last. A failed or
 OOM full-batch run stops the notebook and is never silently replaced or packaged
