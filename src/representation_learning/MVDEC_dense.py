@@ -29,10 +29,14 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LITERAL_EQUATION11_PROTOCOL_ID,
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    REPRESENTATION_METRIC_SEMANTICS,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
+    VIEW_INPUT_CONTRACT,
+    balanced_batch_count,
 )
 from pipeline.mvdec_runs import (
     append_run_log,
@@ -40,6 +44,7 @@ from pipeline.mvdec_runs import (
     load_run_manifests,
     prepare_run_directory,
     resolve_run_paths,
+    resolve_training_commit,
     write_run_manifest,
 )
 from pipeline.public_artifacts import (
@@ -52,6 +57,8 @@ from pipeline.public_artifacts import (
 from pipeline.public_data import (
     PAPER_RMS_NORMALIZATION,
     RELEASE_L2_NORMALIZATION,
+    TWENTY_NEWS_RELEASE_NPZ,
+    TWENTY_NEWS_SKLEARN_SOURCE,
     load_dekm_public_dataset,
 )
 
@@ -118,6 +125,7 @@ PROTOCOL_IDS = (
     EQUATION11_SMALLEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -206,6 +214,7 @@ class MvdecProtocol:
             "architecture_source": self.architecture_source,
             "architecture": {
                 "view2": self.view2_architecture_id,
+                "view_input_contract": VIEW_INPUT_CONTRACT,
             },
             "refinement_source": self.refinement_source,
             "preprocessing": {
@@ -328,6 +337,8 @@ class MvdecProtocol:
                     "clustering": "independent_kmeans_n_init_100",
                     "metrics": ["acc", "nmi"],
                     "ground_truth_usage": "final_evaluation_only",
+                    "metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
+                    "view1_semantics": "jointly_trained_view1_not_dekm_f",
                 },
             }
             if self.protocol_id in EQUATION11_PROTOCOL_IDS - {
@@ -678,6 +689,21 @@ PAPER_RESOLVED_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+PAPER_INFORMED_FULL_BATCH_PROTOCOL = replace(
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+    protocol_id=PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Paper-informed full-batch reconstruction of MvDEC 2025; explicit '
+        'implementation choices are recorded and this is not an official or '
+        'uniquely paper-resolved protocol'
+    ),
+    refinement_source=(
+        'MvDEC 2025 Eq. 11 and conflicting eigen-direction prose, combined '
+        'with a paper-informed full-batch interpretation of Table 2'
+    ),
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -706,6 +732,7 @@ PUBLIC_PROTOCOLS = {
         EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL
     ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_FULL_BATCH_PROTOCOL,
 }
 
 
@@ -982,6 +1009,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-Eq11-literal'
     if protocol.protocol_id == PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-paper-resolved-full-batch'
+    if protocol.protocol_id == PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-paper-informed-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -995,6 +1024,11 @@ def resolved_run_config(
     tolerance: float,
     max_refinement_epochs: int,
     source_sha256: str | None,
+    source_id: str | None,
+    training_commit: str,
+    n_samples: int,
+    n_features: int,
+    n_classes: int | None,
     feature_columns: list[str],
     preprocessing_metadata: dict[str, object] | None,
     resolved_refinement_batch_size: int | None = None,
@@ -1006,6 +1040,13 @@ def resolved_run_config(
         "method": protocol_method_name(protocol),
         "protocol_contract": protocol.manifest_contract(tolerance),
         "source_sha256": source_sha256,
+        "source_id": source_id,
+        "training_commit": training_commit,
+        "n_samples": int(n_samples),
+        "n_features": int(n_features),
+        "n_classes": None if n_classes is None else int(n_classes),
+        "view_input_contract": VIEW_INPUT_CONTRACT,
+        "representation_metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
         "feature_columns": list(feature_columns),
         "preprocessing": preprocessing_metadata,
         "n_clusters": int(n_clusters),
@@ -1223,11 +1264,9 @@ def count_aligned_assignment_changes(previous_labels, current_labels):
 
 
 def number_of_batches(n_samples: int, current_batch_size: int) -> int:
-    """Return the closest positive batch count to the target batch size."""
+    """Backward-compatible wrapper for the shared balanced batch contract."""
 
-    if n_samples < 1 or current_batch_size < 1:
-        raise ValueError('n_samples and batch_size must be positive.')
-    return max(1, (n_samples + current_batch_size // 2) // current_batch_size)
+    return balanced_batch_count(n_samples, current_batch_size)
 
 
 def resolve_refinement_batch_size(
@@ -1535,6 +1574,8 @@ def save_airpollution_mvdec_artifact(
     preprocessing_metadata,
     true_labels=None,
     source_sha256=None,
+    source_id=None,
+    training_commit=None,
     external_metrics=None,
     representation_external_metrics=None,
     training_steps_completed=None,
@@ -1652,6 +1693,10 @@ def save_airpollution_mvdec_artifact(
         "true_labels": true_labels_ordered,
         "row_indices": np.arange(len(labels), dtype=int),
         "source_sha256": source_sha256,
+        "source_id": source_id,
+        "training_commit": training_commit,
+        "view_input_contract": VIEW_INPUT_CONTRACT,
+        "representation_metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
         "init": "k-means",
         "score": float(score),
         "iteration": int(iteration),
@@ -1667,6 +1712,8 @@ def save_airpollution_mvdec_artifact(
         "stop_reason": stop_reason,
         "refinement_epochs_completed": int(refinement_epochs_completed),
         "n_samples": int(h_fused.shape[0]),
+        "n_features": int(input_shape),
+        "n_classes": int(n_clusters) if true_labels is not None else None,
         "feature_columns": feature_columns,
         "eigenvalue_order": EIGENVALUE_ORDER,
         "greedy_eigen_direction": greedy_eigen_direction,
@@ -1694,6 +1741,14 @@ def save_airpollution_mvdec_artifact(
             "view2_base_units": int(view2_base_units),
             "view2_architecture_id": protocol.view2_architecture_id,
             "fusion_contract": protocol.fusion_contract,
+            "source_sha256": source_sha256,
+            "source_id": source_id,
+            "training_commit": training_commit,
+            "n_samples": int(h_fused.shape[0]),
+            "n_features": int(input_shape),
+            "n_classes": int(n_clusters) if true_labels is not None else None,
+            "view_input_contract": VIEW_INPUT_CONTRACT,
+            "representation_metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
             "view1_embedding_dim": int(h_view1.shape[1]),
             "view2_embedding_dim": int(h_view2.shape[1]),
             "fusion_dim": int(h_fused.shape[1]),
@@ -2273,6 +2328,8 @@ def train(
     time_start=None,
     artifact_path=None,
     source_sha256=None,
+    source_id=None,
+    training_commit=None,
     progress_interval=DEFAULT_PROGRESS_INTERVAL,
     protocol=PRIMARY_MVDEC_PROTOCOL,
     run_id=None,
@@ -2921,6 +2978,9 @@ def train(
             result.insert(2, 'protocol_id', protocol.protocol_id)
             result.insert(3, 'run_id', run_id)
             result.insert(4, 'config_hash', config_hash)
+            result.insert(5, 'training_commit', training_commit)
+            result.insert(6, 'source_id', source_id)
+            result.insert(7, 'source_sha256', source_sha256)
             assignments_path = (
                 Path(assignments_path)
                 if assignments_path is not None
@@ -2954,6 +3014,8 @@ def train(
             preprocessing_metadata=preprocessing_metadata,
             true_labels=y,
             source_sha256=source_sha256,
+            source_id=source_id,
+            training_commit=training_commit,
             external_metrics=external_metrics,
             representation_external_metrics=(
                 {
@@ -2985,7 +3047,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='select dataset:AIRPOLLUTION,TIKI,REUTERS,20NEWS,RCV1',
     )
-    parser.add_argument('ds_name', default='AIRPOLLUTION')
+    parser.add_argument(
+        'ds_name',
+        choices=(*UNLABELED_DATASETS, *PUBLIC_DATASETS),
+    )
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument(
         '--seed',
@@ -3117,16 +3182,7 @@ if __name__ == '__main__':
         args.max_refinement_epochs,
     )
     validate_progress_interval(args.progress_interval)
-    if args.ds_name is None or args.ds_name not in [
-        'AIRPOLLUTION',
-        'TIKI',
-        'REUTERS',
-        '20NEWS',
-        'RCV1',
-    ]:
-        ds_name = 'AIRPOLLUTION'
-    else:
-        ds_name = args.ds_name
+    ds_name = args.ds_name
     validate_protocol_dataset_scope(protocol, ds_name)
 
     if ds_name in UNLABELED_DATASETS:
@@ -3165,6 +3221,7 @@ if __name__ == '__main__':
         legacy_anchor = Path(args.artifact_path)
         private_output_root = legacy_anchor.parent / legacy_anchor.stem
 
+    training_commit = resolve_training_commit(Path(__file__).resolve().parents[2])
     public_dataset = (
         None
         if ds_name in UNLABELED_DATASETS
@@ -3172,6 +3229,11 @@ if __name__ == '__main__':
             ds_name,
             args.dataset_root,
             normalization=protocol.input_normalization,
+            twenty_news_source=(
+                TWENTY_NEWS_SKLEARN_SOURCE
+                if ds_name == "20NEWS"
+                else TWENTY_NEWS_RELEASE_NPZ
+            ),
         )
     )
     run_metrics = []
@@ -3196,6 +3258,7 @@ if __name__ == '__main__':
         raw_x = None
         preprocessing_metadata = None
         source_sha256 = None
+        source_id = None
         if ds_name in UNLABELED_DATASETS:
             dataset_config = UNLABELED_DATASETS[ds_name]
             scaling_method = resolve_unlabeled_scaling_method(
@@ -3225,6 +3288,7 @@ if __name__ == '__main__':
                 f'feature_{index + 1}' for index in range(public_dataset.X.shape[1])
             ]
             source_sha256 = public_dataset.source_sha256
+            source_id = public_dataset.source_id
         resolved_refinement_batch_size = resolve_refinement_batch_size(
             protocol,
             len(x),
@@ -3236,6 +3300,11 @@ if __name__ == '__main__':
             tolerance=assignment_change_tolerance,
             max_refinement_epochs=args.max_refinement_epochs,
             source_sha256=source_sha256,
+            source_id=source_id,
+            training_commit=training_commit,
+            n_samples=len(x),
+            n_features=x.shape[1],
+            n_classes=n_clusters if y is not None else None,
             feature_columns=feature_columns,
             preprocessing_metadata=preprocessing_metadata,
             resolved_refinement_batch_size=resolved_refinement_batch_size,
@@ -3257,6 +3326,14 @@ if __name__ == '__main__':
             'method': protocol_method_name(protocol),
             'protocol_id': protocol.protocol_id,
             'config_hash': run_paths.config_hash,
+            'training_commit': training_commit,
+            'source_id': source_id,
+            'source_sha256': source_sha256,
+            'n_samples': len(x),
+            'n_features': x.shape[1],
+            'n_classes': n_clusters if y is not None else None,
+            'view_input_contract': VIEW_INPUT_CONTRACT,
+            'representation_metric_semantics': REPRESENTATION_METRIC_SEMANTICS,
             'seed': run_seed,
             'run_index': run_index + 1,
             'started_at_utc': datetime.now(UTC).isoformat(),
@@ -3301,6 +3378,8 @@ if __name__ == '__main__':
                 time_start=time_start,
                 artifact_path=run_paths.artifact,
                 source_sha256=source_sha256,
+                source_id=source_id,
+                training_commit=training_commit,
                 progress_interval=args.progress_interval,
                 protocol=protocol,
                 run_id=run_paths.run_id,

@@ -251,3 +251,34 @@ def test_write_aggregate_summary_groups_by_config_hash(tmp_path: Path) -> None:
     assert {row["config_hash"] for row in aggregates} == {"config_a", "config_b"}
     assert all(row["acc_std"] == "" for row in aggregates)
     assert all(row["nmi_std"] == "" for row in aggregates)
+
+
+def test_reusable_manifest_rejects_stale_training_commit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manifest = {"status": "complete", "training_commit": "a" * 40}
+    monkeypatch.setattr(
+        matrix,
+        "matching_complete_manifests",
+        lambda _output_root, _spec: [manifest],
+    )
+    monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "b" * 40)
+
+    assert (
+        matrix.reusable_complete_manifest(
+            tmp_path,
+            matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+        )
+        is None
+    )
+
+
+def test_archive_path_is_bound_to_config_hash(tmp_path: Path) -> None:
+    spec = matrix.MatrixRunSpec("REUTERS", "protocol_a", 42)
+
+    first, _ = matrix.archive_paths(tmp_path, spec, "a" * 64)
+    second, _ = matrix.archive_paths(tmp_path, spec, "b" * 64)
+
+    assert first != second
+    assert "aaaaaaaaaaaa" in first.name

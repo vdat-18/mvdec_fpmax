@@ -3,6 +3,8 @@
 import csv
 import hashlib
 import json
+import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +14,28 @@ from pipeline.io import replace_with_retry
 
 RUN_MANIFEST_SCHEMA_VERSION = 1
 RUN_MANIFEST_FILENAME = "manifest.json"
+GIT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+
+
+def resolve_training_commit(repository: Path) -> str:
+    """Resolve and validate the exact Git commit used for training."""
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(
+            "Unable to resolve the MvDEC training Git commit."
+        ) from error
+    commit = result.stdout.strip().lower()
+    if GIT_COMMIT_PATTERN.fullmatch(commit) is None:
+        raise RuntimeError("Git returned an invalid MvDEC training commit.")
+    return commit
 
 
 @dataclass(frozen=True)
@@ -240,6 +264,12 @@ def build_summary_frames(
             "method": manifest["method"],
             "protocol_id": manifest["protocol_id"],
             "config_hash": manifest["config_hash"],
+            "training_commit": manifest.get("training_commit"),
+            "source_id": manifest.get("source_id"),
+            "source_sha256": manifest.get("source_sha256"),
+            "n_samples": manifest.get("n_samples"),
+            "n_features": manifest.get("n_features"),
+            "n_classes": manifest.get("n_classes"),
             "random_seed": manifest["seed"],
             "run": manifest["run_index"],
             "runtime_seconds": manifest["runtime_seconds"],
@@ -257,6 +287,12 @@ def build_summary_frames(
         "method": complete[0]["method"],
         "protocol_id": complete[0]["protocol_id"],
         "config_hash": complete[0]["config_hash"],
+        "training_commit": complete[0].get("training_commit"),
+        "source_id": complete[0].get("source_id"),
+        "source_sha256": complete[0].get("source_sha256"),
+        "n_samples": complete[0].get("n_samples"),
+        "n_features": complete[0].get("n_features"),
+        "n_classes": complete[0].get("n_classes"),
         "discovered_runs": len(manifests),
         "completed_runs": len(complete),
         "failed_runs": sum(

@@ -19,10 +19,14 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     LITERAL_EQUATION11_PROTOCOL_ID,
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    REPRESENTATION_METRIC_SEMANTICS,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
+    VIEW_INPUT_CONTRACT,
+    balanced_batch_count,
 )
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
@@ -37,16 +41,11 @@ PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID = "mvdec_dekm_consistent_public_v1"
 PUBLIC_DEKM_CONSISTENT_METHOD = "MvDEC-DEKM-consistent-public"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
 PUBLIC_REPRODUCTION_OBJECTIVE = (
-    "mvdec_2025_public_reproduction_release_"
-    "l1_reconstruction_plus_l4_greedy_mse"
+    "mvdec_2025_public_reproduction_release_l1_reconstruction_plus_l4_greedy_mse"
 )
 PUBLIC_REPRODUCTION_METHOD = "MvDEC-2025-public-reproduction"
-PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = (
-    "mvdec_2025_view2_encoder_bottleneck_v1"
-)
-PUBLIC_ENCODER_BOTTLENECK_METHOD = (
-    "MvDEC-2025-View2-encoder-bottleneck-ablation"
-)
+PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = "mvdec_2025_view2_encoder_bottleneck_v1"
+PUBLIC_ENCODER_BOTTLENECK_METHOD = "MvDEC-2025-View2-encoder-bottleneck-ablation"
 PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID = "mvdec_2025_view2_direct_23_split_v1"
 PUBLIC_DIRECT_JOINT_HEAD_METHOD = "MvDEC-2025-View2-direct-joint-head-ablation"
 PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID = (
@@ -59,12 +58,11 @@ LITERAL_EQUATION11_OBJECTIVE = "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4
 LITERAL_EQUATION11_METHOD = "MvDEC-2025-Eq11-literal"
 EQUATION11_AMBIGUITY_METHOD = "MvDEC-2025-Eq11-ambiguity-experiment"
 PAPER_RESOLVED_METHOD = "MvDEC-2025-paper-resolved-full-batch"
+PAPER_INFORMED_METHOD = "MvDEC-2025-paper-informed-full-batch"
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
-    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (
-        VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID
-    ),
+    PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
         VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
@@ -88,10 +86,10 @@ PUBLIC_PROTOCOL_METHODS = {
     },
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_METHOD,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_METHOD,
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_METHOD,
 }
 PUBLIC_PROTOCOL_FUSIONS = {
-    protocol_id: FUSION_ENCODER_AVERAGE
-    for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
+    protocol_id: FUSION_ENCODER_AVERAGE for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
 }
 PUBLIC_PROTOCOL_FUSIONS[PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID] = (
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE
@@ -385,18 +383,14 @@ def _validate_public_protocol_contract(
         else "sequential_release_order"
     )
     expected_kmeans_n_init_policy = (
-        "fixed_100"
-        if is_dekm_consistent
-        else "initial_100_then_twice_previous_n_iter"
+        "fixed_100" if is_dekm_consistent else "initial_100_then_twice_previous_n_iter"
     )
     if is_equation11:
         expected_loss_terms = {
             "L1_reconstruction": {
                 "weight": 1.0,
                 "optimized": True,
-                "definition": (
-                    "mean_batch(||x-xhat_view1||^2 + ||x-xhat_view2||^2)"
-                ),
+                "definition": ("mean_batch(||x-xhat_view1||^2 + ||x-xhat_view2||^2)"),
                 "reduction": "sum_squared_dimensions_then_mean_batch",
                 "source_classification": "paper_explicit",
             },
@@ -443,9 +437,7 @@ def _validate_public_protocol_contract(
             },
         }
     expected_eigen_direction = (
-        EQUATION11_PROTOCOL_SETTINGS[protocol_id][0]
-        if is_equation11
-        else "largest"
+        EQUATION11_PROTOCOL_SETTINGS[protocol_id][0] if is_equation11 else "largest"
     )
     expected_target_mode = (
         EQUATION11_PROTOCOL_SETTINGS[protocol_id][1]
@@ -453,9 +445,7 @@ def _validate_public_protocol_contract(
         else "frozen_snapshot"
     )
     expected_batch_policy = (
-        EQUATION11_PROTOCOL_SETTINGS[protocol_id][2]
-        if is_equation11
-        else "fixed_256"
+        EQUATION11_PROTOCOL_SETTINGS[protocol_id][2] if is_equation11 else "fixed_256"
     )
     expected_batch_size = (
         "full_dataset" if expected_batch_policy == "full_dataset" else 256
@@ -469,9 +459,9 @@ def _validate_public_protocol_contract(
     elif expected_batch_policy == "full_dataset":
         expected_batches_per_epoch = 1
     elif expected_batching_policy == "balanced_shuffled_each_epoch":
-        expected_batches_per_epoch = max(
-            n_samples // expected_resolved_batch_size,
-            1,
+        expected_batches_per_epoch = balanced_batch_count(
+            n_samples,
+            expected_resolved_batch_size,
         )
     else:
         expected_batches_per_epoch = (
@@ -502,9 +492,7 @@ def _validate_public_protocol_contract(
         },
     }
     if is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID:
-        expected_schedule["refinement"]["batch_size_policy"] = (
-            expected_batch_policy
-        )
+        expected_schedule["refinement"]["batch_size_policy"] = expected_batch_policy
     expected_loss_weights = {
         "reconstruction": 1.0,
         "kmeans": 1.0 if is_equation11 else 0.0,
@@ -533,6 +521,18 @@ def _validate_public_protocol_contract(
             best_result.get("method_name") != expected_method,
             objective.get("name") != expected_objective,
             objective.get("loss_terms") != expected_loss_terms,
+            contract.get("architecture", {}).get("view_input_contract")
+            != VIEW_INPUT_CONTRACT,
+            schedule.get("final_evaluation", {}).get("metric_semantics")
+            != REPRESENTATION_METRIC_SEMANTICS,
+            schedule.get("final_evaluation", {}).get("view1_semantics")
+            != "jointly_trained_view1_not_dekm_f",
+            best_result.get("view_input_contract") != VIEW_INPUT_CONTRACT,
+            config.get("view_input_contract") != VIEW_INPUT_CONTRACT,
+            best_result.get("representation_metric_semantics")
+            != REPRESENTATION_METRIC_SEMANTICS,
+            config.get("representation_metric_semantics")
+            != REPRESENTATION_METRIC_SEMANTICS,
             eigen.get("order") != "ascending",
             eigen.get("direction") != expected_eigen_direction,
             greedy_target.get("mode") != expected_target_mode,
@@ -545,14 +545,11 @@ def _validate_public_protocol_contract(
             config.get("max_training_steps") != 14000,
             config.get("kmeans_n_init_policy") != expected_kmeans_n_init_policy,
             config.get("pretrain_loss_reduction") != expected_pretrain_reduction,
-            config.get("pretrain_shuffle_buffer")
-            != expected_pretrain_shuffle_buffer,
+            config.get("pretrain_shuffle_buffer") != expected_pretrain_shuffle_buffer,
             config.get("refinement_objective") != expected_refinement_objective,
             best_result.get("kmeans_refresh_policy") != "fixed_10_updates",
-            best_result.get("refinement_batching_policy")
-            != expected_batching_policy,
-            best_result.get("kmeans_n_init_policy")
-            != expected_kmeans_n_init_policy,
+            best_result.get("refinement_batching_policy") != expected_batching_policy,
+            best_result.get("kmeans_n_init_policy") != expected_kmeans_n_init_policy,
             best_result.get("iteration") != training_steps_completed,
             config.get("training_steps_completed") != training_steps_completed,
             n_samples < 1,
@@ -560,8 +557,7 @@ def _validate_public_protocol_contract(
             config.get("batches_per_epoch") != batches_per_epoch,
             refinement_epochs_completed
             != training_steps_completed // max(batches_per_epoch, 1),
-            config.get("refinement_epochs_completed")
-            != refinement_epochs_completed,
+            config.get("refinement_epochs_completed") != refinement_epochs_completed,
             config.get("stop_reason") != stop_reason,
             not 0 <= training_steps_completed <= 14000,
             stop_reason not in {"converged_assignment", "max_epochs_reached"},
@@ -570,8 +566,7 @@ def _validate_public_protocol_contract(
                 float(stopping.get("assignment_change_tolerance", np.nan)),
                 0.001,
             ),
-            is_equation11
-            and not contract.get("decision_provenance"),
+            is_equation11 and not contract.get("decision_provenance"),
             is_equation11
             and protocol_id == LITERAL_EQUATION11_PROTOCOL_ID
             and (
@@ -583,10 +578,8 @@ def _validate_public_protocol_contract(
             is_equation11
             and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
             and (
-                best_result.get("refinement_batch_size_policy")
-                != expected_batch_policy
-                or config.get("refinement_batch_size_policy")
-                != expected_batch_policy
+                best_result.get("refinement_batch_size_policy") != expected_batch_policy
+                or config.get("refinement_batch_size_policy") != expected_batch_policy
                 or best_result.get("resolved_refinement_batch_size")
                 != expected_resolved_batch_size
                 or config.get("resolved_refinement_batch_size")
@@ -780,6 +773,27 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
     artifact_config = best_result.get("config", {})
     manifest_config = manifest.get("config", {})
     output_sha256 = manifest.get("output_sha256", {}).get("artifact")
+    provenance_fields = (
+        "training_commit",
+        "source_id",
+        "source_sha256",
+        "n_samples",
+        "n_features",
+        "n_classes",
+        "view_input_contract",
+        "representation_metric_semantics",
+    )
+    provenance_mismatch = any(
+        manifest.get(field) != best_result.get(field)
+        or manifest_config.get(field) != best_result.get(field)
+        or artifact_config.get(field) != best_result.get(field)
+        for field in provenance_fields
+    )
+    public_provenance_missing = best_result.get(
+        "dataset"
+    ) in PUBLIC_MVDEC_DATASETS and any(
+        best_result.get(field) is None for field in provenance_fields
+    )
     if any(
         (
             manifest.get("status") != "complete",
@@ -795,6 +809,8 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
             resolve_manifest_output_path(manifest, "artifact").resolve()
             != result_path.resolve(),
             output_sha256 != file_sha256(result_path),
+            provenance_mismatch,
+            public_provenance_missing,
         )
     ):
         msg = "MvDEC artifact does not match its complete run manifest."
@@ -862,12 +878,8 @@ def _validate_mvdec2025_contract(
     elif fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
         view1_squared_norm = np.sum(np.square(h_view1), axis=1, keepdims=True)
         view2_squared_norm = np.sum(np.square(h_view2), axis=1, keepdims=True)
-        view1_normalized = h_view1 / np.sqrt(
-            np.maximum(view1_squared_norm, 1e-12)
-        )
-        view2_normalized = h_view2 / np.sqrt(
-            np.maximum(view2_squared_norm, 1e-12)
-        )
+        view1_normalized = h_view1 / np.sqrt(np.maximum(view1_squared_norm, 1e-12))
+        view2_normalized = h_view2 / np.sqrt(np.maximum(view2_squared_norm, 1e-12))
         expected = (view1_normalized + view2_normalized) / 2
     else:
         msg = f"Unsupported MvDEC fusion contract: {fusion_contract!r}."

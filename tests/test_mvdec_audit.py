@@ -1,5 +1,11 @@
+import pytest
+
 import pipeline.mvdec_audit as mvdec_audit
-from pipeline.mvdec_audit import artifact_data_path, audit_run_root
+from pipeline.mvdec_audit import (
+    artifact_data_path,
+    audit_run_root,
+    validate_public_source,
+)
 from pipeline.mvdec_runs import file_sha256, resolve_run_paths, write_run_manifest
 
 
@@ -78,3 +84,18 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
 
     assert audit_run_root(tmp_path) == (1, 0)
     assert loaded == [(paths.artifact, source_path)]
+
+
+def test_validate_public_source_rejects_noncanonical_20news(tmp_path) -> None:
+    manifest = {
+        "dataset": "20NEWS",
+        "source_id": "dekm_google_drive_npz_18057",
+        "config": {
+            "protocol_contract": {
+                "preprocessing": {"input_normalization": "release_l2_unit_norm"}
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="sklearn source"):
+        validate_public_source(manifest, tmp_path)

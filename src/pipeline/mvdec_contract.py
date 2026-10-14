@@ -8,15 +8,13 @@ VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID = (
     "mvdec2025_post_skip_direct_latent_reconstruction_head_v1"
 )
 FUSION_ENCODER_AVERAGE = "mvdec2025_encoder_average"
-FUSION_ENCODER_L2_NORMALIZED_AVERAGE = (
-    "mvdec2025_encoder_l2_normalized_average"
-)
+FUSION_ENCODER_L2_NORMALIZED_AVERAGE = "mvdec2025_encoder_l2_normalized_average"
+VIEW_INPUT_CONTRACT = "same_full_feature_matrix_both_views_v1"
+REPRESENTATION_METRIC_SEMANTICS = "jointly_trained_views_independent_kmeans_v1"
 
 
 LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"
-EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID = (
-    "mvdec_2025_equation11_smallest_frozen_v1"
-)
+EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID = "mvdec_2025_equation11_smallest_frozen_v1"
 EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID = (
     "mvdec_2025_equation11_largest_selected_only_v1"
 )
@@ -33,29 +31,57 @@ EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID = (
     "mvdec_2025_equation11_largest_selected_only_full_batch_v1"
 )
 PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_resolved_full_batch_v1"
+PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"
 
 EQUATION11_PROTOCOL_SETTINGS = {
     LITERAL_EQUATION11_PROTOCOL_ID: ("largest", "frozen_snapshot", "fixed_256"),
     EQUATION11_SMALLEST_FROZEN_PROTOCOL_ID: (
-        "smallest", "frozen_snapshot", "fixed_256"
+        "smallest",
+        "frozen_snapshot",
+        "fixed_256",
     ),
     EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID: (
-        "largest", "selected_dimension_only", "fixed_256"
+        "largest",
+        "selected_dimension_only",
+        "fixed_256",
     ),
     EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID: (
-        "smallest", "selected_dimension_only", "fixed_256"
+        "smallest",
+        "selected_dimension_only",
+        "fixed_256",
     ),
     EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID: (
-        "largest", "frozen_snapshot", "full_dataset"
+        "largest",
+        "frozen_snapshot",
+        "full_dataset",
     ),
     EQUATION11_SMALLEST_FROZEN_FULL_BATCH_PROTOCOL_ID: (
-        "smallest", "frozen_snapshot", "full_dataset"
+        "smallest",
+        "frozen_snapshot",
+        "full_dataset",
     ),
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID: (
-        "largest", "selected_dimension_only", "full_dataset"
+        "largest",
+        "selected_dimension_only",
+        "full_dataset",
     ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: (
-        "smallest", "selected_dimension_only", "full_dataset"
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
     ),
 }
 EQUATION11_PROTOCOL_IDS = frozenset(EQUATION11_PROTOCOL_SETTINGS)
+
+
+def balanced_batch_count(n_samples: int, batch_size: int) -> int:
+    """Return the closest positive batch count to the requested batch size."""
+
+    if n_samples < 1 or batch_size < 1:
+        raise ValueError("n_samples and batch_size must be positive.")
+    return max(1, (n_samples + batch_size // 2) // batch_size)

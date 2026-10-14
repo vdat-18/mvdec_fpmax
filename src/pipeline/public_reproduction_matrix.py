@@ -17,11 +17,14 @@ from loguru import logger
 
 from config import DEKM_DATASET_DIR, PROJECT_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.io import replace_with_retry
+from pipeline.mvdec_audit import validate_public_source
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
+    resolve_training_commit,
     validate_manifest_outputs,
 )
+from pipeline.public_data import TWENTY_NEWS_SKLEARN_SOURCE
 
 SUMMARY_FILENAME = "public_mvdec_matrix_runs.csv"
 AGGREGATE_SUMMARY_FILENAME = "public_mvdec_matrix_aggregate.csv"
@@ -32,6 +35,12 @@ SUMMARY_FIELDS = (
     "seed",
     "run_id",
     "config_hash",
+    "training_commit",
+    "source_id",
+    "source_sha256",
+    "n_samples",
+    "n_features",
+    "n_classes",
     "acc",
     "nmi",
     "runtime_seconds",
@@ -103,10 +112,18 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def archive_paths(archive_root: Path, spec: MatrixRunSpec) -> tuple[Path, Path]:
-    """Resolve stable archive and checksum paths for one matrix run."""
+def archive_paths(
+    archive_root: Path,
+    spec: MatrixRunSpec,
+    config_hash: str | None = None,
+) -> tuple[Path, Path]:
+    """Resolve a config-bound archive and checksum path for one matrix run."""
 
-    stem = f"{spec.dataset.lower()}__{spec.protocol_id.lower()}__seed_{spec.seed}"
+    config_part = f"__{config_hash[:12]}" if config_hash else ""
+    stem = (
+        f"{spec.dataset.lower()}__{spec.protocol_id.lower()}"
+        f"{config_part}__seed_{spec.seed}"
+    )
     archive_path = archive_root / f"{stem}.tar.gz"
     return archive_path, archive_path.with_suffix(f"{archive_path.suffix}.sha256")
 
@@ -168,6 +185,7 @@ def require_single_complete_manifest(
 def reusable_complete_manifest(
     output_root: Path,
     spec: MatrixRunSpec,
+    dataset_root: Path | None = None,
 ) -> dict[str, object] | None:
     """Return an auditable completed run, or require it to be rebuilt."""
 
@@ -177,11 +195,32 @@ def reusable_complete_manifest(
     if not manifests:
         return None
     manifest = manifests[0]
+    current_commit = resolve_training_commit(PROJECT_DIR)
+    if manifest.get("training_commit") != current_commit:
+        logger.warning(
+            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_commit",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+        )
+        return None
+    if spec.dataset == "20NEWS" and manifest.get("source_id") != (
+        TWENTY_NEWS_SKLEARN_SOURCE
+    ):
+        logger.warning(
+            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_source",
+            spec.dataset,
+            spec.protocol_id,
+            spec.seed,
+        )
+        return None
     try:
         validate_manifest_outputs(manifest)
+        if dataset_root is not None:
+            validate_public_source(manifest, dataset_root)
     except ValueError:
         logger.warning(
-            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:invalid_output_hash",
+            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:invalid_run_audit",
             spec.dataset,
             spec.protocol_id,
             spec.seed,
@@ -259,7 +298,11 @@ def run_training(
         raise subprocess.CalledProcessError(return_code, command)
 
 
-def audit_run(run_dir: Path, stdout_path: Path) -> None:
+def audit_run(
+    run_dir: Path,
+    stdout_path: Path,
+    dataset_root: Path,
+) -> None:
     """Audit one run and append verbose audit output to its retained log."""
 
     with stdout_path.open("a", encoding="utf-8") as output:
@@ -270,6 +313,8 @@ def audit_run(run_dir: Path, stdout_path: Path) -> None:
                 "pipeline.mvdec_audit",
                 "--root",
                 str(run_dir),
+                "--dataset-root",
+                str(dataset_root),
             ],
             cwd=PROJECT_DIR,
             stdout=output,
@@ -332,6 +377,12 @@ def summary_record(
         "seed": manifest["seed"],
         "run_id": manifest["run_id"],
         "config_hash": manifest["config_hash"],
+        "training_commit": manifest["training_commit"],
+        "source_id": manifest["source_id"],
+        "source_sha256": manifest["source_sha256"],
+        "n_samples": manifest["n_samples"],
+        "n_features": manifest["n_features"],
+        "n_classes": manifest["n_classes"],
         "acc": metrics["acc"],
         "nmi": metrics["nmi"],
         "runtime_seconds": manifest["runtime_seconds"],
@@ -459,17 +510,7 @@ def run_public_matrix(
     summary_path = archive_root / SUMMARY_FILENAME
     for spec in specs:
         run_started = perf_counter()
-        archive_path, checksum_path = archive_paths(archive_root, spec)
         stdout_path = training_stdout_path(archive_root, spec)
-        if resume and checksum_matches(archive_path, checksum_path):
-            logger.info(
-                "run_skip; dataset:{}; protocol:{}; seed:{}; reason:archive_verified",
-                spec.dataset,
-                spec.protocol_id,
-                spec.seed,
-            )
-            yield CompletedMatrixRun(spec, archive_path, checksum_path, True)
-            continue
 
         logger.info(
             "run_start; dataset:{}; protocol:{}; seed:{}",
@@ -478,7 +519,12 @@ def run_public_matrix(
             spec.seed,
         )
 
-        manifest = reusable_complete_manifest(output_root, spec)
+        manifest = (
+            reusable_complete_manifest(output_root, spec, dataset_root)
+            if resume
+            else None
+        )
+        reused_manifest = manifest is not None
         if manifest is None:
             run_training(
                 spec,
@@ -491,8 +537,13 @@ def run_public_matrix(
             manifest = require_single_complete_manifest(output_root, spec)
 
         validate_manifest_outputs(manifest)
+        archive_path, checksum_path = archive_paths(
+            archive_root,
+            spec,
+            str(manifest["config_hash"]),
+        )
         manifest_path = Path(str(manifest["_manifest_path"]))
-        audit_run(manifest_path.parent, stdout_path)
+        audit_run(manifest_path.parent, stdout_path, dataset_root)
         archive_sha256 = package_run(manifest, archive_path, checksum_path)
         record = summary_record(manifest, archive_path, archive_sha256)
         update_summary(summary_path, record)
@@ -510,7 +561,7 @@ def run_public_matrix(
             float(record["acc"]),
             float(record["nmi"]),
         )
-        yield CompletedMatrixRun(spec, archive_path, checksum_path, False)
+        yield CompletedMatrixRun(spec, archive_path, checksum_path, reused_manifest)
 
 
 def main() -> None:

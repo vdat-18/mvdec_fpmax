@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,7 @@ from pipeline.mvdec_runs import (
     load_run_manifests,
     prepare_run_directory,
     resolve_run_paths,
+    resolve_training_commit,
     validate_manifest_outputs,
     write_run_manifest,
 )
@@ -230,3 +232,10 @@ def test_complete_manifest_requires_hash_for_every_output(tmp_path):
 
     with pytest.raises(ValueError, match="hash every declared output"):
         validate_manifest_outputs(manifest)
+
+
+def test_resolve_training_commit_returns_full_head() -> None:
+    commit = resolve_training_commit(Path(__file__).resolve().parents[1])
+
+    assert len(commit) == 40
+    assert set(commit) <= set("0123456789abcdef")

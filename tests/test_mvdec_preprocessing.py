@@ -160,6 +160,11 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
         tolerance=0.01,
         max_refinement_epochs=1400,
         source_sha256="source-hash",
+        source_id=None,
+        training_commit="a" * 40,
+        n_samples=5,
+        n_features=1,
+        n_classes=None,
         feature_columns=["feature"],
         preprocessing_metadata=None,
     )
@@ -768,7 +773,7 @@ def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
     }
 
 
-def test_literal_equation11_resolved_config_hash_is_unchanged(monkeypatch):
+def test_literal_equation11_resolved_config_hash_covers_provenance(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     monkeypatch.setattr(mvdec, 'ds_name', 'REUTERS')
     monkeypatch.setattr(mvdec, 'input_shape', 2000)
@@ -783,13 +788,21 @@ def test_literal_equation11_resolved_config_hash_is_unchanged(monkeypatch):
         source_sha256=(
             '427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b'
         ),
+        source_id='dekm_google_drive_reuters_10k',
+        training_commit='a' * 40,
+        n_samples=10_000,
+        n_features=2000,
+        n_classes=4,
         feature_columns=[f'feature_{index + 1}' for index in range(2000)],
         preprocessing_metadata=None,
     )
 
-    assert canonical_config_hash(config) == (
-        '5bc0498e77dfaaee404c989ed249610ac438b642053fb0b2e40c702157cc3d45'
+    config_with_new_commit = {**config, 'training_commit': 'b' * 40}
+    assert canonical_config_hash(config) != canonical_config_hash(
+        config_with_new_commit
     )
+    assert config['source_id'] == 'dekm_google_drive_reuters_10k'
+    assert config['n_samples'] == 10_000
     assert 'refinement_batch_size_policy' not in config
     assert 'resolved_refinement_batch_size' not in config
 
@@ -804,6 +817,11 @@ def test_paper_resolved_config_records_full_batch(monkeypatch):
         tolerance=0.001,
         max_refinement_epochs=1400,
         source_sha256='a' * 64,
+        source_id='dekm_google_drive_reuters_10k',
+        training_commit='b' * 40,
+        n_samples=10_000,
+        n_features=2000,
+        n_classes=4,
         feature_columns=['feature_1'],
         preprocessing_metadata=None,
         resolved_refinement_batch_size=10_000,
