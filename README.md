@@ -217,6 +217,17 @@ The release-derived protocols are seeded by the wrapper so runs can be audited,
 but execute on the current TensorFlow/scikit-learn runtime. They are not bitwise
 reproductions of the unavailable Python 3.8 / TensorFlow 2.4.1 environment.
 
+### Current MvDEC audit status
+
+MvDEC is not yet frozen as a canonical three-dataset protocol. The complete
+paper-code review and closure blockers are recorded in
+[`MVDEC_DEEP_AUDIT_2026-10-14.md`](MVDEC_DEEP_AUDIT_2026-10-14.md). In
+particular, do not launch a canonical 20NEWS run until the MvDEC loader is
+explicitly bound to the official 18,846-row scikit-learn source and the run
+manifest records and verifies its source identity. Existing REUTERS P0 results
+remain historical paper-informed reconstruction artifacts, not official or
+uniquely paper-resolved MvDEC results.
+
 Download the exact files linked by the official DEKM Google Drive folder:
 
 ```bash
@@ -267,7 +278,7 @@ Git. The RCV1 release contains only split indices, so its run additionally
 requires the scikit-learn RCV1 cache.
 ### Reproduce MvDEC 2025 Equation 11 literally
 
-The primary MvDEC reconstruction protocol is
+The immutable MvDEC literal-control protocol is
 `mvdec_2025_equation11_literal_v1`. It implements Equation 11 as the unweighted
 sum `L1 + L2 + L3 + L4`, uses the direct View2 joint head closest to Figure 2,
 and averages the two latent views for fusion. Every underspecified choice is
@@ -393,15 +404,15 @@ The `23` in the protocol name records the Air Pollution Fig. 2 layout
 (`10 + 13`). For public 2,000-dimensional inputs the same contract creates a
 `10 + 2,000` joint head and persists the resolved dimensions in the manifest.
 
-For the preregistered three-dataset validation, use either
-`notebooks/mvdec_2025_three_datasets_kaggle.ipynb` on Kaggle or
-`notebooks/mvdec_2025_three_datasets_colab.ipynb` on Google Colab. It runs
-the paper-resolved
-full-batch protocol on REUTERS-10K, 20NEWS, and RCV1-10K for seeds 42-44,
-continues after a failed combination, and writes per-run and aggregate CSVs.
-The aggregate uses the DEKM-compatible mean and sample standard deviation as
-the primary report. Best ACC and best NMI are labeled sensitivity-only because
-MvDEC reports "best performance" without disclosing a trial count or rule.
+The tracked three-dataset Kaggle and Colab notebooks are historical experiment
+drivers and are not currently approved for a canonical run. They clone a moving
+branch, use the legacy 18,057-row 20NEWS source through the current MvDEC CLI,
+and can package a partial matrix after failures. The replacement workflow must
+pin a commit and first run a fail-closed official-source 20NEWS seed-42 gate.
+Only after that gate is independently audited may seeds 43-44 and RCV1 run.
+Primary reporting remains the DEKM-compatible mean and sample standard
+deviation; best ACC and best NMI are sensitivity-only because MvDEC reports
+"best performance" without disclosing a trial count or rule.
 
 Replace `REUTERS` with `20NEWS` or `RCV1`. Each `artifact.pkl` is directly
 usable by MiMvDEC. Pass the same run directory's `assignments.csv` as
