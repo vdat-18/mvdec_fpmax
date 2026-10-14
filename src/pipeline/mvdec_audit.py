@@ -3,11 +3,13 @@
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from loguru import logger
 
 from config import DEKM_DATASET_DIR
-from pipeline.data import load_mvdec_result
+from pipeline.data import load_mvdec_result, validate_mvdec_artifact
+from pipeline.external_metrics import compute_external_metrics
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
@@ -37,12 +39,12 @@ def artifact_data_path(manifest: dict[str, object]) -> Path:
 def validate_public_source(
     manifest: dict[str, object],
     dataset_root: Path,
-) -> None:
+) -> pd.DataFrame | None:
     """Rebuild one canonical public input and verify all provenance fields."""
 
     dataset_name = manifest.get("dataset")
     if dataset_name not in {"REUTERS", "20NEWS", "RCV1"}:
-        return
+        return None
     config = manifest.get("config")
     if not isinstance(config, dict):
         raise ValueError("Public MvDEC manifest is missing its resolved config.")
@@ -89,6 +91,53 @@ def validate_public_source(
             raise ValueError(f"MvDEC assignments are missing stable {field} metadata.")
         if str(assignments[field].iloc[0]) != str(manifest.get(field)):
             raise ValueError(f"MvDEC assignments {field} does not match the manifest.")
+    return assignments
+
+
+def validate_public_assignments(
+    manifest: dict[str, object],
+    artifact: dict[str, object],
+    assignments: pd.DataFrame,
+) -> None:
+    """Verify row alignment and independently recompute public ACC/NMI."""
+
+    required_columns = {"sample_index", "cluster", "true_label"}
+    missing = required_columns.difference(assignments.columns)
+    if missing:
+        raise ValueError(f"MvDEC assignments are missing columns: {sorted(missing)}")
+    expected_rows = int(manifest["n_samples"])
+    if len(assignments) != expected_rows:
+        raise ValueError("MvDEC assignments row count does not match the manifest.")
+    if not np.array_equal(assignments["sample_index"], np.arange(expected_rows)):
+        raise ValueError("MvDEC assignments are not in canonical sample order.")
+
+    labels = np.asarray(artifact["labels"])
+    true_labels = np.asarray(artifact["true_labels"])
+    if not np.array_equal(assignments["cluster"], labels):
+        raise ValueError("MvDEC assignments do not match artifact cluster labels.")
+    if not np.array_equal(assignments["true_label"], true_labels):
+        raise ValueError("MvDEC assignments do not match artifact true labels.")
+
+    metrics = compute_external_metrics(
+        assignments["true_label"],
+        assignments["cluster"],
+        n_clusters=int(manifest["n_classes"]),
+    )
+    manifest_metrics = manifest.get("metrics")
+    if not isinstance(manifest_metrics, dict):
+        raise ValueError("Public MvDEC manifest is missing metrics.")
+    recorded = (
+        artifact.get("acc"),
+        artifact.get("nmi"),
+        manifest_metrics.get("acc"),
+        manifest_metrics.get("nmi"),
+    )
+    expected_metrics = (metrics.acc, metrics.nmi, metrics.acc, metrics.nmi)
+    if not all(
+        value is not None and np.isclose(float(value), expected)
+        for value, expected in zip(recorded, expected_metrics, strict=True)
+    ):
+        raise ValueError("MvDEC recorded ACC/NMI do not match assignments.")
 
 
 def audit_run_root(
@@ -114,11 +163,16 @@ def audit_run_root(
                 f"MvDEC run is neither complete nor failed: {manifest_path}"
             )
         validate_manifest_outputs(manifest)
-        validate_public_source(manifest, dataset_root)
-        load_mvdec_result(
-            result_path=resolve_manifest_output_path(manifest, "artifact"),
-            data_path=artifact_data_path(manifest),
-        )
+        assignments = validate_public_source(manifest, dataset_root)
+        artifact_path = resolve_manifest_output_path(manifest, "artifact")
+        if assignments is None:
+            load_mvdec_result(
+                result_path=artifact_path,
+                data_path=artifact_data_path(manifest),
+            )
+        else:
+            artifact = validate_mvdec_artifact(artifact_path)
+            validate_public_assignments(manifest, artifact, assignments)
         completed += 1
         logger.info("Validated MvDEC run: {}", manifest["run_id"])
     return completed, failed

@@ -1,9 +1,12 @@
+import numpy as np
+import pandas as pd
 import pytest
 
 import pipeline.mvdec_audit as mvdec_audit
 from pipeline.mvdec_audit import (
     artifact_data_path,
     audit_run_root,
+    validate_public_assignments,
     validate_public_source,
 )
 from pipeline.mvdec_runs import file_sha256, resolve_run_paths, write_run_manifest
@@ -99,3 +102,50 @@ def test_validate_public_source_rejects_noncanonical_20news(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="sklearn source"):
         validate_public_source(manifest, tmp_path)
+
+
+def test_validate_public_assignments_recomputes_metrics() -> None:
+    assignments = pd.DataFrame(
+        {
+            "sample_index": np.arange(4),
+            "cluster": [1, 1, 0, 0],
+            "true_label": [0, 0, 1, 1],
+        }
+    )
+    manifest = {
+        "n_samples": 4,
+        "n_classes": 2,
+        "metrics": {"acc": 1.0, "nmi": 1.0},
+    }
+    artifact = {
+        "labels": np.array([1, 1, 0, 0]),
+        "true_labels": np.array([0, 0, 1, 1]),
+        "acc": 1.0,
+        "nmi": 1.0,
+    }
+
+    validate_public_assignments(manifest, artifact, assignments)
+
+
+def test_validate_public_assignments_rejects_metric_mismatch() -> None:
+    assignments = pd.DataFrame(
+        {
+            "sample_index": np.arange(4),
+            "cluster": [1, 1, 0, 0],
+            "true_label": [0, 0, 1, 1],
+        }
+    )
+    manifest = {
+        "n_samples": 4,
+        "n_classes": 2,
+        "metrics": {"acc": 0.5, "nmi": 1.0},
+    }
+    artifact = {
+        "labels": np.array([1, 1, 0, 0]),
+        "true_labels": np.array([0, 0, 1, 1]),
+        "acc": 1.0,
+        "nmi": 1.0,
+    }
+
+    with pytest.raises(ValueError, match="ACC/NMI"):
+        validate_public_assignments(manifest, artifact, assignments)

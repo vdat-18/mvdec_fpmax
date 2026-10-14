@@ -910,12 +910,11 @@ def load_preprocessed_dataset(
     )
 
 
-def load_mvdec_result(
+def _load_validated_mvdec_artifact(
     result_path: Path,
-    data_path: Path = PREPROCESSED_DATA_PATH,
-    allow_legacy_concat: bool = False,
-) -> MvdecResult:
-    """Load the cached MvDEC result and recompute its silhouette score."""
+    allow_legacy_concat: bool,
+) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
+    """Load one artifact and validate its persisted contract without diagnostics."""
 
     with result_path.open("rb") as file:
         best_result = pickle.load(file)
@@ -987,6 +986,32 @@ def load_mvdec_result(
         msg = "MvDEC row_indices must use canonical order 0..n_samples - 1."
         raise ValueError(msg)
 
+    return best_result, h_fused, labels, true_labels, row_indices
+
+
+def validate_mvdec_artifact(
+    result_path: Path,
+    allow_legacy_concat: bool = False,
+) -> dict:
+    """Validate one MvDEC artifact without allocating pairwise diagnostics."""
+
+    best_result, _, _, _, _ = _load_validated_mvdec_artifact(
+        result_path,
+        allow_legacy_concat,
+    )
+    return best_result
+
+
+def load_mvdec_result(
+    result_path: Path,
+    data_path: Path = PREPROCESSED_DATA_PATH,
+    allow_legacy_concat: bool = False,
+) -> MvdecResult:
+    """Load the cached MvDEC result and recompute its silhouette score."""
+
+    best_result, h_fused, labels, true_labels, row_indices = (
+        _load_validated_mvdec_artifact(result_path, allow_legacy_concat)
+    )
     preprocessed_df = pd.read_csv(data_path)
     preprocessed_rows = len(preprocessed_df)
     if preprocessed_rows != h_fused.shape[0]:

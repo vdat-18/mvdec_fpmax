@@ -305,23 +305,28 @@ def audit_run(
 ) -> None:
     """Audit one run and append verbose audit output to its retained log."""
 
-    with stdout_path.open("a", encoding="utf-8") as output:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pipeline.mvdec_audit",
-                "--root",
-                str(run_dir),
-                "--dataset-root",
-                str(dataset_root),
-            ],
-            cwd=PROJECT_DIR,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=True,
-        )
+    try:
+        with stdout_path.open("a", encoding="utf-8") as output:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pipeline.mvdec_audit",
+                    "--root",
+                    str(run_dir),
+                    "--dataset-root",
+                    str(dataset_root),
+                ],
+                cwd=PROJECT_DIR,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=True,
+            )
+    except subprocess.CalledProcessError:
+        log_tail = stdout_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+        logger.error("audit_failed; run_dir:{}; log_tail:\n{}", run_dir, log_tail)
+        raise
 
 
 def package_run(
