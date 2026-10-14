@@ -1015,12 +1015,44 @@ def test_no_alignment_protocol_changes_only_alignment_weight(monkeypatch):
     assert weak_contract["schedule"] == disabled_contract["schedule"]
 
 
+def test_legacy_scaled_protocol_changes_only_loss_scale_policy(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    weak = mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    legacy = mvdec.LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL
+    weak_contract = weak.manifest_contract(0.001)
+    legacy_contract = legacy.manifest_contract(0.001)
+
+    assert legacy.alignment_weight == 0.05
+    assert legacy.loss_scale_policy == "sum_squared_dimensions"
+    assert legacy.protocol_id == (
+        mvdec.LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
+    )
+    assert legacy_contract["objective"]["loss_scale_policy"] == (
+        "sum_squared_dimensions"
+    )
+    assert legacy_contract["objective"]["loss_terms"] == (
+        weak_contract["objective"]["loss_terms"]
+    )
+    ignored_fields = {
+        "protocol_id",
+        "claim_scope",
+        "refinement_source",
+        "loss_scale_policy",
+    }
+    for field in weak.__dataclass_fields__:
+        if field not in ignored_fields:
+            assert getattr(legacy, field) == getattr(weak, field)
+    assert weak_contract["schedule"] == legacy_contract["schedule"]
+
+
 @pytest.mark.parametrize(
     "protocol_name",
     [
         "ALIGNED_BALANCED_FULL_BATCH_PROTOCOL",
         "ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
         "ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL",
+        "LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL",
     ],
 )
 def test_aligned_balanced_artifact_contract_passes_loader_validation(

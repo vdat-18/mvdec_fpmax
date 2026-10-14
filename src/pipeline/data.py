@@ -17,12 +17,14 @@ from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_PROTOCOL_IDS,
+    ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES,
     ALIGNED_BALANCED_PROTOCOL_SETTINGS,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
@@ -72,6 +74,9 @@ ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD = (
 ALIGNED_BALANCED_NO_ALIGNMENT_METHOD = (
     "MvDEC-2025-aligned-balanced-alignment-000-full-batch"
 )
+LEGACY_SCALED_WEAK_ALIGNMENT_METHOD = (
+    "MvDEC-2025-legacy-scaled-alignment-005-full-batch"
+)
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -110,6 +115,9 @@ PUBLIC_PROTOCOL_METHODS = {
     ),
     ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         ALIGNED_BALANCED_NO_ALIGNMENT_METHOD
+    ),
+    LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
+        LEGACY_SCALED_WEAK_ALIGNMENT_METHOD
     ),
 }
 PUBLIC_PROTOCOL_FUSIONS = {
@@ -381,6 +389,9 @@ def _validate_public_protocol_contract(
     is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
     is_aligned_balanced = protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
     alignment_weight = ALIGNED_BALANCED_PROTOCOL_SETTINGS.get(protocol_id, 0.0)
+    expected_loss_scale_policy = ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES.get(
+        protocol_id
+    )
     if is_aligned_balanced:
         expected_objective = ALIGNED_BALANCED_OBJECTIVE
     elif is_equation11:
@@ -593,12 +604,12 @@ def _validate_public_protocol_contract(
             objective.get("loss_terms") != expected_loss_terms,
             (
                 objective.get("loss_scale_policy")
-                != "mean_squared_dimensions"
+                != expected_loss_scale_policy
                 if is_aligned_balanced
                 else "loss_scale_policy" in objective
             ),
             (
-                config.get("loss_scale_policy") != "mean_squared_dimensions"
+                config.get("loss_scale_policy") != expected_loss_scale_policy
                 if is_aligned_balanced
                 else "loss_scale_policy" in config
             ),
