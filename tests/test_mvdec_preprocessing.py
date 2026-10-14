@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pipeline import data as pipeline_data
 from pipeline.data import file_sha256, load_mvdec_result
 from pipeline.external_metrics import compute_external_metrics
 from pipeline.mvdec_runs import (
@@ -29,6 +30,21 @@ def _restore_original_order(values, shuffled_indices):
     restored = np.empty_like(values)
     restored[shuffled_indices] = values
     return restored
+
+
+def _public_provenance(source_sha256):
+    return {
+        "training_commit": "f" * 40,
+        "source_id": "test-public-source",
+        "source_sha256": source_sha256,
+        "n_samples": 4,
+        "n_features": 2,
+        "n_classes": 2,
+        "view_input_contract": "same_full_feature_matrix_both_views_v1",
+        "representation_metric_semantics": (
+            "jointly_trained_views_independent_kmeans_v1"
+        ),
+    }
 
 
 def test_airpollution_minmax_scales_each_column_before_shuffle(tmp_path, monkeypatch):
@@ -508,6 +524,7 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
     assert schedule.max_training_steps == 14_000
     assert protocol.manifest_contract(0.001)["architecture"] == {
         "view2": mvdec.VIEW2_ARCHITECTURE_ID,
+        "view_input_contract": mvdec.VIEW_INPUT_CONTRACT,
     }
     assert protocol.manifest_contract(0.001)["schedule"]["refinement"] == {
         "objective": "release_reconstruction_plus_greedy_mse",
@@ -760,7 +777,7 @@ def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
     contract = mvdec.LITERAL_EQUATION11_PROTOCOL.manifest_contract(0.001)
 
     assert mvdec.protocol_contract_sha256(contract) == (
-        'f09877f8db424c00eaaa46be036d9aa4cdd4223bf90afc3290cb5445d0a5324f'
+        'c02f47a19748551ac362195017c77625c6902fe73e3c98c44814da43ab0c475d'
     )
     assert contract['schedule']['refinement'] == {
         'objective': 'joint_reconstruction_plus_greedy',
@@ -889,6 +906,172 @@ def test_literal_equation11_gradients_reach_both_views(monkeypatch):
     np.testing.assert_allclose(kmeans.numpy(), scatter.numpy())
 
 
+def test_aligned_balanced_protocol_is_explicit_full_batch_and_immutable(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    protocol = mvdec.resolve_mvdec_protocol(
+        mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+        kmeans_weight=1.0,
+        greedy_weight=1.0,
+        eigen_direction="smallest",
+        target_mode="selected_dimension_only",
+    )
+    contract = protocol.manifest_contract(0.001)
+
+    assert protocol == mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL
+    assert protocol.refinement_batch_size_policy == "full_dataset"
+    assert protocol.scatter_trace_weight == 0.0
+    assert protocol.alignment_weight == 1.0
+    assert protocol.loss_scale_policy == "mean_squared_dimensions"
+    assert contract["objective"]["loss_scale_policy"] == (
+        "mean_squared_dimensions"
+    )
+    assert contract["objective"]["loss_terms"][
+        "L5_cross_view_alignment"
+    ] == {
+        "weight": 1.0,
+        "optimized": True,
+        "definition": (
+            "mean_batch(||L2_normalize(h_view1) - "
+            "L2_normalize(h_view2)||^2)"
+        ),
+    }
+    assert "L5_cross_view_alignment" not in (
+        mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL.manifest_contract(0.001)[
+            "objective"
+        ]["loss_terms"]
+    )
+    assert mvdec.resolve_refinement_batch_size(protocol, 3_765, 256) == 3_765
+
+    with pytest.raises(ValueError, match="immutable"):
+        mvdec.resolve_mvdec_protocol(
+            mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+            kmeans_weight=0.0,
+            greedy_weight=1.0,
+            eigen_direction="smallest",
+            target_mode="selected_dimension_only",
+        )
+
+
+def test_aligned_balanced_artifact_contract_passes_loader_validation(
+    tmp_path,
+    monkeypatch,
+):
+    mvdec = _load_mvdec(monkeypatch)
+    protocol = mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL
+    monkeypatch.setattr(mvdec, "lambda_reconstruction", 1.0)
+    monkeypatch.setattr(mvdec, "lambda_kmeans", 1.0)
+    monkeypatch.setattr(mvdec, "lambda_orthonormal", 0.0)
+    monkeypatch.setattr(mvdec, "lambda_greedy", 1.0)
+    monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
+    monkeypatch.setattr(mvdec, "input_shape", 2)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    monkeypatch.setattr(mvdec, "n_clusters", 2)
+    monkeypatch.setattr(mvdec, "assignment_change_tolerance", 0.001)
+    h_view1 = np.array([[0.0, 0.1], [0.1, 0.0], [5.0, 5.1], [5.1, 5.0]])
+    h_view2 = h_view1 + 0.1
+    labels = np.array([0, 0, 1, 1])
+    metrics = compute_external_metrics(labels, labels, n_clusters=2)
+    artifact_path = tmp_path / "aligned.pkl"
+
+    mvdec.save_airpollution_mvdec_artifact(
+        artifact_path=artifact_path,
+        h_view1=h_view1,
+        h_view2=h_view2,
+        h_fused=(h_view1 + h_view2) / 2,
+        labels=labels,
+        score=1.0,
+        iteration=30,
+        orig_idx=np.arange(4),
+        feature_columns=["a", "b"],
+        random_seed=42,
+        greedy_eigen_direction="smallest",
+        greedy_target_mode="selected_dimension_only",
+        batches_per_epoch=1,
+        max_refinement_epochs=1400,
+        stop_reason="converged_assignment",
+        refinement_epochs_completed=30,
+        preprocessing_metadata=None,
+        true_labels=labels,
+        source_sha256="a" * 64,
+        source_id="test-source",
+        training_commit="b" * 40,
+        external_metrics=metrics,
+        representation_external_metrics={
+            "view1": metrics,
+            "view2": metrics,
+            "fused": metrics,
+        },
+        training_steps_completed=30,
+        protocol=protocol,
+        run_id="aligned-test-run",
+        config_hash="c" * 64,
+        refinement_batch_size=4,
+    )
+
+    with artifact_path.open("rb") as file:
+        artifact = pickle.load(file)
+    pipeline_data._validate_mvdec_protocol_contract(artifact)
+
+
+def test_aligned_balanced_loss_scaling_and_combination(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 4)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+
+    reconstruction, kmeans, scatter = mvdec.scale_joint_loss_terms(
+        mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
+        20.0,
+        6.0,
+        8.0,
+    )
+    total = mvdec.combine_joint_losses(
+        mvdec.ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
+        reconstruction,
+        kmeans,
+        scatter,
+        2.0,
+        0.5,
+    )
+
+    assert reconstruction == 5.0
+    assert kmeans == 3.0
+    assert scatter == 4.0
+    assert total == 10.5
+
+    legacy_terms = mvdec.scale_joint_loss_terms(
+        mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL,
+        20.0,
+        6.0,
+        8.0,
+    )
+    assert legacy_terms == (20.0, 6.0, 8.0)
+
+
+def test_cross_view_alignment_is_directional_and_reaches_both_views(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    tf = pytest.importorskip("tensorflow")
+    view1 = tf.Variable([[1.0, 0.0], [0.0, 2.0]])
+    identical_direction = tf.constant([[3.0, 0.0], [0.0, 4.0]])
+    opposite = tf.constant([[-1.0, 0.0], [0.0, -2.0]])
+    misaligned = tf.Variable([[0.0, 1.0], [1.0, 0.0]])
+
+    np.testing.assert_allclose(
+        mvdec.cross_view_alignment_loss(view1, identical_direction).numpy(),
+        0.0,
+        atol=1e-7,
+    )
+    assert mvdec.cross_view_alignment_loss(view1, opposite).numpy() == (
+        pytest.approx(4.0)
+    )
+    with tf.GradientTape() as tape:
+        loss = mvdec.cross_view_alignment_loss(view1, misaligned)
+    gradients = tape.gradient(loss, [view1, misaligned])
+
+    assert all(gradient is not None for gradient in gradients)
+    assert all(np.any(np.abs(gradient.numpy()) > 0) for gradient in gradients)
+
+
 def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
 
@@ -1010,6 +1193,7 @@ def test_direct_joint_head_l2norm_protocol_changes_only_fusion(monkeypatch):
     )
     assert protocol.manifest_contract(0.001)["architecture"] == {
         "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+        "view_input_contract": mvdec.VIEW_INPUT_CONTRACT,
         "fusion": mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     }
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
@@ -1225,9 +1409,11 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     artifact_path = tmp_path / "reuters.pkl"
     data_path = tmp_path / "reuters.csv"
     pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    provenance = _public_provenance("c" * 64)
     run_config = {
         "dataset": "REUTERS",
         "protocol_contract": mvdec.PRIMARY_MVDEC_PROTOCOL.manifest_contract(0.001),
+        **provenance,
     }
     config_hash = canonical_config_hash(run_config)
     run_id = build_run_id(
@@ -1258,6 +1444,8 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
         preprocessing_metadata=None,
         true_labels=truth,
         source_sha256="c" * 64,
+        source_id=provenance["source_id"],
+        training_commit=provenance["training_commit"],
         external_metrics=metrics,
         run_id=run_id,
         config_hash=config_hash,
@@ -1272,6 +1460,7 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "protocol_id": mvdec.PRIMARY_PROTOCOL_ID,
             "config_hash": config_hash,
             "config": run_config,
+            **provenance,
             "seed": 42,
             "paths": {"artifact": str(artifact_path)},
             "output_sha256": {"artifact": file_sha256(artifact_path)},
@@ -1529,9 +1718,11 @@ def test_public_reproduction_artifact_persists_view_metrics(
     artifact_path = tmp_path / "reuters_reproduction.pkl"
     data_path = tmp_path / "reuters.csv"
     pd.DataFrame({"feature": range(4)}).to_csv(data_path, index=False)
+    provenance = _public_provenance("e" * 64)
     run_config = {
         "dataset": "REUTERS",
         "protocol_contract": protocol.manifest_contract(0.001),
+        **provenance,
     }
     config_hash = canonical_config_hash(run_config)
     run_id = build_run_id(
@@ -1567,6 +1758,8 @@ def test_public_reproduction_artifact_persists_view_metrics(
         preprocessing_metadata=None,
         true_labels=truth,
         source_sha256="e" * 64,
+        source_id=provenance["source_id"],
+        training_commit=provenance["training_commit"],
         external_metrics=metrics,
         representation_external_metrics=representation_metrics,
         training_steps_completed=30,
@@ -1582,6 +1775,7 @@ def test_public_reproduction_artifact_persists_view_metrics(
         "protocol_id": protocol_id,
         "config_hash": config_hash,
         "config": run_config,
+        **provenance,
         "seed": 42,
         "paths": {"artifact": str(artifact_path)},
         "output_sha256": {"artifact": file_sha256(artifact_path)},

@@ -14,6 +14,7 @@ from sklearn.metrics import silhouette_score
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
 from pipeline.mvdec_contract import (
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     FUSION_ENCODER_AVERAGE,
@@ -55,10 +56,12 @@ PUBLIC_DIRECT_JOINT_HEAD_L2NORM_METHOD = (
     "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
 )
 LITERAL_EQUATION11_OBJECTIVE = "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4"
+ALIGNED_BALANCED_OBJECTIVE = "mvdec_aligned_balanced_l1_plus_l2_plus_l4_plus_l5"
 LITERAL_EQUATION11_METHOD = "MvDEC-2025-Eq11-literal"
 EQUATION11_AMBIGUITY_METHOD = "MvDEC-2025-Eq11-ambiguity-experiment"
 PAPER_RESOLVED_METHOD = "MvDEC-2025-paper-resolved-full-batch"
 PAPER_INFORMED_METHOD = "MvDEC-2025-paper-informed-full-batch"
+ALIGNED_BALANCED_METHOD = "MvDEC-2025-aligned-balanced-full-batch"
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -71,6 +74,9 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
         protocol_id: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
         for protocol_id in EQUATION11_PROTOCOL_IDS
     },
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: (
+        VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    ),
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
@@ -87,6 +93,7 @@ PUBLIC_PROTOCOL_METHODS = {
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_METHOD,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_METHOD,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_METHOD,
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_METHOD,
 }
 PUBLIC_PROTOCOL_FUSIONS = {
     protocol_id: FUSION_ENCODER_AVERAGE for protocol_id in PUBLIC_PROTOCOL_ARCHITECTURES
@@ -355,7 +362,10 @@ def _validate_public_protocol_contract(
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
     is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
-    if is_equation11:
+    is_aligned_balanced = protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID
+    if is_aligned_balanced:
+        expected_objective = ALIGNED_BALANCED_OBJECTIVE
+    elif is_equation11:
         expected_objective = LITERAL_EQUATION11_OBJECTIVE
     elif is_dekm_consistent:
         expected_objective = PRIMARY_MVDEC_OBJECTIVE
@@ -363,7 +373,7 @@ def _validate_public_protocol_contract(
         expected_objective = PUBLIC_REPRODUCTION_OBJECTIVE
     expected_l4_reduction = (
         "sum_squared_dimensions_then_mean_batch"
-        if is_dekm_consistent or is_equation11
+        if is_dekm_consistent or is_equation11 or is_aligned_balanced
         else "mean_squared_dimensions_per_sample_sum_batch_gradient"
     )
     expected_pretrain_reduction = (
@@ -374,7 +384,7 @@ def _validate_public_protocol_contract(
     expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
     expected_refinement_objective = (
         "joint_reconstruction_plus_greedy"
-        if is_dekm_consistent or is_equation11
+        if is_dekm_consistent or is_equation11 or is_aligned_balanced
         else "release_reconstruction_plus_greedy_mse"
     )
     expected_batching_policy = (
@@ -385,7 +395,30 @@ def _validate_public_protocol_contract(
     expected_kmeans_n_init_policy = (
         "fixed_100" if is_dekm_consistent else "initial_100_then_twice_previous_n_iter"
     )
-    if is_equation11:
+    if is_aligned_balanced:
+        expected_loss_terms = {
+            "L1_reconstruction": {"weight": 1.0, "optimized": True},
+            "L2_kmeans": {"weight": 1.0, "optimized": True},
+            "L3_scatter_trace": {
+                "weight": 0.0,
+                "optimized": False,
+                "mathematically_equivalent_to_L2": True,
+            },
+            "L4_greedy": {
+                "weight": 1.0,
+                "optimized": True,
+                "reduction": "sum_squared_dimensions_then_mean_batch",
+            },
+            "L5_cross_view_alignment": {
+                "weight": 1.0,
+                "optimized": True,
+                "definition": (
+                    "mean_batch(||L2_normalize(h_view1) - "
+                    "L2_normalize(h_view2)||^2)"
+                ),
+            },
+        }
+    elif is_equation11:
         expected_loss_terms = {
             "L1_reconstruction": {
                 "weight": 1.0,
@@ -437,15 +470,25 @@ def _validate_public_protocol_contract(
             },
         }
     expected_eigen_direction = (
-        EQUATION11_PROTOCOL_SETTINGS[protocol_id][0] if is_equation11 else "largest"
+        "smallest"
+        if is_aligned_balanced
+        else EQUATION11_PROTOCOL_SETTINGS[protocol_id][0]
+        if is_equation11
+        else "largest"
     )
     expected_target_mode = (
-        EQUATION11_PROTOCOL_SETTINGS[protocol_id][1]
+        "selected_dimension_only"
+        if is_aligned_balanced
+        else EQUATION11_PROTOCOL_SETTINGS[protocol_id][1]
         if is_equation11
         else "frozen_snapshot"
     )
     expected_batch_policy = (
-        EQUATION11_PROTOCOL_SETTINGS[protocol_id][2] if is_equation11 else "fixed_256"
+        "full_dataset"
+        if is_aligned_balanced
+        else EQUATION11_PROTOCOL_SETTINGS[protocol_id][2]
+        if is_equation11
+        else "fixed_256"
     )
     expected_batch_size = (
         "full_dataset" if expected_batch_policy == "full_dataset" else 256
@@ -493,13 +536,16 @@ def _validate_public_protocol_contract(
             "view1_semantics": "jointly_trained_view1_not_dekm_f",
         },
     }
-    if is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID:
+    if (
+        is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
+    ) or is_aligned_balanced:
         expected_schedule["refinement"]["batch_size_policy"] = expected_batch_policy
     expected_loss_weights = {
         "reconstruction": 1.0,
-        "kmeans": 1.0 if is_equation11 else 0.0,
+        "kmeans": 1.0 if is_equation11 or is_aligned_balanced else 0.0,
         "scatter_trace_diagnostic": 1.0 if is_equation11 else 0.0,
         "greedy": 1.0,
+        **({"cross_view_alignment": 1.0} if is_aligned_balanced else {}),
     }
     training_steps_completed = int(best_result.get("training_steps_completed", -1))
     batches_per_epoch = int(best_result.get("batches_per_epoch", 0))
@@ -523,6 +569,17 @@ def _validate_public_protocol_contract(
             best_result.get("method_name") != expected_method,
             objective.get("name") != expected_objective,
             objective.get("loss_terms") != expected_loss_terms,
+            (
+                objective.get("loss_scale_policy")
+                != "mean_squared_dimensions"
+                if is_aligned_balanced
+                else "loss_scale_policy" in objective
+            ),
+            (
+                config.get("loss_scale_policy") != "mean_squared_dimensions"
+                if is_aligned_balanced
+                else "loss_scale_policy" in config
+            ),
             contract.get("architecture", {}).get("view_input_contract")
             != VIEW_INPUT_CONTRACT,
             schedule.get("final_evaluation", {}).get("metric_semantics")
@@ -577,7 +634,7 @@ def _validate_public_protocol_contract(
                 or "refinement_batch_size_policy" in config
                 or "resolved_refinement_batch_size" in config
             ),
-            is_equation11
+            (is_equation11 or is_aligned_balanced)
             and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
             and (
                 best_result.get("refinement_batch_size_policy") != expected_batch_policy

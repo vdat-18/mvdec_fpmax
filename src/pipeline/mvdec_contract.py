@@ -32,6 +32,9 @@ EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID = (
 )
 PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_resolved_full_batch_v1"
 PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"
+ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID = (
+    "mvdec_2025_aligned_balanced_full_batch_v1"
+)
 
 EQUATION11_PROTOCOL_SETTINGS = {
     LITERAL_EQUATION11_PROTOCOL_ID: ("largest", "frozen_snapshot", "fixed_256"),

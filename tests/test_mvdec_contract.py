@@ -4,6 +4,7 @@ import pytest
 
 from pipeline import data
 from pipeline.mvdec_contract import (
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -37,6 +38,14 @@ def test_paper_informed_v2_preserves_historical_setting_without_overclaiming() -
         EQUATION11_PROTOCOL_SETTINGS[PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID]
         == (EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID])
     )
+
+
+def test_aligned_balanced_protocol_has_public_loader_contract() -> None:
+    assert data.PUBLIC_PROTOCOL_ARCHITECTURES[
+        ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID
+    ] == VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    assert ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID in data.PUBLIC_PROTOCOL_METHODS
+    assert ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID in data.PUBLIC_PROTOCOL_FUSIONS
 
 
 def test_balanced_batch_count_matches_training_contract() -> None:

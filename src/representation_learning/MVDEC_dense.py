@@ -19,6 +19,7 @@ from utils import log_csv
 from config import DEKM_DATASET_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
 from pipeline.mvdec_contract import (
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_PROTOCOL_ID,
@@ -103,6 +104,7 @@ PUBLIC_REPRODUCTION_PROTOCOL_IDS = frozenset(
         PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID,
         PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID,
+        ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
         *EQUATION11_PROTOCOL_IDS,
     }
 )
@@ -126,6 +128,7 @@ PROTOCOL_IDS = (
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     CUSTOM_PROTOCOL_ID,
 )
 EIGENVALUE_ORDER = "ascending"
@@ -143,6 +146,8 @@ RELEASE_KMEANS_REFRESH_POLICY = "fixed_10_updates"
 RELEASE_REFINEMENT_BATCHING_POLICY = "sequential_release_order"
 FIXED_256_BATCH_POLICY = "fixed_256"
 FULL_DATASET_BATCH_POLICY = "full_dataset"
+LEGACY_SUM_DIMENSIONS_POLICY = "sum_squared_dimensions"
+MEAN_PER_DIMENSION_POLICY = "mean_squared_dimensions"
 JOINT_REFINEMENT_OBJECTIVE = "joint_reconstruction_plus_greedy"
 RELEASE_REFINEMENT_OBJECTIVE = "release_reconstruction_plus_greedy_mse"
 SUM_SQUARED_PRETRAIN_REDUCTION = "sum_squared_dimensions_per_sample"
@@ -204,6 +209,8 @@ class MvdecProtocol:
     pretrain_shuffle_buffer: int | None
     input_normalization: str = RELEASE_L2_NORMALIZATION
     decision_provenance: tuple[tuple[str, str, str], ...] = ()
+    alignment_weight: float = 0.0
+    loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
 
     def manifest_contract(self, tolerance: float) -> dict[str, object]:
         """Return the explicit paper and optimization contract for artifacts."""
@@ -272,6 +279,19 @@ class MvdecProtocol:
                 ),
             },
         }
+        if (
+            self.alignment_weight > 0
+            or self.loss_scale_policy != LEGACY_SUM_DIMENSIONS_POLICY
+        ):
+            contract['objective']['loss_terms']['L5_cross_view_alignment'] = {
+                'weight': self.alignment_weight,
+                'optimized': self.alignment_weight > 0,
+                'definition': (
+                    'mean_batch(||L2_normalize(h_view1) - '
+                    'L2_normalize(h_view2)||^2)'
+                ),
+            }
+            contract['objective']['loss_scale_policy'] = self.loss_scale_policy
         if self.protocol_id in EQUATION11_PROTOCOL_IDS:
             literal_metadata = {
                 'L1_reconstruction': {
@@ -341,9 +361,10 @@ class MvdecProtocol:
                     "view1_semantics": "jointly_trained_view1_not_dekm_f",
                 },
             }
-            if self.protocol_id in EQUATION11_PROTOCOL_IDS - {
-                LITERAL_EQUATION11_PROTOCOL_ID
-            }:
+            if (
+                self.protocol_id in EQUATION11_PROTOCOL_IDS
+                and self.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
+            ) or self.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
                 contract["schedule"]["refinement"]["batch_size_policy"] = (
                     self.refinement_batch_size_policy
                 )
@@ -704,6 +725,23 @@ PAPER_INFORMED_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+ALIGNED_BALANCED_FULL_BATCH_PROTOCOL = replace(
+    PAPER_INFORMED_FULL_BATCH_PROTOCOL,
+    protocol_id=ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Corrected MvDEC diagnostic with explicit cross-view latent alignment '
+        'and dimension-balanced losses; not an exact paper reproduction'
+    ),
+    refinement_source=(
+        'MvDEC 2025 paper-informed full-batch refinement corrected after the '
+        'seed-42 fusion-collapse audit'
+    ),
+    scatter_trace_weight=0.0,
+    alignment_weight=1.0,
+    loss_scale_policy=MEAN_PER_DIMENSION_POLICY,
+)
+
+
 PUBLIC_PROTOCOLS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_PROTOCOL,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: PUBLIC_REPRODUCTION_PROTOCOL,
@@ -733,6 +771,7 @@ PUBLIC_PROTOCOLS = {
     ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_FULL_BATCH_PROTOCOL,
+    ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
 }
 
 
@@ -830,6 +869,8 @@ def final_training_objective(protocol: MvdecProtocol) -> str:
         return "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
+    if protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+        return 'mvdec_aligned_balanced_l1_plus_l2_plus_l4_plus_l5'
     if protocol.protocol_id in PUBLIC_REPRODUCTION_PROTOCOL_IDS:
         return (
             "mvdec_2025_public_reproduction_release_"
@@ -904,6 +945,7 @@ def resolve_mvdec_protocol(
         kmeans_refresh_policy=KMEANS_REFRESH_POLICY,
         kmeans_refresh_interval=None,
         refinement_batching_policy=REFINEMENT_BATCHING_POLICY,
+        refinement_batch_size_policy=FIXED_256_BATCH_POLICY,
         max_training_steps=None,
         kmeans_n_init_policy=FIXED_KMEANS_N_INIT_POLICY,
         pretrain_loss_reduction=SUM_SQUARED_PRETRAIN_REDUCTION,
@@ -1011,6 +1053,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-paper-resolved-full-batch'
     if protocol.protocol_id == PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-paper-informed-full-batch'
+    if protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-aligned-balanced-full-batch'
     if protocol.protocol_id in EQUATION11_PROTOCOL_IDS:
         return 'MvDEC-2025-Eq11-ambiguity-experiment'
     if protocol.protocol_id in PUBLIC_PROTOCOL_IDS:
@@ -1076,12 +1120,13 @@ def resolved_run_config(
                 "kmeans_n_init_policy": protocol.kmeans_n_init_policy,
             }
         )
-    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS - {
-        LITERAL_EQUATION11_PROTOCOL_ID
-    }:
+    if (
+        protocol.protocol_id in EQUATION11_PROTOCOL_IDS
+        and protocol.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
+    ) or protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
         if resolved_refinement_batch_size is None:
             raise ValueError(
-                'Named Eq. 11 ambiguity protocols require a resolved batch size.'
+                'Named batch-policy protocols require a resolved batch size.'
             )
         config.update(
             {
@@ -1133,6 +1178,37 @@ def fused_latent_embedding(
             l2_normalize_latent(h_view1) + l2_normalize_latent(h_view2)
         ) / 2
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
+
+
+def cross_view_alignment_loss(view1_latent, view2_latent):
+    """Penalize directional disagreement between paired view latents."""
+
+    normalized_view1 = l2_normalize_latent(view1_latent)
+    normalized_view2 = l2_normalize_latent(view2_latent)
+    return tf.reduce_mean(
+        squared_euclidean_per_sample(normalized_view1, normalized_view2)
+    )
+
+
+def scale_joint_loss_terms(
+    protocol: MvdecProtocol,
+    reconstruction_loss,
+    kmeans_loss,
+    scatter_trace_loss,
+):
+    """Apply the immutable dimensional scaling policy to joint losses."""
+
+    if protocol.loss_scale_policy == LEGACY_SUM_DIMENSIONS_POLICY:
+        return reconstruction_loss, kmeans_loss, scatter_trace_loss
+    if protocol.loss_scale_policy == MEAN_PER_DIMENSION_POLICY:
+        return (
+            reconstruction_loss / float(input_shape),
+            kmeans_loss / float(hidden_units),
+            scatter_trace_loss / float(hidden_units),
+        )
+    raise ValueError(
+        f'Unsupported joint loss-scale policy: {protocol.loss_scale_policy!r}.'
+    )
 
 
 def greedy_eigen_index(direction):
@@ -1769,14 +1845,25 @@ def save_airpollution_mvdec_artifact(
                 "kmeans": protocol.kmeans_weight,
                 "scatter_trace_diagnostic": protocol.scatter_trace_weight,
                 "greedy": protocol.greedy_weight,
+                **(
+                    {"cross_view_alignment": protocol.alignment_weight}
+                    if protocol.alignment_weight > 0
+                    else {}
+                ),
             },
+            **(
+                {"loss_scale_policy": protocol.loss_scale_policy}
+                if protocol.loss_scale_policy != LEGACY_SUM_DIMENSIONS_POLICY
+                else {}
+            ),
             "fusion": fusion_expression,
             'preprocessing': preprocessing_metadata,
         },
     }
-    if protocol.protocol_id in EQUATION11_PROTOCOL_IDS - {
-        LITERAL_EQUATION11_PROTOCOL_ID
-    }:
+    if (
+        protocol.protocol_id in EQUATION11_PROTOCOL_IDS
+        and protocol.protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
+    ) or protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:
         batch_metadata = {
             'refinement_batch_size_policy': (
                 protocol.refinement_batch_size_policy
@@ -2043,6 +2130,7 @@ def combine_joint_losses(
     kmeans_loss,
     scatter_trace_loss,
     greedy_loss,
+    alignment_loss=0.0,
 ):
     """Combine MvDEC Eq. 11 terms using the immutable protocol weights."""
 
@@ -2051,6 +2139,7 @@ def combine_joint_losses(
         + protocol.kmeans_weight * kmeans_loss
         + protocol.scatter_trace_weight * scatter_trace_loss
         + protocol.greedy_weight * greedy_loss
+        + protocol.alignment_weight * alignment_loss
     )
 
 
@@ -2414,6 +2503,7 @@ def train(
     kmeans_loss_value = 0
     orthonormal_loss_value = 0
     greedy_loss_value = 0
+    alignment_loss_value = 0
     greedy_selected_loss_value = 0
     greedy_nonselected_loss_value = 0
     silhouette = np.nan
@@ -2663,6 +2753,24 @@ def train(
                         orthonormal_residual,
                     )
                 )
+                (
+                    reconstruction_loss_value,
+                    kmeans_loss_value,
+                    orthonormal_loss_value,
+                ) = scale_joint_loss_terms(
+                    protocol,
+                    reconstruction_loss_value,
+                    kmeans_loss_value,
+                    orthonormal_loss_value,
+                )
+                alignment_loss_value = (
+                    cross_view_alignment_loss(
+                        latent_embedding(y_pred1),
+                        latent_embedding(y_pred2),
+                    )
+                    if protocol.alignment_weight > 0
+                    else tf.constant(0.0)
+                )
                 if greedy_target_mode == "selected_dimension_only":
                     greedy_selected_loss_value = selected_direction_greedy_loss(
                         y_pred_cluster,
@@ -2690,8 +2798,10 @@ def train(
                     kmeans_loss_value,
                     orthonormal_loss_value,
                     greedy_loss_value,
+                    alignment_loss_value,
                 )
             elif protocol.refinement_objective == RELEASE_REFINEMENT_OBJECTIVE:
+                alignment_loss_value = tf.constant(0.0)
                 kmeans_loss_value = tf.constant(0.0)
                 orthonormal_loss_value = tf.constant(0.0)
                 (
@@ -2731,6 +2841,11 @@ def train(
                 'kmeans': _loss_scalar(kmeans_loss_value),
                 'orthonormal': _loss_scalar(orthonormal_loss_value),
                 'greedy': _loss_scalar(greedy_loss_value),
+                **(
+                    {'alignment': _loss_scalar(alignment_loss_value)}
+                    if protocol.alignment_weight > 0
+                    else {}
+                ),
                 'greedy_selected': _loss_scalar(greedy_selected_loss_value),
                 'greedy_nonselected': _loss_scalar(
                     greedy_nonselected_loss_value
@@ -2770,6 +2885,11 @@ def train(
                 )
                 metric_scope = "full_dataset_after_release_update_window"
                 loss_scope = "release_update_window_mean"
+            alignment_loss_log = (
+                f'L5_alignment:{last_epoch_loss_means["alignment"]:.5f}, '
+                if protocol.alignment_weight > 0
+                else ''
+            )
             _log_training_phase(
                 phase=phase_name,
                 space="H_fused_latent_same_labels",
@@ -2782,6 +2902,7 @@ def train(
                     f'L3_trace_logged:'
                     f'{last_epoch_loss_means["orthonormal"]:.5f}, '
                     f'L4_greedy:{greedy_total_scalar:.5f}, '
+                    f'{alignment_loss_log}'
                     f'L4_selected_direction:'
                     f'{greedy_selected_scalar:.5f}, '
                     f'L4_nonselected_snapshot_anchor:'
