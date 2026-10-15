@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import pickle
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +46,7 @@ from pipeline.mvdec_runs import (
     load_run_manifest,
     resolve_manifest_output_path,
 )
+from pipeline.public_artifacts import load_public_artifact
 
 PRIMARY_MVDEC_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
 PRIMARY_MVDEC_OBJECTIVE = "mvdec_dekm_consistent_l1_reconstruction_plus_l4_greedy"
@@ -1076,8 +1076,10 @@ def _load_validated_mvdec_artifact(
 ) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
     """Load one artifact and validate its persisted contract without diagnostics."""
 
-    with result_path.open("rb") as file:
-        best_result = pickle.load(file)
+    best_result = load_public_artifact(result_path)
+    if not isinstance(best_result, dict):
+        msg = f"MvDEC artifact must contain a dictionary: {result_path}."
+        raise ValueError(msg)
 
     h_fused = np.asarray(best_result["h_fused"])
     if h_fused.ndim != 2:

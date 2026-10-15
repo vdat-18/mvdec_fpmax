@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import pickle
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -30,7 +29,7 @@ from pipeline.mvdec_runs import (
     validate_manifest_identity,
     validate_manifest_outputs,
 )
-from pipeline.public_artifacts import write_public_frame
+from pipeline.public_artifacts import load_public_artifact, write_public_frame
 
 
 @dataclass(frozen=True)
@@ -224,10 +223,9 @@ def audit_artifact(
     artifact_path: Path,
     output_dir: Path,
 ) -> tuple[pd.DataFrame, AlignmentDiagnostics]:
-    """Audit one trusted local artifact and export independent assignments."""
+    """Audit one restricted artifact and export independent assignments."""
 
-    with artifact_path.open("rb") as file:
-        artifact = pickle.load(file)  # noqa: S301 - trusted local CLI input.
+    artifact = load_public_artifact(artifact_path)
     if not isinstance(artifact, dict):
         raise ValueError(f"MvDEC artifact is not a mapping: {artifact_path}")
     view1, view2, fused = _validated_latents(artifact)
@@ -354,11 +352,12 @@ def main() -> None:
     parser.add_argument(
         "--trust-pickle-artifacts",
         action="store_true",
-        help="Required acknowledgement because pickle files can execute code.",
+        help=(
+            "Deprecated compatibility flag; artifacts are always loaded with a "
+            "restricted NumPy-only unpickler."
+        ),
     )
     args = parser.parse_args()
-    if not args.trust_pickle_artifacts:
-        raise ValueError("Pass --trust-pickle-artifacts for trusted local outputs.")
     print(
         audit_root(
             args.root,

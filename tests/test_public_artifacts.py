@@ -1,17 +1,29 @@
 """Tests for canonical public benchmark artifacts."""
 
+import os
 import pickle
 
 import numpy as np
+import pytest
 
 from pipeline.external_metrics import compute_external_metrics
 from pipeline.public_artifacts import (
     build_public_artifact,
+    load_public_artifact,
     public_assignment_frame,
     restore_original_order,
     write_public_artifact,
     write_public_assignments,
 )
+
+
+class _ExecutablePayload:
+    def __init__(self, marker_path) -> None:
+        self.marker_path = marker_path
+
+    def __reduce__(self):
+        command = f'echo pickle-executed > "{self.marker_path}"'
+        return os.system, (command,)
 
 
 def test_public_artifact_and_assignments_use_canonical_row_order(tmp_path) -> None:
@@ -55,3 +67,38 @@ def test_public_artifact_and_assignments_use_canonical_row_order(tmp_path) -> No
     assert assignments_path.read_text(encoding="utf-8").splitlines()[0] == (
         "dataset,method,sample_index,random_seed,cluster,true_label"
     )
+
+
+def test_restricted_public_artifact_loader_accepts_numpy_payload(tmp_path) -> None:
+    artifact_path = tmp_path / "artifact.pkl"
+    expected = {
+        "array": np.array([[1.0, 2.0]], dtype=np.float32),
+        "scalar": np.float32(3.0),
+    }
+    artifact_path.write_bytes(pickle.dumps(expected))
+
+    loaded = load_public_artifact(artifact_path)
+
+    np.testing.assert_array_equal(loaded["array"], expected["array"])
+    assert loaded["scalar"] == expected["scalar"]
+
+
+def test_restricted_public_artifact_loader_rejects_executable_global(
+    tmp_path,
+) -> None:
+    artifact_path = tmp_path / "malicious.pkl"
+    marker_path = tmp_path / "executed.txt"
+    artifact_path.write_bytes(pickle.dumps(_ExecutablePayload(marker_path)))
+
+    with pytest.raises(pickle.UnpicklingError, match="forbidden"):
+        load_public_artifact(artifact_path)
+
+    assert not marker_path.exists()
+
+
+def test_restricted_public_artifact_loader_rejects_trailing_bytes(tmp_path) -> None:
+    artifact_path = tmp_path / "trailing.pkl"
+    artifact_path.write_bytes(pickle.dumps({"value": 1}) + b"unbound payload")
+
+    with pytest.raises(pickle.UnpicklingError, match="trailing bytes"):
+        load_public_artifact(artifact_path)

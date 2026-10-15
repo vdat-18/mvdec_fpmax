@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import pickle
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from pipeline.clustering import (
 from pipeline.data import file_sha256
 from pipeline.experiments import serialize_cluster_assignments
 from pipeline.io import replace_with_retry
+from pipeline.public_artifacts import load_public_artifact
 
 NATIVE_NUMERIC_GOWER_CONTRACT = "native_numeric_gower_v1"
 CSV_LABEL_COLUMNS = ("cluster", "label", "kmeans_label")
@@ -134,10 +134,9 @@ def _load_pickle_source(
     representation_key: str,
     n_clusters: int,
 ) -> NativeRun:
-    """Load a trusted local representation artifact."""
+    """Load a restricted representation artifact."""
 
-    with source_path.open("rb") as file:
-        artifact = pickle.load(file)
+    artifact = load_public_artifact(source_path)
     if not isinstance(artifact, dict):
         msg = f"Native artifact must contain a dictionary: {source_path}."
         raise ValueError(msg)
