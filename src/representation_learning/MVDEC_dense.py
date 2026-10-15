@@ -193,6 +193,24 @@ UNLABELED_DATASETS = {
 }
 
 
+def validate_loss_weights(**loss_weights) -> None:
+    """Reject loss weights that cannot define a finite minimization objective."""
+
+    invalid_weights = [
+        name
+        for name, value in loss_weights.items()
+        if isinstance(value, (bool, np.bool_))
+        or not isinstance(value, (int, float, np.integer, np.floating))
+        or not np.isfinite(value)
+        or value < 0
+    ]
+    if invalid_weights:
+        raise ValueError(
+            'MvDEC loss weights must be finite, numeric, non-negative, and '
+            f'not booleans: {", ".join(invalid_weights)}.'
+        )
+
+
 @dataclass(frozen=True)
 class MvdecProtocol:
     """Resolved immutable identity for one MvDEC training configuration."""
@@ -227,6 +245,21 @@ class MvdecProtocol:
     loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
 
     def __post_init__(self) -> None:
+        validate_loss_weights(
+            reconstruction_weight=self.reconstruction_weight,
+            kmeans_weight=self.kmeans_weight,
+            scatter_trace_weight=self.scatter_trace_weight,
+            greedy_weight=self.greedy_weight,
+            alignment_weight=self.alignment_weight,
+        )
+        valid_loss_scale_policies = {
+            LEGACY_SUM_DIMENSIONS_POLICY,
+            MEAN_PER_DIMENSION_POLICY,
+        }
+        if self.loss_scale_policy not in valid_loss_scale_policies:
+            raise ValueError(
+                f'Unsupported joint loss-scale policy: {self.loss_scale_policy!r}.'
+            )
         valid_alignment_modes = {
             ALIGNMENT_UNCENTERED_ROW_L2,
             ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
@@ -1041,8 +1074,10 @@ def resolve_mvdec_protocol(
 
     if protocol_id not in PROTOCOL_IDS:
         raise ValueError(f'Unsupported MvDEC protocol: {protocol_id!r}.')
-    if kmeans_weight < 0 or greedy_weight < 0:
-        raise ValueError('MvDEC loss weights must be non-negative.')
+    validate_loss_weights(
+        kmeans_weight=kmeans_weight,
+        greedy_weight=greedy_weight,
+    )
     greedy_eigen_index(eigen_direction)
     validate_greedy_target_mode(target_mode)
     if protocol_id in PUBLIC_PROTOCOL_IDS:

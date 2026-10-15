@@ -1,5 +1,6 @@
 import importlib
 import pickle
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -188,9 +189,7 @@ def test_dataset_registry_scales_only_airpollution(monkeypatch):
         run_config["deterministic_runtime_policy"] == mvdec.DETERMINISTIC_RUNTIME_POLICY
     )
     assert run_config["kmeans_refresh_policy"] == "one_epoch"
-    assert run_config["refinement_batching_policy"] == (
-        "balanced_shuffled_each_epoch"
-    )
+    assert run_config["refinement_batching_policy"] == ("balanced_shuffled_each_epoch")
     assert "update_interval" not in run_config
     assert "max_training_steps" not in run_config
     assert "kmeans_n_init_policy" not in run_config
@@ -505,6 +504,29 @@ def test_primary_protocol_is_explicit_and_immutable(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("invalid_weight", [np.nan, np.inf, -np.inf, -0.1, True])
+def test_custom_protocol_rejects_invalid_loss_weights(monkeypatch, invalid_weight):
+    mvdec = _load_mvdec(monkeypatch)
+
+    with pytest.raises(ValueError, match="loss weights must be finite"):
+        mvdec.resolve_mvdec_protocol(
+            mvdec.CUSTOM_PROTOCOL_ID,
+            kmeans_weight=invalid_weight,
+            greedy_weight=1.0,
+            eigen_direction="largest",
+            target_mode="frozen_snapshot",
+        )
+
+
+def test_protocol_rejects_invalid_alignment_weight_and_scale_policy(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+
+    with pytest.raises(ValueError, match="alignment_weight"):
+        replace(mvdec.PRIMARY_MVDEC_PROTOCOL, alignment_weight=np.nan)
+    with pytest.raises(ValueError, match="loss-scale policy"):
+        replace(mvdec.PRIMARY_MVDEC_PROTOCOL, loss_scale_policy="unknown")
+
+
 def test_refinement_progress_uses_refresh_windows_for_public_protocols(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     public_protocol = mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL
@@ -527,22 +549,27 @@ def test_refinement_progress_uses_refresh_windows_for_public_protocols(monkeypat
         max_refinement_epochs=1400,
     )
 
-    assert mvdec.refinement_progress_unit(public_protocol) == (
-        "kmeans_refresh_windows"
+    assert mvdec.refinement_progress_unit(public_protocol) == ("kmeans_refresh_windows")
+    assert (
+        mvdec.completed_refinement_progress(public_protocol, 1540, public_schedule)
+        == 154
     )
-    assert mvdec.completed_refinement_progress(
-        public_protocol, 1540, public_schedule
-    ) == 154
     assert fixed_batch_public_schedule.batches_per_epoch == 40
-    assert mvdec.completed_refinement_progress(
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL, 1540, fixed_batch_public_schedule
-    ) == 154
+    assert (
+        mvdec.completed_refinement_progress(
+            mvdec.PUBLIC_REPRODUCTION_PROTOCOL, 1540, fixed_batch_public_schedule
+        )
+        == 154
+    )
     assert mvdec.refinement_progress_unit(mvdec.PRIMARY_MVDEC_PROTOCOL) == (
         "dataset_epochs"
     )
-    assert mvdec.completed_refinement_progress(
-        mvdec.PRIMARY_MVDEC_PROTOCOL, 78, private_schedule
-    ) == 2
+    assert (
+        mvdec.completed_refinement_progress(
+            mvdec.PRIMARY_MVDEC_PROTOCOL, 78, private_schedule
+        )
+        == 2
+    )
     with pytest.raises(ValueError, match="non-negative"):
         mvdec.completed_refinement_progress(public_protocol, -1, public_schedule)
 
@@ -570,8 +597,7 @@ def test_public_reproduction_protocol_locks_release_schedule(monkeypatch):
     assert protocol.scatter_trace_weight == 0.0
     assert protocol.greedy_weight == 1.0
     assert mvdec.final_training_objective(protocol) == (
-        "mvdec_2025_public_reproduction_release_"
-        "l1_reconstruction_plus_l4_greedy_mse"
+        "mvdec_2025_public_reproduction_release_l1_reconstruction_plus_l4_greedy_mse"
     )
     assert schedule.batches_per_epoch == 40
     assert schedule.kmeans_refresh_interval == 10
@@ -634,8 +660,7 @@ def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
         protocol.greedy_weight,
     ] == [1.0, 1.0, 1.0, 1.0]
     assert all(
-        term["optimized"]
-        for term in contract["objective"]["loss_terms"].values()
+        term["optimized"] for term in contract["objective"]["loss_terms"].values()
     )
     assert contract["schedule"]["refinement"] == {
         "objective": "joint_reconstruction_plus_greedy",
@@ -648,12 +673,16 @@ def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
     }
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
-    assert contract["decision_provenance"]["view2_direct_23_split"][
-        "classification"
-    ] == "implementation_assumption"
-    assert contract["decision_provenance"]["largest_last_eigen_direction"][
-        "classification"
-    ] == "dekm_inherited"
+    assert (
+        contract["decision_provenance"]["view2_direct_23_split"]["classification"]
+        == "implementation_assumption"
+    )
+    assert (
+        contract["decision_provenance"]["largest_last_eigen_direction"][
+            "classification"
+        ]
+        == "dekm_inherited"
+    )
 
     with pytest.raises(ValueError, match="immutable"):
         mvdec.resolve_mvdec_protocol(
@@ -667,60 +696,60 @@ def test_literal_equation11_protocol_is_explicit_and_immutable(monkeypatch):
 
 @pytest.mark.parametrize(
     (
-        'protocol_id',
-        'eigen_direction',
-        'target_mode',
-        'batch_policy',
-        'resolved_batch_size',
+        "protocol_id",
+        "eigen_direction",
+        "target_mode",
+        "batch_policy",
+        "resolved_batch_size",
     ),
     [
         (
-            'mvdec_2025_equation11_smallest_frozen_v1',
-            'smallest',
-            'frozen_snapshot',
-            'fixed_256',
+            "mvdec_2025_equation11_smallest_frozen_v1",
+            "smallest",
+            "frozen_snapshot",
+            "fixed_256",
             256,
         ),
         (
-            'mvdec_2025_equation11_largest_selected_only_v1',
-            'largest',
-            'selected_dimension_only',
-            'fixed_256',
+            "mvdec_2025_equation11_largest_selected_only_v1",
+            "largest",
+            "selected_dimension_only",
+            "fixed_256",
             256,
         ),
         (
-            'mvdec_2025_equation11_smallest_selected_only_v1',
-            'smallest',
-            'selected_dimension_only',
-            'fixed_256',
+            "mvdec_2025_equation11_smallest_selected_only_v1",
+            "smallest",
+            "selected_dimension_only",
+            "fixed_256",
             256,
         ),
         (
-            'mvdec_2025_equation11_largest_frozen_full_batch_v1',
-            'largest',
-            'frozen_snapshot',
-            'full_dataset',
+            "mvdec_2025_equation11_largest_frozen_full_batch_v1",
+            "largest",
+            "frozen_snapshot",
+            "full_dataset",
             10_000,
         ),
         (
-            'mvdec_2025_equation11_smallest_frozen_full_batch_v1',
-            'smallest',
-            'frozen_snapshot',
-            'full_dataset',
+            "mvdec_2025_equation11_smallest_frozen_full_batch_v1",
+            "smallest",
+            "frozen_snapshot",
+            "full_dataset",
             10_000,
         ),
         (
-            'mvdec_2025_equation11_largest_selected_only_full_batch_v1',
-            'largest',
-            'selected_dimension_only',
-            'full_dataset',
+            "mvdec_2025_equation11_largest_selected_only_full_batch_v1",
+            "largest",
+            "selected_dimension_only",
+            "full_dataset",
             10_000,
         ),
         (
-            'mvdec_2025_paper_resolved_full_batch_v1',
-            'smallest',
-            'selected_dimension_only',
-            'full_dataset',
+            "mvdec_2025_paper_resolved_full_batch_v1",
+            "smallest",
+            "selected_dimension_only",
+            "full_dataset",
             10_000,
         ),
     ],
@@ -758,19 +787,17 @@ def test_named_equation11_ambiguity_protocols_are_immutable(
     assert protocol.greedy_target_mode == target_mode
     assert protocol.refinement_batch_size_policy == batch_policy
     assert actual_batch_size == resolved_batch_size
-    assert schedule.batches_per_epoch == (
-        1 if batch_policy == 'full_dataset' else 40
-    )
+    assert schedule.batches_per_epoch == (1 if batch_policy == "full_dataset" else 40)
     assert mvdec.final_training_objective(protocol) == (
-        'mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4'
+        "mvdec_2025_equation11_l1_plus_l2_plus_l3_plus_l4"
     )
-    with pytest.raises(ValueError, match='immutable'):
+    with pytest.raises(ValueError, match="immutable"):
         mvdec.resolve_mvdec_protocol(
             protocol_id,
             kmeans_weight=1.0,
             greedy_weight=1.0,
             eigen_direction=(
-                'largest' if eigen_direction == 'smallest' else 'smallest'
+                "largest" if eigen_direction == "smallest" else "smallest"
             ),
             target_mode=target_mode,
         )
@@ -808,8 +835,8 @@ def test_resolved_cli_protocol_updates_omitted_runtime_fields(monkeypatch):
 
     assert args.lambda_kmeans == 1.0
     assert args.lambda_greedy == 1.0
-    assert args.greedy_eigen_direction == 'smallest'
-    assert args.greedy_target_mode == 'selected_dimension_only'
+    assert args.greedy_eigen_direction == "smallest"
+    assert args.greedy_target_mode == "selected_dimension_only"
 
 
 def test_cli_named_protocol_still_rejects_explicit_override(monkeypatch):
@@ -831,51 +858,51 @@ def test_literal_equation11_contract_hash_is_unchanged(monkeypatch):
     contract = mvdec.LITERAL_EQUATION11_PROTOCOL.manifest_contract(0.001)
 
     assert mvdec.protocol_contract_sha256(contract) == (
-        'c02f47a19748551ac362195017c77625c6902fe73e3c98c44814da43ab0c475d'
+        "c02f47a19748551ac362195017c77625c6902fe73e3c98c44814da43ab0c475d"
     )
-    assert contract['schedule']['refinement'] == {
-        'objective': 'joint_reconstruction_plus_greedy',
-        'batch_size': 256,
-        'batching_policy': 'sequential_release_order',
-        'kmeans_refresh_policy': 'fixed_10_updates',
-        'update_interval': 10,
-        'max_training_steps': 14_000,
-        'kmeans_n_init_policy': 'initial_100_then_twice_previous_n_iter',
+    assert contract["schedule"]["refinement"] == {
+        "objective": "joint_reconstruction_plus_greedy",
+        "batch_size": 256,
+        "batching_policy": "sequential_release_order",
+        "kmeans_refresh_policy": "fixed_10_updates",
+        "update_interval": 10,
+        "max_training_steps": 14_000,
+        "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
     }
 
 
 def test_literal_equation11_resolved_config_hash_covers_provenance(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
-    monkeypatch.setattr(mvdec, 'ds_name', 'REUTERS')
-    monkeypatch.setattr(mvdec, 'input_shape', 2000)
-    monkeypatch.setattr(mvdec, 'hidden_units', 10)
-    monkeypatch.setattr(mvdec, 'n_clusters', 4)
+    monkeypatch.setattr(mvdec, "ds_name", "REUTERS")
+    monkeypatch.setattr(mvdec, "input_shape", 2000)
+    monkeypatch.setattr(mvdec, "hidden_units", 10)
+    monkeypatch.setattr(mvdec, "n_clusters", 4)
 
     config = mvdec.resolved_run_config(
         protocol=mvdec.LITERAL_EQUATION11_PROTOCOL,
-        dataset_name='REUTERS',
+        dataset_name="REUTERS",
         tolerance=0.001,
         max_refinement_epochs=1400,
         source_sha256=(
-            '427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b'
+            "427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b"
         ),
-        source_id='dekm_google_drive_reuters_10k',
-        training_commit='a' * 40,
+        source_id="dekm_google_drive_reuters_10k",
+        training_commit="a" * 40,
         n_samples=10_000,
         n_features=2000,
         n_classes=4,
-        feature_columns=[f'feature_{index + 1}' for index in range(2000)],
+        feature_columns=[f"feature_{index + 1}" for index in range(2000)],
         preprocessing_metadata=None,
     )
 
-    config_with_new_commit = {**config, 'training_commit': 'b' * 40}
+    config_with_new_commit = {**config, "training_commit": "b" * 40}
     assert canonical_config_hash(config) != canonical_config_hash(
         config_with_new_commit
     )
-    assert config['source_id'] == 'dekm_google_drive_reuters_10k'
-    assert config['n_samples'] == 10_000
-    assert 'refinement_batch_size_policy' not in config
-    assert 'resolved_refinement_batch_size' not in config
+    assert config["source_id"] == "dekm_google_drive_reuters_10k"
+    assert config["n_samples"] == 10_000
+    assert "refinement_batch_size_policy" not in config
+    assert "resolved_refinement_batch_size" not in config
 
 
 def test_paper_resolved_config_records_full_batch(monkeypatch):
@@ -884,31 +911,31 @@ def test_paper_resolved_config_records_full_batch(monkeypatch):
 
     config = mvdec.resolved_run_config(
         protocol=protocol,
-        dataset_name='REUTERS',
+        dataset_name="REUTERS",
         tolerance=0.001,
         max_refinement_epochs=1400,
-        source_sha256='a' * 64,
-        source_id='dekm_google_drive_reuters_10k',
-        training_commit='b' * 40,
+        source_sha256="a" * 64,
+        source_id="dekm_google_drive_reuters_10k",
+        training_commit="b" * 40,
         n_samples=10_000,
         n_features=2000,
         n_classes=4,
-        feature_columns=['feature_1'],
+        feature_columns=["feature_1"],
         preprocessing_metadata=None,
         resolved_refinement_batch_size=10_000,
     )
 
-    assert config['refinement_batch_size_policy'] == 'full_dataset'
-    assert config['resolved_refinement_batch_size'] == 10_000
-    assert config['protocol_contract']['schedule']['refinement'] == {
-        'objective': 'joint_reconstruction_plus_greedy',
-        'batch_size': 'full_dataset',
-        'batching_policy': 'sequential_release_order',
-        'kmeans_refresh_policy': 'fixed_10_updates',
-        'update_interval': 10,
-        'max_training_steps': 14_000,
-        'kmeans_n_init_policy': 'initial_100_then_twice_previous_n_iter',
-        'batch_size_policy': 'full_dataset',
+    assert config["refinement_batch_size_policy"] == "full_dataset"
+    assert config["resolved_refinement_batch_size"] == 10_000
+    assert config["protocol_contract"]["schedule"]["refinement"] == {
+        "objective": "joint_reconstruction_plus_greedy",
+        "batch_size": "full_dataset",
+        "batching_policy": "sequential_release_order",
+        "kmeans_refresh_policy": "fixed_10_updates",
+        "update_interval": 10,
+        "max_training_steps": 14_000,
+        "kmeans_n_init_policy": "initial_100_then_twice_previous_n_iter",
+        "batch_size_policy": "full_dataset",
     }
 
 
@@ -977,23 +1004,21 @@ def test_aligned_balanced_protocol_is_explicit_full_batch_and_immutable(monkeypa
     assert protocol.scatter_trace_weight == 0.0
     assert protocol.alignment_weight == 1.0
     assert protocol.loss_scale_policy == "mean_squared_dimensions"
-    assert contract["objective"]["loss_scale_policy"] == (
-        "mean_squared_dimensions"
-    )
-    assert contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ] == {
+    assert contract["objective"]["loss_scale_policy"] == ("mean_squared_dimensions")
+    assert contract["objective"]["loss_terms"]["L5_cross_view_alignment"] == {
         "weight": 1.0,
         "optimized": True,
         "definition": (
-            "mean_batch(||L2_normalize(h_view1) - "
-            "L2_normalize(h_view2)||^2)"
+            "mean_batch(||L2_normalize(h_view1) - L2_normalize(h_view2)||^2)"
         ),
     }
-    assert "L5_cross_view_alignment" not in (
-        mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL.manifest_contract(0.001)[
-            "objective"
-        ]["loss_terms"]
+    assert (
+        "L5_cross_view_alignment"
+        not in (
+            mvdec.PAPER_INFORMED_FULL_BATCH_PROTOCOL.manifest_contract(0.001)[
+                "objective"
+            ]["loss_terms"]
+        )
     )
     assert mvdec.resolve_refinement_batch_size(protocol, 3_765, 256) == 3_765
 
@@ -1019,9 +1044,10 @@ def test_weak_alignment_protocol_changes_only_alignment_weight(monkeypatch):
     assert weak.protocol_id == (
         mvdec.ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
     )
-    assert weak_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ]["weight"] == 0.05
+    assert (
+        weak_contract["objective"]["loss_terms"]["L5_cross_view_alignment"]["weight"]
+        == 0.05
+    )
     ignored_fields = {
         "protocol_id",
         "claim_scope",
@@ -1046,14 +1072,11 @@ def test_no_alignment_protocol_changes_only_alignment_weight(monkeypatch):
     assert disabled.protocol_id == (
         mvdec.ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
     )
-    assert disabled_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ] == {
+    assert disabled_contract["objective"]["loss_terms"]["L5_cross_view_alignment"] == {
         "weight": 0.0,
         "optimized": False,
         "definition": (
-            "mean_batch(||L2_normalize(h_view1) - "
-            "L2_normalize(h_view2)||^2)"
+            "mean_batch(||L2_normalize(h_view1) - L2_normalize(h_view2)||^2)"
         ),
     }
     ignored_fields = {
@@ -1084,8 +1107,9 @@ def test_legacy_scaled_protocol_changes_only_loss_scale_policy(monkeypatch):
     assert legacy_contract["objective"]["loss_scale_policy"] == (
         "sum_squared_dimensions"
     )
-    assert legacy_contract["objective"]["loss_terms"] == (
-        weak_contract["objective"]["loss_terms"]
+    assert (
+        legacy_contract["objective"]["loss_terms"]
+        == (weak_contract["objective"]["loss_terms"])
     )
     ignored_fields = {
         "protocol_id",
@@ -1110,9 +1134,10 @@ def test_legacy_scaled_alignment_protocol_changes_only_alignment_weight(monkeypa
     assert strong.alignment_weight == 1.0
     assert strong.loss_scale_policy == "sum_squared_dimensions"
     assert strong.protocol_id == mvdec.LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
-    assert strong_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ]["weight"] == 1.0
+    assert (
+        strong_contract["objective"]["loss_terms"]["L5_cross_view_alignment"]["weight"]
+        == 1.0
+    )
     ignored_fields = {
         "protocol_id",
         "claim_scope",
@@ -1138,18 +1163,15 @@ def test_centered_alignment_protocol_changes_only_alignment_mode(monkeypatch):
     assert centered.protocol_id == (
         mvdec.LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
     )
-    assert centered_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ]["definition"] == (
+    assert centered_contract["objective"]["loss_terms"]["L5_cross_view_alignment"][
+        "definition"
+    ] == (
         "mean_batch(||L2_normalize(h_view1-mean_batch(h_view1)) - "
         "L2_normalize(h_view2-mean_batch(h_view2))||^2)"
     )
-    assert uncentered_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ]["definition"] == (
-        "mean_batch(||L2_normalize(h_view1) - "
-        "L2_normalize(h_view2)||^2)"
-    )
+    assert uncentered_contract["objective"]["loss_terms"]["L5_cross_view_alignment"][
+        "definition"
+    ] == ("mean_batch(||L2_normalize(h_view1) - L2_normalize(h_view2)||^2)")
     ignored_fields = {
         "protocol_id",
         "claim_scope",
@@ -1174,9 +1196,7 @@ def test_centered_scale_matched_protocol_changes_only_alignment_weight(monkeypat
     mvdec = _load_mvdec(monkeypatch)
 
     baseline = mvdec.LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL
-    scaled = (
-        mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
-    )
+    scaled = mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
     baseline_contract = baseline.manifest_contract(0.001)
     scaled_contract = scaled.manifest_contract(0.001)
 
@@ -1185,9 +1205,10 @@ def test_centered_scale_matched_protocol_changes_only_alignment_weight(monkeypat
     assert scaled.protocol_id == (
         mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID
     )
-    assert scaled_contract["objective"]["loss_terms"][
-        "L5_cross_view_alignment"
-    ]["weight"] == 100.0
+    assert (
+        scaled_contract["objective"]["loss_terms"]["L5_cross_view_alignment"]["weight"]
+        == 100.0
+    )
     ignored_fields = {
         "protocol_id",
         "claim_scope",
@@ -1343,9 +1364,7 @@ def test_centered_scale_matched_objective_applies_legacy_scaling_and_weight(
     mvdec = _load_mvdec(monkeypatch)
     monkeypatch.setattr(mvdec, "input_shape", 4)
     monkeypatch.setattr(mvdec, "hidden_units", 2)
-    protocol = (
-        mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
-    )
+    protocol = mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
 
     reconstruction, kmeans, scatter = mvdec.scale_joint_loss_terms(
         protocol,
@@ -1393,9 +1412,7 @@ def test_cross_view_alignment_is_directional_and_reaches_both_views(monkeypatch)
 def test_centered_alignment_detects_shared_offset_anti_alignment(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     tf = pytest.importorskip("tensorflow")
-    centered_structure = tf.constant(
-        [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]]
-    )
+    centered_structure = tf.constant([[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]])
     shared_offset = tf.constant([[1000.0, 1000.0]])
     view1 = shared_offset + centered_structure
     view2 = shared_offset - centered_structure
@@ -1459,13 +1476,16 @@ def test_public_dekm_consistent_protocol_uses_bounded_public_schedule(monkeypatc
     assert schedule.batches_per_epoch == 39
     assert schedule.kmeans_refresh_interval == 10
     assert schedule.max_training_steps == 14_000
-    assert len(
-        mvdec.epoch_batch_indices(
-            n_samples=10_000,
-            current_batch_size=256,
-            rng=np.random.default_rng(42),
+    assert (
+        len(
+            mvdec.epoch_batch_indices(
+                n_samples=10_000,
+                current_batch_size=256,
+                rng=np.random.default_rng(42),
+            )
         )
-    ) == schedule.batches_per_epoch
+        == schedule.batches_per_epoch
+    )
     assert protocol.manifest_contract(0.001)["schedule"]["pretraining"] == {
         "epochs": 200,
         "batch_size": 256,
@@ -1541,17 +1561,18 @@ def test_direct_joint_head_l2norm_protocol_changes_only_fusion(monkeypatch):
     assert protocol.view2_architecture_id == (
         mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.view2_architecture_id
     )
-    assert protocol.fusion_contract == (
-        mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE
-    )
+    assert protocol.fusion_contract == (mvdec.FUSION_ENCODER_L2_NORMALIZED_AVERAGE)
     assert mvdec.protocol_method_name(protocol) == (
         "MvDEC-2025-View2-direct-joint-head-L2norm-average-ablation"
     )
     assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
         mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL
     )
-    assert protocol.manifest_contract(0.001)["schedule"] == (
-        mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
+    assert (
+        protocol.manifest_contract(0.001)["schedule"]
+        == (
+            mvdec.PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL.manifest_contract(0.001)["schedule"]
+        )
     )
     assert protocol.manifest_contract(0.001)["architecture"] == {
         "view2": mvdec.VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
@@ -1582,11 +1603,13 @@ def test_encoder_bottleneck_protocol_changes_only_view2_architecture(monkeypatch
     assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
         mvdec.PUBLIC_REPRODUCTION_PROTOCOL
     )
-    assert protocol.manifest_contract(0.001)["schedule"] == (
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"]
+    assert (
+        protocol.manifest_contract(0.001)["schedule"]
+        == (mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"])
     )
-    assert protocol.manifest_contract(0.001)["architecture"] != (
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
+    assert (
+        protocol.manifest_contract(0.001)["architecture"]
+        != (mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"])
     )
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
@@ -1612,11 +1635,13 @@ def test_direct_joint_head_protocol_changes_only_view2_architecture(monkeypatch)
     assert mvdec.final_training_objective(protocol) == mvdec.final_training_objective(
         mvdec.PUBLIC_REPRODUCTION_PROTOCOL
     )
-    assert protocol.manifest_contract(0.001)["schedule"] == (
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"]
+    assert (
+        protocol.manifest_contract(0.001)["schedule"]
+        == (mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["schedule"])
     )
-    assert protocol.manifest_contract(0.001)["architecture"] != (
-        mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"]
+    assert (
+        protocol.manifest_contract(0.001)["architecture"]
+        != (mvdec.PUBLIC_REPRODUCTION_PROTOCOL.manifest_contract(0.001)["architecture"])
     )
     mvdec.validate_protocol_dataset_scope(protocol, "REUTERS")
 
@@ -1844,9 +1869,7 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
     assert artifact["method_name"] == "MvDEC-DEKM-consistent"
     assert artifact["claim_scope"] == mvdec.PRIMARY_MVDEC_PROTOCOL.claim_scope
     assert artifact["view2_architecture_id"] == mvdec.VIEW2_ARCHITECTURE_ID
-    assert artifact["config"]["view2_architecture_id"] == (
-        mvdec.VIEW2_ARCHITECTURE_ID
-    )
+    assert artifact["config"]["view2_architecture_id"] == (mvdec.VIEW2_ARCHITECTURE_ID)
     assert artifact["protocol_contract"]["eigen"]["direction"] == "largest"
     assert artifact["protocol_contract"]["greedy_target"]["mode"] == ("frozen_snapshot")
     assert len(artifact["protocol_contract_sha256"]) == 64
@@ -1870,9 +1893,7 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
 
     artifact["view2_architecture_id"] = mvdec.VIEW2_ARCHITECTURE_ID
     artifact["config"]["view2_architecture_id"] = mvdec.VIEW2_ARCHITECTURE_ID
-    artifact["protocol_contract"]["architecture"]["view2"] = (
-        mvdec.VIEW2_ARCHITECTURE_ID
-    )
+    artifact["protocol_contract"]["architecture"]["view2"] = mvdec.VIEW2_ARCHITECTURE_ID
     artifact["protocol_contract"]["eigen"]["direction"] = "smallest"
     with artifact_path.open("wb") as file:
         pickle.dump(artifact, file)
