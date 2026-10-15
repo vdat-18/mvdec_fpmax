@@ -202,7 +202,11 @@ def resolve_manifest_output_path(
     manifest_path = manifest.get("_manifest_path")
     if not isinstance(manifest_path, str):
         raise ValueError("MvDEC manifest-relative path requires manifest location.")
-    return Path(manifest_path).parent / path
+    run_dir = Path(manifest_path).parent.resolve()
+    resolved = (run_dir / path).resolve()
+    if not resolved.is_relative_to(run_dir):
+        raise ValueError(f"MvDEC output path escapes its run directory: {path}")
+    return resolved
 
 
 def validate_manifest_outputs(manifest: dict[str, object]) -> None:

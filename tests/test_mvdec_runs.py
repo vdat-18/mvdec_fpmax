@@ -5,8 +5,10 @@ import pytest
 
 from pipeline.mvdec_runs import (
     build_summary_frames,
+    canonical_config_hash,
     complete_run_manifests,
     file_sha256,
+    load_run_manifest,
     load_run_manifests,
     prepare_run_directory,
     resolve_run_paths,
@@ -198,6 +200,28 @@ def test_manifest_loader_rejects_tampered_config(tmp_path):
 
     with pytest.raises(ValueError, match="config hash"):
         load_run_manifests(paths.config_dir)
+
+
+def test_manifest_output_path_cannot_escape_run_directory(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    outside = tmp_path / "outside.pkl"
+    outside.write_bytes(b"artifact")
+    manifest_path = run_dir / "manifest.json"
+    write_run_manifest(
+        manifest_path,
+        {
+            "status": "complete",
+            "config": {},
+            "config_hash": canonical_config_hash({}),
+            "paths": {"artifact": "../outside.pkl"},
+            "output_sha256": {"artifact": file_sha256(outside)},
+        },
+    )
+    manifest = load_run_manifest(manifest_path)
+
+    with pytest.raises(ValueError, match="escapes its run directory"):
+        validate_manifest_outputs(manifest)
 
 
 def test_complete_manifest_output_hashes_are_verified(tmp_path):
