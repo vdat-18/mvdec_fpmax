@@ -22,9 +22,9 @@ from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
     resolve_training_commit,
+    validate_manifest_identity,
     validate_manifest_outputs,
 )
-from pipeline.public_data import TWENTY_NEWS_SKLEARN_SOURCE
 
 SUMMARY_FILENAME = "public_mvdec_matrix_runs.csv"
 AGGREGATE_SUMMARY_FILENAME = "public_mvdec_matrix_aggregate.csv"
@@ -172,23 +172,45 @@ def matching_complete_manifests(
     return manifests
 
 
-def require_single_complete_manifest(
+def auditable_complete_manifests(
     output_root: Path,
     spec: MatrixRunSpec,
-    expected_training_commit: str | None = None,
-) -> dict[str, object]:
-    """Return the unique complete manifest produced for one code revision."""
+    dataset_root: Path,
+    expected_training_commit: str,
+) -> list[dict[str, object]]:
+    """Return complete manifests that pass identity, output, and source audits."""
 
-    manifests = matching_complete_manifests(output_root, spec)
-    if expected_training_commit is not None:
-        manifests = [
-            manifest
-            for manifest in manifests
-            if manifest.get("training_commit") == expected_training_commit
-        ]
+    manifests = []
+    for manifest in matching_complete_manifests(output_root, spec):
+        if manifest.get("training_commit") != expected_training_commit:
+            continue
+        try:
+            validate_manifest_identity(manifest)
+            validate_manifest_outputs(manifest)
+            validate_public_source(manifest, dataset_root)
+        except ValueError:
+            continue
+        manifests.append(manifest)
+    return manifests
+
+
+def require_single_auditable_manifest(
+    output_root: Path,
+    spec: MatrixRunSpec,
+    dataset_root: Path,
+    expected_training_commit: str,
+) -> dict[str, object]:
+    """Return the unique complete run that passes the current audit contract."""
+
+    manifests = auditable_complete_manifests(
+        output_root,
+        spec,
+        dataset_root,
+        expected_training_commit,
+    )
     if len(manifests) != 1:
         raise ValueError(
-            "Expected exactly one complete manifest for "
+            "Expected exactly one auditable complete manifest for "
             f"{spec.dataset}/{spec.protocol_id}/seed_{spec.seed}; "
             f"found {len(manifests)}."
         )
@@ -198,56 +220,45 @@ def require_single_complete_manifest(
 def reusable_complete_manifest(
     output_root: Path,
     spec: MatrixRunSpec,
-    dataset_root: Path | None = None,
+    dataset_root: Path,
 ) -> dict[str, object] | None:
     """Return an auditable completed run, or require it to be rebuilt."""
 
     discovered = matching_complete_manifests(output_root, spec)
     current_commit = resolve_training_commit(PROJECT_DIR)
-    manifests = [
+    commit_matches = [
         manifest
         for manifest in discovered
         if manifest.get("training_commit") == current_commit
     ]
+    manifests = auditable_complete_manifests(
+        output_root,
+        spec,
+        dataset_root,
+        current_commit,
+    )
     if len(manifests) > 1:
-        require_single_complete_manifest(
-            output_root,
-            spec,
-            expected_training_commit=current_commit,
+        raise ValueError(
+            "Expected at most one reusable auditable manifest for "
+            f"{spec.dataset}/{spec.protocol_id}/seed_{spec.seed}; "
+            f"found {len(manifests)}."
         )
-    if not manifests:
-        if discovered:
-            logger.warning(
-                "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_commit",
-                spec.dataset,
-                spec.protocol_id,
-                spec.seed,
-            )
-        return None
-    manifest = manifests[0]
-    if spec.dataset == "20NEWS" and manifest.get("source_id") != (
-        TWENTY_NEWS_SKLEARN_SOURCE
-    ):
+    if manifests:
+        return manifests[0]
+    reason = (
+        "stale_commit"
+        if discovered and not commit_matches
+        else "invalid_run_audit"
+    )
+    if discovered:
         logger.warning(
-            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_source",
+            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:{}",
             spec.dataset,
             spec.protocol_id,
             spec.seed,
+            reason,
         )
-        return None
-    try:
-        validate_manifest_outputs(manifest)
-        if dataset_root is not None:
-            validate_public_source(manifest, dataset_root)
-    except ValueError:
-        logger.warning(
-            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:invalid_run_audit",
-            spec.dataset,
-            spec.protocol_id,
-            spec.seed,
-        )
-        return None
-    return manifest
+    return None
 
 
 def run_training(
@@ -566,10 +577,11 @@ def run_public_matrix(
                 stdout_path=stdout_path,
                 heartbeat_seconds=heartbeat_seconds,
             )
-            manifest = require_single_complete_manifest(
+            manifest = require_single_auditable_manifest(
                 output_root,
                 spec,
-                expected_training_commit=resolve_training_commit(PROJECT_DIR),
+                dataset_root,
+                resolve_training_commit(PROJECT_DIR),
             )
 
         validate_manifest_outputs(manifest)

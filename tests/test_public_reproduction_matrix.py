@@ -121,7 +121,7 @@ def test_reusable_complete_manifest_rejects_corrupt_outputs(
 ) -> None:
     """Resume must rebuild a run whose manifest hashes no longer validate."""
 
-    manifest = {"status": "complete"}
+    manifest = {"status": "complete", "training_commit": "a" * 40}
     monkeypatch.setattr(
         matrix,
         "matching_complete_manifests",
@@ -131,11 +131,19 @@ def test_reusable_complete_manifest_rejects_corrupt_outputs(
     def reject_outputs(_manifest: dict[str, object]) -> None:
         raise ValueError("hash mismatch")
 
+    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
     monkeypatch.setattr(matrix, "validate_manifest_outputs", reject_outputs)
+    monkeypatch.setattr(
+        matrix,
+        "validate_public_source",
+        lambda _manifest, _dataset_root: None,
+    )
+    monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "a" * 40)
 
     reusable = matrix.reusable_complete_manifest(
         tmp_path,
         matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+        tmp_path / "datasets",
     )
 
     assert reusable is None
@@ -301,6 +309,7 @@ def test_reusable_manifest_rejects_stale_training_commit(
         matrix.reusable_complete_manifest(
             tmp_path,
             matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+            tmp_path / "datasets",
         )
         is None
     )
@@ -318,35 +327,59 @@ def test_reusable_manifest_ignores_stale_duplicate(
         lambda _output_root, _spec: [stale, current],
     )
     monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "b" * 40)
+    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
     monkeypatch.setattr(matrix, "validate_manifest_outputs", lambda _manifest: None)
+    monkeypatch.setattr(
+        matrix,
+        "validate_public_source",
+        lambda _manifest, _dataset_root: None,
+    )
 
     reusable = matrix.reusable_complete_manifest(
         tmp_path,
         matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+        tmp_path / "datasets",
     )
 
     assert reusable is current
 
 
-def test_require_single_manifest_filters_stale_training_commit(
+def test_auditable_manifest_filter_ignores_invalid_same_commit(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    current = {"status": "complete", "training_commit": "b" * 40}
-    stale = {"status": "complete", "training_commit": "a" * 40}
+    valid = {"status": "complete", "training_commit": "b" * 40}
+    invalid = {
+        "status": "complete",
+        "training_commit": "b" * 40,
+        "invalid": True,
+    }
     monkeypatch.setattr(
         matrix,
         "matching_complete_manifests",
-        lambda _output_root, _spec: [stale, current],
+        lambda _output_root, _spec: [invalid, valid],
+    )
+    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
+
+    def validate_outputs(manifest):
+        if manifest.get("invalid"):
+            raise ValueError("corrupt output")
+
+    monkeypatch.setattr(matrix, "validate_manifest_outputs", validate_outputs)
+    monkeypatch.setattr(
+        matrix,
+        "validate_public_source",
+        lambda _manifest, _dataset_root: None,
     )
 
-    selected = matrix.require_single_complete_manifest(
+    selected = matrix.require_single_auditable_manifest(
         tmp_path,
         matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
-        expected_training_commit="b" * 40,
+        tmp_path / "datasets",
+        "b" * 40,
     )
 
-    assert selected is current
+    assert selected is valid
 
 
 def test_archive_path_is_bound_to_config_hash(tmp_path: Path) -> None:
