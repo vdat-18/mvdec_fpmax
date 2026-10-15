@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from pipeline.mvdec_runs import (
+    RUN_OUTPUT_NAMES,
     build_summary_frames,
     canonical_config_hash,
     complete_run_manifests,
@@ -16,6 +17,17 @@ from pipeline.mvdec_runs import (
     validate_manifest_outputs,
     write_run_manifest,
 )
+
+
+def _complete_outputs(root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    paths = {}
+    hashes = {}
+    for name in RUN_OUTPUT_NAMES:
+        path = root / f"{name}.bin"
+        path.write_bytes(name.encode())
+        paths[name] = str(path)
+        hashes[name] = file_sha256(path)
+    return paths, hashes
 
 
 def test_run_paths_isolate_seed_and_config(tmp_path):
@@ -205,8 +217,11 @@ def test_manifest_loader_rejects_tampered_config(tmp_path):
 def test_manifest_output_path_cannot_escape_run_directory(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    paths, hashes = _complete_outputs(run_dir)
     outside = tmp_path / "outside.pkl"
     outside.write_bytes(b"artifact")
+    paths["artifact"] = "../outside.pkl"
+    hashes["artifact"] = file_sha256(outside)
     manifest_path = run_dir / "manifest.json"
     write_run_manifest(
         manifest_path,
@@ -214,8 +229,33 @@ def test_manifest_output_path_cannot_escape_run_directory(tmp_path):
             "status": "complete",
             "config": {},
             "config_hash": canonical_config_hash({}),
-            "paths": {"artifact": "../outside.pkl"},
-            "output_sha256": {"artifact": file_sha256(outside)},
+            "paths": paths,
+            "output_sha256": hashes,
+        },
+    )
+    manifest = load_run_manifest(manifest_path)
+
+    with pytest.raises(ValueError, match="escapes its run directory"):
+        validate_manifest_outputs(manifest)
+
+
+def test_manifest_absolute_output_path_cannot_escape_run_directory(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    paths, hashes = _complete_outputs(run_dir)
+    outside = tmp_path / "outside.pkl"
+    outside.write_bytes(b"artifact")
+    paths["artifact"] = str(outside.resolve())
+    hashes["artifact"] = file_sha256(outside)
+    manifest_path = run_dir / "manifest.json"
+    write_run_manifest(
+        manifest_path,
+        {
+            "status": "complete",
+            "config": {},
+            "config_hash": canonical_config_hash({}),
+            "paths": paths,
+            "output_sha256": hashes,
         },
     )
     manifest = load_run_manifest(manifest_path)
@@ -225,33 +265,42 @@ def test_manifest_output_path_cannot_escape_run_directory(tmp_path):
 
 
 def test_complete_manifest_output_hashes_are_verified(tmp_path):
-    artifact = tmp_path / "artifact.pkl"
-    artifact.write_bytes(b"artifact")
+    paths, hashes = _complete_outputs(tmp_path)
     manifest = {
         "status": "complete",
-        "paths": {"artifact": str(artifact)},
-        "output_sha256": {"artifact": file_sha256(artifact)},
+        "paths": paths,
+        "output_sha256": hashes,
     }
 
     validate_manifest_outputs(manifest)
+    artifact = Path(paths["artifact"])
     artifact.write_bytes(b"tampered")
 
     with pytest.raises(ValueError, match="output hash"):
         validate_manifest_outputs(manifest)
 
 
-def test_complete_manifest_requires_hash_for_every_output(tmp_path):
-    artifact = tmp_path / "artifact.pkl"
-    assignments = tmp_path / "assignments.csv"
-    artifact.write_bytes(b"artifact")
-    assignments.write_text("cluster\n0\n", encoding="utf-8")
+def test_complete_manifest_requires_every_run_output(tmp_path):
+    paths, hashes = _complete_outputs(tmp_path)
+    paths.pop("final_view2")
+    hashes.pop("final_view2")
     manifest = {
         "status": "complete",
-        "paths": {
-            "artifact": str(artifact),
-            "assignments": str(assignments),
-        },
-        "output_sha256": {"artifact": file_sha256(artifact)},
+        "paths": paths,
+        "output_sha256": hashes,
+    }
+
+    with pytest.raises(ValueError, match="every required run output"):
+        validate_manifest_outputs(manifest)
+
+
+def test_complete_manifest_requires_hash_for_every_output(tmp_path):
+    paths, hashes = _complete_outputs(tmp_path)
+    hashes.pop("assignments")
+    manifest = {
+        "status": "complete",
+        "paths": paths,
+        "output_sha256": hashes,
     }
 
     with pytest.raises(ValueError, match="hash every declared output"):

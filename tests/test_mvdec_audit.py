@@ -9,7 +9,12 @@ from pipeline.mvdec_audit import (
     validate_public_assignments,
     validate_public_source,
 )
-from pipeline.mvdec_runs import file_sha256, resolve_run_paths, write_run_manifest
+from pipeline.mvdec_runs import (
+    RUN_OUTPUT_NAMES,
+    file_sha256,
+    resolve_run_paths,
+    write_run_manifest,
+)
 
 
 def test_artifact_data_path_uses_structured_preprocessing_metadata(tmp_path):
@@ -61,6 +66,9 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
     paths.run_dir.mkdir(parents=True)
     paths.artifact.write_bytes(b"artifact")
     paths.assignments.write_text("cluster\n0\n", encoding="utf-8")
+    for name in RUN_OUTPUT_NAMES - {"artifact", "assignments"}:
+        getattr(paths, name).write_bytes(name.encode())
+    output_paths = {name: getattr(paths, name).name for name in RUN_OUTPUT_NAMES}
     write_run_manifest(
         paths.manifest,
         {
@@ -68,13 +76,10 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
             "status": "complete",
             "config": config,
             "config_hash": paths.config_hash,
-            "paths": {
-                "artifact": paths.artifact.name,
-                "assignments": paths.assignments.name,
-            },
+            "paths": output_paths,
             "output_sha256": {
-                "artifact": file_sha256(paths.artifact),
-                "assignments": file_sha256(paths.assignments),
+                name: file_sha256(getattr(paths, name))
+                for name in RUN_OUTPUT_NAMES
             },
         },
     )

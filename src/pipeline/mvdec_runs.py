@@ -15,6 +15,17 @@ from pipeline.io import replace_with_retry
 RUN_MANIFEST_SCHEMA_VERSION = 1
 RUN_MANIFEST_FILENAME = "manifest.json"
 GIT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+RUN_OUTPUT_NAMES = frozenset(
+    {
+        "artifact",
+        "assignments",
+        "pretrain_view1",
+        "pretrain_view2",
+        "final_view1",
+        "final_view2",
+        "training_log",
+    }
+)
 
 
 def resolve_training_commit(repository: Path) -> str:
@@ -190,20 +201,20 @@ def resolve_manifest_output_path(
     manifest: dict[str, object],
     name: str,
 ) -> Path:
-    """Resolve one absolute or manifest-relative output path."""
+    """Resolve one output path and contain loaded manifests to their run dir."""
 
     paths = manifest.get("paths")
     output_path = paths.get(name) if isinstance(paths, dict) else None
     if not isinstance(output_path, str):
         raise ValueError(f"MvDEC manifest is missing output path {name!r}.")
     path = Path(output_path)
-    if path.is_absolute():
-        return path
     manifest_path = manifest.get("_manifest_path")
+    if path.is_absolute() and not isinstance(manifest_path, str):
+        return path.resolve()
     if not isinstance(manifest_path, str):
         raise ValueError("MvDEC manifest-relative path requires manifest location.")
     run_dir = Path(manifest_path).parent.resolve()
-    resolved = (run_dir / path).resolve()
+    resolved = path.resolve() if path.is_absolute() else (run_dir / path).resolve()
     if not resolved.is_relative_to(run_dir):
         raise ValueError(f"MvDEC output path escapes its run directory: {path}")
     return resolved
@@ -218,7 +229,11 @@ def validate_manifest_outputs(manifest: dict[str, object]) -> None:
     output_hashes = manifest.get("output_sha256")
     if not isinstance(paths, dict) or not isinstance(output_hashes, dict):
         raise ValueError("Complete MvDEC manifest is missing output paths or hashes.")
-    if not paths or paths.keys() != output_hashes.keys():
+    if set(paths) != RUN_OUTPUT_NAMES:
+        raise ValueError(
+            "Complete MvDEC manifest must declare every required run output."
+        )
+    if paths.keys() != output_hashes.keys():
         raise ValueError("Complete MvDEC manifest must hash every declared output.")
     for name, expected_hash in output_hashes.items():
         if not isinstance(expected_hash, str):

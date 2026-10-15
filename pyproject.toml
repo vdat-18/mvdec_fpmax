@@ -63,3 +63,9 @@ quote-style = "double"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+    "paper_replication/intuitive_kprototypes/tests",
+]
