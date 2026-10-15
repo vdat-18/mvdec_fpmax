@@ -13,9 +13,17 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 from pipeline.external_metrics import compute_external_metrics
+from pipeline.mvdec_audit import validate_expected_run_set
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+)
+from pipeline.mvdec_runs import (
+    RUN_MANIFEST_FILENAME,
+    load_run_manifest,
+    resolve_manifest_output_path,
+    validate_manifest_identity,
+    validate_manifest_outputs,
 )
 from pipeline.public_artifacts import write_public_frame
 
@@ -51,6 +59,14 @@ def _validated_latents(artifact: dict[str, object]) -> tuple[np.ndarray, ...]:
         raise ValueError("MvDEC latent arrays must be finite two-dimensional arrays.")
     if len({values.shape for values in arrays}) != 1:
         raise ValueError("MvDEC View1, View2, and fused arrays must share one shape.")
+    if arrays[0].shape[0] < 2 or arrays[0].shape[1] < 1:
+        raise ValueError(
+            "MvDEC latent arrays require at least two rows and one column."
+        )
+    if np.any(np.linalg.norm(arrays[0], axis=1) == 0):
+        raise ValueError("MvDEC View1 contains zero-norm latent rows.")
+    if np.any(np.linalg.norm(arrays[1], axis=1) == 0):
+        raise ValueError("MvDEC View2 contains zero-norm latent rows.")
     return arrays
 
 
@@ -218,13 +234,19 @@ def audit_artifact(
         raise ValueError("Saved fused latent does not implement its declared contract.")
 
     true_labels = np.asarray(artifact["true_labels"])
+    if true_labels.ndim != 1 or len(true_labels) != len(view1):
+        raise ValueError("MvDEC true labels must be one-dimensional and row-aligned.")
     n_clusters = int(artifact["n_clusters"])
-    seed = int(artifact["config"]["seed"])
+    if not 2 <= n_clusters <= len(true_labels):
+        raise ValueError("MvDEC cluster count must be between 2 and the sample count.")
+    config = artifact.get("config")
+    seed_value = config.get("seed") if isinstance(config, dict) else None
+    if isinstance(seed_value, bool) or not isinstance(seed_value, (int, np.integer)):
+        raise ValueError("MvDEC fusion audit requires an explicit integer seed.")
+    seed = int(seed_value)
     n_init = int(artifact["kmeans_n_init"])
     if n_init != 100:
-        raise ValueError(
-            "Independent MvDEC fusion audit requires K-Means n_init=100."
-        )
+        raise ValueError("Independent MvDEC fusion audit requires K-Means n_init=100.")
     dataset_output = output_dir / str(artifact["dataset"]).lower()
     records = []
     for name, representation in diagnostic_representations(
@@ -274,13 +296,38 @@ def audit_artifact(
     return metrics_frame, diagnostics
 
 
-def audit_root(root: Path, output_dir: Path) -> pd.DataFrame:
-    """Audit every artifact below a downloaded Kaggle output root."""
+def audit_root(
+    root: Path,
+    output_dir: Path,
+    expected_datasets: tuple[str, ...] | None = None,
+    expected_protocol_id: str | None = None,
+    expected_training_commit: str | None = None,
+    expected_seed: int | None = None,
+) -> pd.DataFrame:
+    """Audit exactly the complete, hash-verified artifacts owned by manifests."""
 
-    artifacts = sorted(root.rglob("artifact.pkl"))
-    if not artifacts:
-        raise ValueError(f"No artifact.pkl files found below: {root}")
-    frames = [audit_artifact(path, output_dir)[0] for path in artifacts]
+    manifest_paths = sorted(root.rglob(RUN_MANIFEST_FILENAME))
+    if not manifest_paths:
+        raise ValueError(f"No MvDEC run manifests found below: {root}")
+    manifests = [load_run_manifest(path) for path in manifest_paths]
+    for manifest in manifests:
+        validate_manifest_identity(manifest)
+        validate_manifest_outputs(manifest)
+    validate_expected_run_set(
+        manifests,
+        expected_datasets=expected_datasets,
+        expected_protocol_id=expected_protocol_id,
+        expected_training_commit=expected_training_commit,
+        expected_seed=expected_seed,
+        require_all_complete=True,
+    )
+    frames = [
+        audit_artifact(
+            resolve_manifest_output_path(manifest, "artifact"),
+            output_dir,
+        )[0]
+        for manifest in manifests
+    ]
     combined = pd.concat(frames, ignore_index=True)
     write_public_frame(combined, output_dir / "mvdec_fusion_audit_metrics.csv")
     return combined
@@ -290,6 +337,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--expected-datasets", nargs="+")
+    parser.add_argument("--expected-protocol-id")
+    parser.add_argument("--expected-training-commit")
+    parser.add_argument("--expected-seed", type=int)
     parser.add_argument(
         "--trust-pickle-artifacts",
         action="store_true",
@@ -298,7 +349,18 @@ def main() -> None:
     args = parser.parse_args()
     if not args.trust_pickle_artifacts:
         raise ValueError("Pass --trust-pickle-artifacts for trusted local outputs.")
-    print(audit_root(args.root, args.output_dir).to_string(index=False))
+    print(
+        audit_root(
+            args.root,
+            args.output_dir,
+            expected_datasets=(
+                tuple(args.expected_datasets) if args.expected_datasets else None
+            ),
+            expected_protocol_id=args.expected_protocol_id,
+            expected_training_commit=args.expected_training_commit,
+            expected_seed=args.expected_seed,
+        ).to_string(index=False)
+    )
 
 
 if __name__ == "__main__":

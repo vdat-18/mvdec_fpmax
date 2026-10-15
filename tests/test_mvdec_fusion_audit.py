@@ -6,6 +6,7 @@ import pytest
 from pipeline.mvdec_fusion_audit import (
     alignment_diagnostics,
     audit_artifact,
+    audit_root,
     diagnostic_representations,
     fused_representation,
 )
@@ -117,6 +118,7 @@ def test_audit_artifact_rejects_noncanonical_kmeans_restart_count(tmp_path) -> N
     with pytest.raises(ValueError, match="n_init=100"):
         audit_artifact(artifact_path, tmp_path / "audit")
 
+
 def test_audit_artifact_honors_l2_normalized_fusion(tmp_path) -> None:
     view1 = np.array([[-3.0, 0.0], [-2.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
     view2 = np.array([[0.0, -4.0], [0.0, -1.0], [0.0, 1.0], [0.0, 4.0]])
@@ -146,3 +148,31 @@ def test_audit_artifact_honors_l2_normalized_fusion(tmp_path) -> None:
     fused_metrics = metrics.set_index("representation").loc["fused"]
     assert fused_metrics["fusion_contract"] == fusion_contract
     assert fused_metrics["run_id"] == "run"
+
+
+def test_audit_artifact_rejects_zero_norm_rows(tmp_path) -> None:
+    view1 = np.array([[0.0, 0.0], [1.0, 0.0]])
+    artifact = {
+        "dataset": "TEST",
+        "fusion_contract": "mvdec2025_encoder_average",
+        "config": {"seed": 42},
+        "n_clusters": 2,
+        "kmeans_n_init": 100,
+        "h_view1": view1,
+        "h_view2": np.array([[1.0, 0.0], [2.0, 0.0]]),
+        "h_fused": np.array([[0.5, 0.0], [1.5, 0.0]]),
+        "true_labels": np.array([0, 1]),
+    }
+    artifact_path = tmp_path / "artifact.pkl"
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+
+    with pytest.raises(ValueError, match="zero-norm latent rows"):
+        audit_artifact(artifact_path, tmp_path / "audit")
+
+
+def test_audit_root_rejects_unmanifested_artifacts(tmp_path) -> None:
+    (tmp_path / "artifact.pkl").write_bytes(b"not trusted")
+
+    with pytest.raises(ValueError, match="No MvDEC run manifests"):
+        audit_root(tmp_path, tmp_path / "audit")
