@@ -148,5 +148,8 @@ output. Temporary full-output matrices are closed and removed after the audit.
 
 Focused validation passes with 54 tests across the new runner, fusion contracts,
 manifest handling, public data, and architecture suites. The runner has not
-been executed on Kaggle and no GPU run, kernel version, seed 43-44 run, commit,
-or push was created.
+been executed on Kaggle, and no GPU run or seed 43-44 run was created. The
+prepared REUTERS-only notebook
+`notebooks/mvdec_2025_reuters_paper_figure_audit_seed42_kaggle.ipynb` pins the
+runner commit `0f282c502c75b6d3679e2e8d4d14531077c37d56` and enforces a
+45-minute hard timeout.
