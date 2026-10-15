@@ -1,6 +1,7 @@
 """Audit completed MvDEC run manifests and reload every saved artifact."""
 
 import argparse
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -166,6 +167,61 @@ def validate_public_assignments(
         raise ValueError("MvDEC recorded ACC/NMI do not match assignments.")
 
 
+def validate_training_log(
+    manifest: dict[str, object],
+    artifact: dict[str, object],
+) -> None:
+    """Verify terminal provenance and the complete refinement-loss trajectory."""
+
+    log_path = resolve_manifest_output_path(manifest, "training_log")
+    with log_path.open(newline="", encoding="utf-8") as file:
+        rows = [[field.strip() for field in row] for row in csv.reader(file)]
+    stop_rows = [row for row in rows if "phase:training_stop" in row]
+    final_rows = [
+        row
+        for row in rows
+        if any(field.startswith("phase:final_recomputed_") for field in row)
+    ]
+    step9_rows = [
+        row
+        for row in rows
+        if any(field.startswith("phase:paper_step9_after_") for field in row)
+    ]
+    expected_windows = int(artifact.get("refinement_epochs_completed", -1))
+    if len(stop_rows) != 1 or len(final_rows) != 1:
+        raise ValueError("MvDEC training log is missing unique terminal phases.")
+    if expected_windows < 1 or len(step9_rows) != expected_windows:
+        raise ValueError("MvDEC training log has an incomplete refinement trajectory.")
+
+    summary_rows = [row for row in rows if row and row[0].startswith("run ")]
+    if len(summary_rows) != 1:
+        raise ValueError("MvDEC training log is missing its unique run summary.")
+    summary = ";".join(summary_rows[0])
+    expected_summary_fields = (
+        f"seed:{manifest.get('seed')}",
+        f"run_id:{manifest.get('run_id')}",
+        f"protocol_id:{manifest.get('protocol_id')}",
+    )
+    if any(field not in summary for field in expected_summary_fields):
+        raise ValueError("MvDEC training-log summary provenance does not match.")
+
+    stop = ";".join(stop_rows[0])
+    stop_fields = (
+        f"training_steps_completed:{artifact.get('training_steps_completed')}",
+        f"refinement_epochs_completed:{expected_windows}",
+        f"refinement_progress_unit:{artifact.get('refinement_progress_unit')}",
+        f"stop_reason:{artifact.get('stop_reason')}",
+    )
+    if any(field not in stop for field in stop_fields):
+        raise ValueError("MvDEC training-log stopping metadata does not match.")
+
+    loss_weights = artifact.get("config", {}).get("loss_weights", {})
+    if loss_weights.get("cross_view_alignment", 0) > 0 and any(
+        not any("L5_alignment:" in field for field in row) for row in step9_rows
+    ):
+        raise ValueError("MvDEC training log is missing its L5 trajectory.")
+
+
 def audit_run_root(
     root: Path,
     dataset_root: Path = DEKM_DATASET_DIR,
@@ -199,6 +255,7 @@ def audit_run_root(
         else:
             artifact = validate_mvdec_artifact(artifact_path)
             validate_public_assignments(manifest, artifact, assignments)
+            validate_training_log(manifest, artifact)
         completed += 1
         logger.info("Validated MvDEC run: {}", manifest["run_id"])
     return completed, failed

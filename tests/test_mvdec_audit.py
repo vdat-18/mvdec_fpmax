@@ -8,6 +8,7 @@ from pipeline.mvdec_audit import (
     audit_run_root,
     validate_public_assignments,
     validate_public_source,
+    validate_training_log,
 )
 from pipeline.mvdec_runs import (
     HDF5_SIGNATURE,
@@ -182,3 +183,66 @@ def test_validate_public_assignments_rejects_metric_mismatch() -> None:
 
     with pytest.raises(ValueError, match="ACC/NMI"):
         validate_public_assignments(manifest, artifact, assignments)
+
+def _write_training_log(path, include_l5: bool = True) -> None:
+    loss = "loss:L1_reconstruction:1.0"
+    if include_l5:
+        loss += ", L5_alignment:0.5"
+    path.write_text(
+        "\n".join(
+            [
+                f"phase:paper_step9_after_release_update_window_1,{loss}",
+                f"phase:paper_step9_after_release_update_window_2,{loss}",
+                (
+                    "phase:training_stop,stop_reason:converged_assignment,"
+                    "training_steps_completed:20,refinement_epochs_completed:2,"
+                    "refinement_progress_unit:kmeans_refresh_windows"
+                ),
+                "phase:final_recomputed_state",
+                "run 1/1,seed:42,run_id:run,protocol_id:protocol",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_validate_training_log_checks_complete_l5_trajectory(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "config": {"loss_weights": {"cross_view_alignment": 100.0}},
+    }
+
+    validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_missing_l5_trajectory(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path, include_l5=False)
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "config": {"loss_weights": {"cross_view_alignment": 100.0}},
+    }
+
+    with pytest.raises(ValueError, match="L5 trajectory"):
+        validate_training_log(manifest, artifact)
