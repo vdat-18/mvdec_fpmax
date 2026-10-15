@@ -12,6 +12,7 @@ from scipy.linalg import orthogonal_procrustes
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
+from pipeline.data import validate_mvdec_artifact
 from pipeline.external_metrics import compute_external_metrics
 from pipeline.mvdec_audit import validate_expected_run_set
 from pipeline.mvdec_contract import (
@@ -321,13 +322,11 @@ def audit_root(
         expected_seed=expected_seed,
         require_all_complete=True,
     )
-    frames = [
-        audit_artifact(
-            resolve_manifest_output_path(manifest, "artifact"),
-            output_dir,
-        )[0]
-        for manifest in manifests
-    ]
+    frames = []
+    for manifest in manifests:
+        artifact_path = resolve_manifest_output_path(manifest, "artifact")
+        validate_mvdec_artifact(artifact_path)
+        frames.append(audit_artifact(artifact_path, output_dir)[0])
     combined = pd.concat(frames, ignore_index=True)
     write_public_frame(combined, output_dir / "mvdec_fusion_audit_metrics.csv")
     return combined
