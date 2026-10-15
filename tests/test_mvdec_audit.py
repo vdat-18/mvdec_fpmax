@@ -6,6 +6,7 @@ import pipeline.mvdec_audit as mvdec_audit
 from pipeline.mvdec_audit import (
     artifact_data_path,
     audit_run_root,
+    validate_expected_run_set,
     validate_public_assignments,
     validate_public_source,
     validate_training_log,
@@ -326,3 +327,55 @@ def test_validate_training_log_rejects_nonfinite_l5(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="non-finite L5"):
         validate_training_log(manifest, artifact)
+
+def test_validate_expected_run_set_checks_order_and_provenance() -> None:
+    manifests = [
+        {
+            "dataset": "REUTERS",
+            "started_at_utc": "2026-10-15T00:00:00+00:00",
+            "protocol_id": "protocol",
+            "training_commit": "a" * 40,
+            "seed": 42,
+        },
+        {
+            "dataset": "RCV1",
+            "started_at_utc": "2026-10-15T01:00:00+00:00",
+            "protocol_id": "protocol",
+            "training_commit": "a" * 40,
+            "seed": 42,
+        },
+        {
+            "dataset": "20NEWS",
+            "started_at_utc": "2026-10-15T02:00:00+00:00",
+            "protocol_id": "protocol",
+            "training_commit": "a" * 40,
+            "seed": 42,
+        },
+    ]
+
+    validate_expected_run_set(
+        manifests,
+        expected_datasets=("REUTERS", "RCV1", "20NEWS"),
+        expected_protocol_id="protocol",
+        expected_training_commit="a" * 40,
+        expected_seed=42,
+    )
+
+
+def test_validate_expected_run_set_rejects_wrong_dataset_order() -> None:
+    manifests = [
+        {
+            "dataset": "RCV1",
+            "started_at_utc": "2026-10-15T00:00:00+00:00",
+        },
+        {
+            "dataset": "REUTERS",
+            "started_at_utc": "2026-10-15T01:00:00+00:00",
+        },
+    ]
+
+    with pytest.raises(ValueError, match="execution order"):
+        validate_expected_run_set(
+            manifests,
+            expected_datasets=("REUTERS", "RCV1"),
+        )

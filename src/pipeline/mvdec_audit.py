@@ -249,9 +249,47 @@ def validate_training_log(
             raise ValueError("MvDEC training log has an incomplete L5 trajectory.")
 
 
+def validate_expected_run_set(
+    manifests: list[dict[str, object]],
+    expected_datasets: tuple[str, ...] | None = None,
+    expected_protocol_id: str | None = None,
+    expected_training_commit: str | None = None,
+    expected_seed: int | None = None,
+) -> None:
+    """Fail closed when a downloaded run set differs from the requested gate."""
+
+    if expected_datasets is not None:
+        started = []
+        for manifest in manifests:
+            started_at = manifest.get("started_at_utc")
+            dataset = manifest.get("dataset")
+            if not isinstance(started_at, str) or not isinstance(dataset, str):
+                raise ValueError("Expected MvDEC run set requires start timestamps.")
+            started.append((started_at, dataset))
+        discovered = tuple(dataset for _, dataset in sorted(started))
+        if discovered != expected_datasets:
+            raise ValueError(
+                "MvDEC dataset execution order does not match the expected gate."
+            )
+    checks = (
+        ("protocol_id", expected_protocol_id),
+        ("training_commit", expected_training_commit),
+        ("seed", expected_seed),
+    )
+    for field, expected in checks:
+        if expected is not None and any(
+            manifest.get(field) != expected for manifest in manifests
+        ):
+            raise ValueError(f"MvDEC run set has unexpected {field}.")
+
+
 def audit_run_root(
     root: Path,
     dataset_root: Path = DEKM_DATASET_DIR,
+    expected_datasets: tuple[str, ...] | None = None,
+    expected_protocol_id: str | None = None,
+    expected_training_commit: str | None = None,
+    expected_seed: int | None = None,
 ) -> tuple[int, int]:
     """Validate all complete runs and return completed/failed manifest counts."""
 
@@ -260,15 +298,24 @@ def audit_run_root(
     manifest_paths = sorted(root.rglob(RUN_MANIFEST_FILENAME))
     if not manifest_paths:
         raise ValueError(f"No MvDEC run manifests found below: {root}")
-    for manifest_path in manifest_paths:
-        manifest = load_run_manifest(manifest_path)
+    manifests = [load_run_manifest(path) for path in manifest_paths]
+    for manifest in manifests:
         validate_manifest_identity(manifest)
+    validate_expected_run_set(
+        manifests,
+        expected_datasets=expected_datasets,
+        expected_protocol_id=expected_protocol_id,
+        expected_training_commit=expected_training_commit,
+        expected_seed=expected_seed,
+    )
+    for manifest in manifests:
         status = manifest.get("status")
         if status == "failed":
             failed += 1
             logger.warning("Failed run retained for audit: {}", manifest["run_id"])
             continue
         if status != "complete":
+            manifest_path = manifest.get("_manifest_path")
             raise ValueError(
                 f"MvDEC run is neither complete nor failed: {manifest_path}"
             )
@@ -303,8 +350,21 @@ def main() -> None:
         default=DEKM_DATASET_DIR,
         help="Root containing canonical DEKM public dataset inputs.",
     )
+    parser.add_argument("--expected-datasets", nargs="+")
+    parser.add_argument("--expected-protocol-id")
+    parser.add_argument("--expected-training-commit")
+    parser.add_argument("--expected-seed", type=int)
     args = parser.parse_args()
-    completed, failed = audit_run_root(args.root, args.dataset_root)
+    completed, failed = audit_run_root(
+        args.root,
+        args.dataset_root,
+        expected_datasets=(
+            tuple(args.expected_datasets) if args.expected_datasets else None
+        ),
+        expected_protocol_id=args.expected_protocol_id,
+        expected_training_commit=args.expected_training_commit,
+        expected_seed=args.expected_seed,
+    )
     logger.info("Audit complete: {} complete, {} failed", completed, failed)
 
 
