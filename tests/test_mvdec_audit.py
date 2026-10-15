@@ -246,3 +246,23 @@ def test_validate_training_log_rejects_missing_l5_trajectory(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="L5 trajectory"):
         validate_training_log(manifest, artifact)
+
+def test_validate_training_log_rejects_prefix_only_provenance_match(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    manifest = {
+        "seed": 4,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "config": {"loss_weights": {"cross_view_alignment": 100.0}},
+    }
+
+    with pytest.raises(ValueError, match="summary provenance"):
+        validate_training_log(manifest, artifact)

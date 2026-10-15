@@ -196,23 +196,23 @@ def validate_training_log(
     summary_rows = [row for row in rows if row and row[0].startswith("run ")]
     if len(summary_rows) != 1:
         raise ValueError("MvDEC training log is missing its unique run summary.")
-    summary = ";".join(summary_rows[0])
+    summary_fields = set(summary_rows[0])
     expected_summary_fields = (
         f"seed:{manifest.get('seed')}",
         f"run_id:{manifest.get('run_id')}",
         f"protocol_id:{manifest.get('protocol_id')}",
     )
-    if any(field not in summary for field in expected_summary_fields):
+    if any(field not in summary_fields for field in expected_summary_fields):
         raise ValueError("MvDEC training-log summary provenance does not match.")
 
-    stop = ";".join(stop_rows[0])
+    stop_fields_found = set(stop_rows[0])
     stop_fields = (
         f"training_steps_completed:{artifact.get('training_steps_completed')}",
         f"refinement_epochs_completed:{expected_windows}",
         f"refinement_progress_unit:{artifact.get('refinement_progress_unit')}",
         f"stop_reason:{artifact.get('stop_reason')}",
     )
-    if any(field not in stop for field in stop_fields):
+    if any(field not in stop_fields_found for field in stop_fields):
         raise ValueError("MvDEC training-log stopping metadata does not match.")
 
     loss_weights = artifact.get("config", {}).get("loss_weights", {})
