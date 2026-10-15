@@ -1262,6 +1262,15 @@ def test_aligned_balanced_artifact_contract_passes_loader_validation(
         artifact = pickle.load(file)
     pipeline_data._validate_mvdec_protocol_contract(artifact)
 
+    for field_path in (("kmeans_n_init",), ("config", "kmeans_n_init")):
+        tampered = pickle.loads(pickle.dumps(artifact))
+        target = tampered
+        for field in field_path[:-1]:
+            target = target[field]
+        target[field_path[-1]] = 10
+        with pytest.raises(ValueError, match="immutable protocol"):
+            pipeline_data._validate_mvdec_protocol_contract(tampered)
+
     if protocol.alignment_mode == mvdec.ALIGNMENT_UNCENTERED_ROW_L2:
         legacy_artifact = pickle.loads(pickle.dumps(artifact))
         legacy_artifact.pop("alignment_mode")

@@ -701,6 +701,8 @@ def _validate_public_protocol_contract(
             config.get("update_interval") != expected_update_interval,
             config.get("max_training_steps") != expected_max_training_steps,
             config.get("kmeans_n_init_policy") != expected_kmeans_n_init_policy,
+            config.get("kmeans_n_init") != 100,
+            best_result.get("kmeans_n_init") != 100,
             config.get("pretrain_loss_reduction") != expected_pretrain_reduction,
             config.get("pretrain_shuffle_buffer") != expected_pretrain_shuffle_buffer,
             config.get("refinement_objective") != expected_refinement_objective,
