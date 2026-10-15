@@ -533,6 +533,41 @@ def test_validate_expected_run_set_rejects_wrong_dataset_order() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("started_at_utc", "message"),
+    (
+        ("not-a-timestamp", "invalid start timestamp"),
+        ("2026-10-15T00:00:00+07:00", "must be UTC"),
+        ("2026-10-15T00:00:00", "must be UTC"),
+    ),
+)
+def test_validate_expected_run_set_rejects_unverifiable_timestamps(
+    started_at_utc,
+    message,
+) -> None:
+    manifests = [{"dataset": "REUTERS", "started_at_utc": started_at_utc}]
+
+    with pytest.raises(ValueError, match=message):
+        validate_expected_run_set(
+            manifests,
+            expected_datasets=("REUTERS",),
+        )
+
+
+def test_validate_expected_run_set_rejects_duplicate_timestamps() -> None:
+    timestamp = "2026-10-15T00:00:00+00:00"
+    manifests = [
+        {"dataset": "REUTERS", "started_at_utc": timestamp},
+        {"dataset": "RCV1", "started_at_utc": timestamp},
+    ]
+
+    with pytest.raises(ValueError, match="must be unique"):
+        validate_expected_run_set(
+            manifests,
+            expected_datasets=("REUTERS", "RCV1"),
+        )
+
+
 def test_validate_expected_run_set_can_require_all_complete() -> None:
     manifests = [
         {

@@ -3,6 +3,7 @@
 import argparse
 import csv
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -374,7 +375,17 @@ def validate_expected_run_set(
             dataset = manifest.get("dataset")
             if not isinstance(started_at, str) or not isinstance(dataset, str):
                 raise ValueError("Expected MvDEC run set requires start timestamps.")
-            started.append((started_at, dataset))
+            try:
+                timestamp = datetime.fromisoformat(started_at)
+            except ValueError as error:
+                raise ValueError(
+                    "Expected MvDEC run set has an invalid start timestamp."
+                ) from error
+            if timestamp.tzinfo is None or timestamp.utcoffset() != timedelta(0):
+                raise ValueError("MvDEC run start timestamps must be UTC.")
+            started.append((timestamp, dataset))
+        if len({timestamp for timestamp, _ in started}) != len(started):
+            raise ValueError("MvDEC run start timestamps must be unique.")
         discovered = tuple(dataset for _, dataset in sorted(started))
         if discovered != expected_datasets:
             raise ValueError(
