@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import re
 from pathlib import Path
 
 import numpy as np
@@ -192,6 +193,23 @@ def validate_training_log(
         raise ValueError("MvDEC training log is missing unique terminal phases.")
     if expected_windows < 1 or len(step9_rows) != expected_windows:
         raise ValueError("MvDEC training log has an incomplete refinement trajectory.")
+    window_numbers = []
+    for row in step9_rows:
+        phase = next(
+            field for field in row if field.startswith("phase:paper_step9_after_")
+        )
+        match = re.fullmatch(
+            r"phase:paper_step9_after_(?:release_update_window|full_epoch)_(\d+)",
+            phase,
+        )
+        if match is None:
+            raise ValueError("MvDEC training log has an invalid refinement phase.")
+        window = int(match.group(1))
+        if f"refinement_epoch:{window}" not in row:
+            raise ValueError("MvDEC training log refinement metadata is inconsistent.")
+        window_numbers.append(window)
+    if window_numbers != list(range(1, expected_windows + 1)):
+        raise ValueError("MvDEC training log refinement windows are not contiguous.")
 
     summary_rows = [row for row in rows if row and row[0].startswith("run ")]
     if len(summary_rows) != 1:
@@ -216,10 +234,18 @@ def validate_training_log(
         raise ValueError("MvDEC training-log stopping metadata does not match.")
 
     loss_weights = artifact.get("config", {}).get("loss_weights", {})
-    if loss_weights.get("cross_view_alignment", 0) > 0 and any(
-        not any("L5_alignment:" in field for field in row) for row in step9_rows
-    ):
-        raise ValueError("MvDEC training log is missing its L5 trajectory.")
+    if loss_weights.get("cross_view_alignment", 0) > 0:
+        l5_values = []
+        for row in step9_rows:
+            matches = re.findall(r"L5_alignment:([^,\s]+)", ",".join(row))
+            if len(matches) != 1:
+                raise ValueError("MvDEC training log is missing its L5 trajectory.")
+            value = float(matches[0])
+            if not np.isfinite(value):
+                raise ValueError("MvDEC training log has a non-finite L5 value.")
+            l5_values.append(value)
+        if len(l5_values) != expected_windows:
+            raise ValueError("MvDEC training log has an incomplete L5 trajectory.")
 
 
 def audit_run_root(

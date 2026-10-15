@@ -184,15 +184,26 @@ def test_validate_public_assignments_rejects_metric_mismatch() -> None:
     with pytest.raises(ValueError, match="ACC/NMI"):
         validate_public_assignments(manifest, artifact, assignments)
 
-def _write_training_log(path, include_l5: bool = True) -> None:
+def _write_training_log(
+    path,
+    include_l5: bool = True,
+    windows: tuple[int, ...] = (1, 2),
+    l5_value: str = "0.5",
+) -> None:
     loss = "loss:L1_reconstruction:1.0"
     if include_l5:
-        loss += ", L5_alignment:0.5"
+        loss += f", L5_alignment:{l5_value}"
+    step_rows = [
+        (
+            f"phase:paper_step9_after_release_update_window_{window},{loss},"
+            f"refinement_epoch:{window}"
+        )
+        for window in windows
+    ]
     path.write_text(
         "\n".join(
             [
-                f"phase:paper_step9_after_release_update_window_1,{loss}",
-                f"phase:paper_step9_after_release_update_window_2,{loss}",
+                *step_rows,
                 (
                     "phase:training_stop,stop_reason:converged_assignment,"
                     "training_steps_completed:20,refinement_epochs_completed:2,"
@@ -265,4 +276,45 @@ def test_validate_training_log_rejects_prefix_only_provenance_match(tmp_path) ->
     }
 
     with pytest.raises(ValueError, match="summary provenance"):
+        validate_training_log(manifest, artifact)
+
+def test_validate_training_log_rejects_noncontiguous_windows(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path, windows=(1, 1))
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "config": {"loss_weights": {"cross_view_alignment": 100.0}},
+    }
+
+    with pytest.raises(ValueError, match="not contiguous"):
+        validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_nonfinite_l5(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path, l5_value="nan")
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "config": {"loss_weights": {"cross_view_alignment": 100.0}},
+    }
+
+    with pytest.raises(ValueError, match="non-finite L5"):
         validate_training_log(manifest, artifact)
