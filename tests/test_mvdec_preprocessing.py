@@ -1317,6 +1317,35 @@ def test_aligned_balanced_loss_scaling_and_combination(monkeypatch):
     assert legacy_terms == (20.0, 6.0, 8.0)
 
 
+def test_centered_scale_matched_objective_applies_legacy_scaling_and_weight(
+    monkeypatch,
+):
+    mvdec = _load_mvdec(monkeypatch)
+    monkeypatch.setattr(mvdec, "input_shape", 4)
+    monkeypatch.setattr(mvdec, "hidden_units", 2)
+    protocol = (
+        mvdec.LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL
+    )
+
+    reconstruction, kmeans, scatter = mvdec.scale_joint_loss_terms(
+        protocol,
+        20.0,
+        6.0,
+        8.0,
+    )
+    total = mvdec.combine_joint_losses(
+        protocol,
+        reconstruction,
+        kmeans,
+        scatter,
+        2.0,
+        0.5,
+    )
+
+    assert (reconstruction, kmeans, scatter) == (20.0, 6.0, 8.0)
+    assert total == 78.0
+
+
 def test_cross_view_alignment_is_directional_and_reaches_both_views(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     tf = pytest.importorskip("tensorflow")
