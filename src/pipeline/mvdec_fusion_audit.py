@@ -13,6 +13,10 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 from pipeline.external_metrics import compute_external_metrics
+from pipeline.mvdec_contract import (
+    FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+)
 from pipeline.public_artifacts import write_public_frame
 
 
@@ -130,11 +134,26 @@ def alignment_diagnostics(
     )
 
 
+def fused_representation(
+    view1: np.ndarray,
+    view2: np.ndarray,
+    fusion_contract: str,
+) -> np.ndarray:
+    """Recompute the latent fusion declared by one immutable protocol."""
+
+    if fusion_contract == FUSION_ENCODER_AVERAGE:
+        return (view1 + view2) / 2
+    if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
+        return (_row_l2_normalize(view1) + _row_l2_normalize(view2)) / 2
+    raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
+
+
 def diagnostic_representations(
     view1: np.ndarray,
     view2: np.ndarray,
+    fusion_contract: str = FUSION_ENCODER_AVERAGE,
 ) -> dict[str, np.ndarray]:
-    """Return paper fusion plus label-free controls that isolate alignment faults."""
+    """Return declared fusion plus label-free controls for alignment faults."""
 
     centered1 = view1 - view1.mean(axis=0)
     centered2 = view2 - view2.mean(axis=0)
@@ -143,7 +162,7 @@ def diagnostic_representations(
     return {
         "view1": view1,
         "view2": view2,
-        "fused": (view1 + view2) / 2,
+        "fused": fused_representation(view1, view2, fusion_contract),
         "row_l2_normalized_average": (
             _row_l2_normalize(view1) + _row_l2_normalize(view2)
         )
@@ -191,9 +210,12 @@ def audit_artifact(
     if not isinstance(artifact, dict):
         raise ValueError(f"MvDEC artifact is not a mapping: {artifact_path}")
     view1, view2, fused = _validated_latents(artifact)
-    expected_fused = (view1 + view2) / 2
+    fusion_contract = artifact.get("fusion_contract")
+    if not isinstance(fusion_contract, str):
+        raise ValueError("MvDEC artifact is missing its fusion contract.")
+    expected_fused = fused_representation(view1, view2, fusion_contract)
     if not np.allclose(fused, expected_fused, rtol=1e-6, atol=1e-6):
-        raise ValueError("Saved fused latent does not implement the declared average.")
+        raise ValueError("Saved fused latent does not implement its declared contract.")
 
     true_labels = np.asarray(artifact["true_labels"])
     n_clusters = int(artifact["n_clusters"])
@@ -205,7 +227,9 @@ def audit_artifact(
         )
     dataset_output = output_dir / str(artifact["dataset"]).lower()
     records = []
-    for name, representation in diagnostic_representations(view1, view2).items():
+    for name, representation in diagnostic_representations(
+        view1, view2, fusion_contract
+    ).items():
         labels = KMeans(
             n_clusters=n_clusters,
             n_init=n_init,
@@ -219,6 +243,12 @@ def audit_artifact(
         records.append(
             {
                 "dataset": artifact["dataset"],
+                "protocol_id": artifact["protocol_id"],
+                "run_id": artifact["run_id"],
+                "training_commit": artifact["training_commit"],
+                "source_id": artifact["source_id"],
+                "source_sha256": artifact["source_sha256"],
+                "fusion_contract": fusion_contract,
                 "representation": name,
                 "acc": metrics.acc,
                 "nmi": metrics.nmi,

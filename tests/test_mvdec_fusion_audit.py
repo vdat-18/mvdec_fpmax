@@ -7,6 +7,7 @@ from pipeline.mvdec_fusion_audit import (
     alignment_diagnostics,
     audit_artifact,
     diagnostic_representations,
+    fused_representation,
 )
 
 
@@ -36,6 +37,19 @@ def test_alignment_diagnostics_separates_shared_offset_from_structure() -> None:
     assert diagnostics.centered_fusion_retained_norm_mean == pytest.approx(0.0)
 
 
+def test_l2_normalized_fusion_matches_declared_contract() -> None:
+    view1 = np.array([[3.0, 0.0], [0.0, 0.0]])
+    view2 = np.array([[0.0, 4.0], [0.0, 2.0]])
+
+    fused = fused_representation(
+        view1,
+        view2,
+        "mvdec2025_encoder_l2_normalized_average",
+    )
+
+    np.testing.assert_allclose(fused, [[0.5, 0.5], [0.0, 0.5]])
+
+
 def test_procrustes_control_recovers_rotated_latent() -> None:
     view1 = np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])
     rotation = np.array([[0.0, -1.0], [1.0, 0.0]])
@@ -60,6 +74,7 @@ def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
         "training_commit": "a" * 40,
         "source_id": "source",
         "source_sha256": "b" * 64,
+        "fusion_contract": "mvdec2025_encoder_average",
         "config": {"seed": 42},
         "n_clusters": 2,
         "kmeans_n_init": 100,
@@ -86,6 +101,7 @@ def test_audit_artifact_rejects_noncanonical_kmeans_restart_count(tmp_path) -> N
     view = np.array([[-1.0, 0.0], [1.0, 0.0]])
     artifact = {
         "dataset": "TEST",
+        "fusion_contract": "mvdec2025_encoder_average",
         "config": {"seed": 42},
         "n_clusters": 2,
         "kmeans_n_init": 10,
@@ -100,3 +116,33 @@ def test_audit_artifact_rejects_noncanonical_kmeans_restart_count(tmp_path) -> N
 
     with pytest.raises(ValueError, match="n_init=100"):
         audit_artifact(artifact_path, tmp_path / "audit")
+
+def test_audit_artifact_honors_l2_normalized_fusion(tmp_path) -> None:
+    view1 = np.array([[-3.0, 0.0], [-2.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
+    view2 = np.array([[0.0, -4.0], [0.0, -1.0], [0.0, 1.0], [0.0, 4.0]])
+    fusion_contract = "mvdec2025_encoder_l2_normalized_average"
+    artifact = {
+        "dataset": "TEST",
+        "protocol_id": "protocol",
+        "run_id": "run",
+        "training_commit": "a" * 40,
+        "source_id": "source",
+        "source_sha256": "b" * 64,
+        "fusion_contract": fusion_contract,
+        "config": {"seed": 42},
+        "n_clusters": 2,
+        "kmeans_n_init": 100,
+        "h_view1": view1,
+        "h_view2": view2,
+        "h_fused": fused_representation(view1, view2, fusion_contract),
+        "true_labels": np.array([0, 0, 1, 1]),
+    }
+    artifact_path = tmp_path / "artifact.pkl"
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+
+    metrics, _ = audit_artifact(artifact_path, tmp_path / "audit")
+
+    fused_metrics = metrics.set_index("representation").loc["fused"]
+    assert fused_metrics["fusion_contract"] == fusion_contract
+    assert fused_metrics["run_id"] == "run"
