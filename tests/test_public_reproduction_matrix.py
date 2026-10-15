@@ -121,23 +121,21 @@ def test_reusable_complete_manifest_rejects_corrupt_outputs(
 ) -> None:
     """Resume must rebuild a run whose manifest hashes no longer validate."""
 
-    manifest = {"status": "complete", "training_commit": "a" * 40}
+    manifest = {
+        "status": "complete",
+        "training_commit": "a" * 40,
+        "_manifest_path": str(tmp_path / "run" / "manifest.json"),
+    }
     monkeypatch.setattr(
         matrix,
         "matching_complete_manifests",
         lambda _output_root, _spec: [manifest],
     )
 
-    def reject_outputs(_manifest: dict[str, object]) -> None:
+    def reject_run(*args, **kwargs):
         raise ValueError("hash mismatch")
 
-    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
-    monkeypatch.setattr(matrix, "validate_manifest_outputs", reject_outputs)
-    monkeypatch.setattr(
-        matrix,
-        "validate_public_source",
-        lambda _manifest, _dataset_root: None,
-    )
+    monkeypatch.setattr(matrix, "audit_run_root", reject_run)
     monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "a" * 40)
 
     reusable = matrix.reusable_complete_manifest(
@@ -319,7 +317,11 @@ def test_reusable_manifest_ignores_stale_duplicate(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    current = {"status": "complete", "training_commit": "b" * 40}
+    current = {
+        "status": "complete",
+        "training_commit": "b" * 40,
+        "_manifest_path": str(tmp_path / "current" / "manifest.json"),
+    }
     stale = {"status": "complete", "training_commit": "a" * 40}
     monkeypatch.setattr(
         matrix,
@@ -327,13 +329,7 @@ def test_reusable_manifest_ignores_stale_duplicate(
         lambda _output_root, _spec: [stale, current],
     )
     monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "b" * 40)
-    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
-    monkeypatch.setattr(matrix, "validate_manifest_outputs", lambda _manifest: None)
-    monkeypatch.setattr(
-        matrix,
-        "validate_public_source",
-        lambda _manifest, _dataset_root: None,
-    )
+    monkeypatch.setattr(matrix, "audit_run_root", lambda *args, **kwargs: (1, 0))
 
     reusable = matrix.reusable_complete_manifest(
         tmp_path,
@@ -348,29 +344,27 @@ def test_auditable_manifest_filter_ignores_invalid_same_commit(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    valid = {"status": "complete", "training_commit": "b" * 40}
+    valid = {
+        "status": "complete",
+        "training_commit": "b" * 40,
+        "_manifest_path": str(tmp_path / "valid" / "manifest.json"),
+    }
     invalid = {
         "status": "complete",
         "training_commit": "b" * 40,
-        "invalid": True,
+        "_manifest_path": str(tmp_path / "invalid" / "manifest.json"),
     }
     monkeypatch.setattr(
         matrix,
         "matching_complete_manifests",
         lambda _output_root, _spec: [invalid, valid],
     )
-    monkeypatch.setattr(matrix, "validate_manifest_identity", lambda _manifest: None)
+    def audit_candidate(root, *args, **kwargs):
+        if root.name == "invalid":
+            raise ValueError("corrupt artifact")
+        return 1, 0
 
-    def validate_outputs(manifest):
-        if manifest.get("invalid"):
-            raise ValueError("corrupt output")
-
-    monkeypatch.setattr(matrix, "validate_manifest_outputs", validate_outputs)
-    monkeypatch.setattr(
-        matrix,
-        "validate_public_source",
-        lambda _manifest, _dataset_root: None,
-    )
+    monkeypatch.setattr(matrix, "audit_run_root", audit_candidate)
 
     selected = matrix.require_single_auditable_manifest(
         tmp_path,

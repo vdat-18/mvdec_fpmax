@@ -17,12 +17,11 @@ from loguru import logger
 
 from config import DEKM_DATASET_DIR, PROJECT_DIR, PUBLIC_BENCHMARK_OUTPUT_DIR
 from pipeline.io import replace_with_retry
-from pipeline.mvdec_audit import validate_public_source
+from pipeline.mvdec_audit import audit_run_root
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
     resolve_training_commit,
-    validate_manifest_identity,
     validate_manifest_outputs,
 )
 
@@ -184,11 +183,22 @@ def auditable_complete_manifests(
     for manifest in matching_complete_manifests(output_root, spec):
         if manifest.get("training_commit") != expected_training_commit:
             continue
+        manifest_path = manifest.get("_manifest_path")
+        if not isinstance(manifest_path, str):
+            continue
         try:
-            validate_manifest_identity(manifest)
-            validate_manifest_outputs(manifest)
-            validate_public_source(manifest, dataset_root)
+            completed, failed = audit_run_root(
+                Path(manifest_path).parent,
+                dataset_root,
+                expected_datasets=(spec.dataset,),
+                expected_protocol_id=spec.protocol_id,
+                expected_training_commit=expected_training_commit,
+                expected_seed=spec.seed,
+                require_all_complete=True,
+            )
         except ValueError:
+            continue
+        if (completed, failed) != (1, 0):
             continue
         manifests.append(manifest)
     return manifests
