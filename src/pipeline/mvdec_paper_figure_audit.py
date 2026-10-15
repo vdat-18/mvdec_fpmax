@@ -45,6 +45,10 @@ DIAGNOSTIC_CLAIM_SCOPE = "post_training_diagnostic_not_exact_paper_truth"
 EQ4_REPRESENTATION = "eq4_latent_average"
 FIGURE1_REPRESENTATION = "figure1_full_output_average"
 FIGURE2_REPRESENTATION = "figure2_full_output_concatenation"
+RAW_INPUT_REPRESENTATION = "raw_input_baseline"
+LATENT_CONCATENATION_REPRESENTATION = "latent_concatenation_control"
+RECONSTRUCTION_AVERAGE_REPRESENTATION = "reconstruction_average_control"
+CONTROL_CLAIM_SCOPE = "diagnostic_control_not_paper_interpretation"
 MAX_INFERENCE_BATCH_SIZE = 4096
 MAX_DIAGNOSTIC_SAMPLES = 25_000
 MAX_VIEW_OUTPUT_WIDTH = 4096
@@ -249,6 +253,7 @@ def _write_model_outputs(
 
 
 def _materialize_representations(
+    X: np.ndarray,
     view1: np.memmap,
     view2: np.memmap,
     config: dict[str, object],
@@ -293,6 +298,39 @@ def _materialize_representations(
                 FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION, output_width
             ),
         ),
+        RAW_INPUT_REPRESENTATION: (
+            int(config["input_shape"]),
+            {
+                "paper_source": "Diagnostic control",
+                "operation": "identity_canonical_input",
+                "fusion_contract": "raw_input_kmeans_control",
+                "input_width_per_view": int(config["input_shape"]),
+                "output_width": int(config["input_shape"]),
+                "claim_scope": CONTROL_CLAIM_SCOPE,
+            },
+        ),
+        LATENT_CONCATENATION_REPRESENTATION: (
+            2 * hidden_width,
+            {
+                "paper_source": "Diagnostic control",
+                "operation": "column_concatenation",
+                "fusion_contract": "latent_concatenation_control",
+                "input_width_per_view": hidden_width,
+                "output_width": 2 * hidden_width,
+                "claim_scope": CONTROL_CLAIM_SCOPE,
+            },
+        ),
+        RECONSTRUCTION_AVERAGE_REPRESENTATION: (
+            int(config["input_shape"]),
+            {
+                "paper_source": "Diagnostic control",
+                "operation": "elementwise_average_reconstruction_only",
+                "fusion_contract": "reconstruction_average_control",
+                "input_width_per_view": int(config["input_shape"]),
+                "output_width": int(config["input_shape"]),
+                "claim_scope": CONTROL_CLAIM_SCOPE,
+            },
+        ),
     }
     representations = {
         name: (
@@ -318,6 +356,18 @@ def _materialize_representations(
         representations[FIGURE1_REPRESENTATION][0][start:stop] = (output1 + output2) / 2
         representations[FIGURE2_REPRESENTATION][0][start:stop, :output_width] = output1
         representations[FIGURE2_REPRESENTATION][0][start:stop, output_width:] = output2
+        representations[RAW_INPUT_REPRESENTATION][0][start:stop] = X[start:stop]
+        representations[LATENT_CONCATENATION_REPRESENTATION][0][
+            start:stop, :hidden_width
+        ] = latent1
+        representations[LATENT_CONCATENATION_REPRESENTATION][0][
+            start:stop, hidden_width:
+        ] = latent2
+        reconstruction1 = output1[:, hidden_width:]
+        reconstruction2 = output2[:, hidden_width:]
+        representations[RECONSTRUCTION_AVERAGE_REPRESENTATION][0][start:stop] = (
+            reconstruction1 + reconstruction2
+        ) / 2
     for representation, _ in representations.values():
         representation.flush()
     return representations
@@ -409,6 +459,7 @@ def run_paper_figure_diagnostic(
                 temporary_dir,
             )
             representations = _materialize_representations(
+                dataset.X,
                 *model_outputs,
                 config,
                 inference_batch_size,

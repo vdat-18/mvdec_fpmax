@@ -13,7 +13,10 @@ from pipeline.mvdec_paper_figure_audit import (
     EQ4_REPRESENTATION,
     FIGURE1_REPRESENTATION,
     FIGURE2_REPRESENTATION,
+    LATENT_CONCATENATION_REPRESENTATION,
     MAX_INFERENCE_BATCH_SIZE,
+    RAW_INPUT_REPRESENTATION,
+    RECONSTRUCTION_AVERAGE_REPRESENTATION,
     run_paper_figure_diagnostic,
 )
 from pipeline.mvdec_runs import (
@@ -173,9 +176,12 @@ def test_paper_figure_runner_exports_metrics_assignments_and_checksums(
         EQ4_REPRESENTATION,
         FIGURE1_REPRESENTATION,
         FIGURE2_REPRESENTATION,
+        RAW_INPUT_REPRESENTATION,
+        LATENT_CONCATENATION_REPRESENTATION,
+        RECONSTRUCTION_AVERAGE_REPRESENTATION,
     )
-    assert metrics["acc"].tolist() == [1.0, 1.0, 1.0]
-    assert metrics["representation_width"].tolist() == [1, 3, 6]
+    assert metrics["acc"].tolist() == [1.0] * 6
+    assert metrics["representation_width"].tolist() == [1, 3, 6, 2, 2, 2]
     assert (output_dir / "paper_figure_diagnostic_metrics.csv").is_file()
     assert (output_dir / "paper_figure_diagnostic_metadata.json").is_file()
     assert (output_dir / "paper_figure_diagnostic_manifest.json").is_file()
@@ -193,6 +199,9 @@ def test_paper_figure_runner_exports_metrics_assignments_and_checksums(
         "eq4_latent_average_assignments",
         "figure1_full_output_average_assignments",
         "figure2_full_output_concatenation_assignments",
+        "latent_concatenation_control_assignments",
+        "raw_input_baseline_assignments",
+        "reconstruction_average_control_assignments",
         "metadata",
         "metrics",
     }
