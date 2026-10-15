@@ -26,6 +26,10 @@ RUN_OUTPUT_NAMES = frozenset(
         "training_log",
     }
 )
+HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+WEIGHT_OUTPUT_NAMES = frozenset(
+    {"pretrain_view1", "pretrain_view2", "final_view1", "final_view2"}
+)
 
 
 def resolve_training_commit(repository: Path) -> str:
@@ -220,8 +224,20 @@ def resolve_manifest_output_path(
     return resolved
 
 
+def validate_run_output_format(name: str, path: Path) -> None:
+    """Reject empty outputs and weight files that are not HDF5 containers."""
+
+    if path.stat().st_size == 0:
+        raise ValueError(f"MvDEC output is empty for {name!r}: {path}")
+    if name in WEIGHT_OUTPUT_NAMES:
+        with path.open("rb") as file:
+            signature = file.read(len(HDF5_SIGNATURE))
+        if signature != HDF5_SIGNATURE:
+            raise ValueError(f"MvDEC weight output is not HDF5 for {name!r}: {path}")
+
+
 def validate_manifest_outputs(manifest: dict[str, object]) -> None:
-    """Verify every output path and SHA-256 declared by a complete manifest."""
+    """Verify every required output, its format, and its declared SHA-256."""
 
     if manifest.get("status") != "complete":
         raise ValueError("Only complete MvDEC manifests have auditable outputs.")
@@ -241,6 +257,7 @@ def validate_manifest_outputs(manifest: dict[str, object]) -> None:
         path = resolve_manifest_output_path(manifest, name)
         if not path.is_file() or file_sha256(path) != expected_hash:
             raise ValueError(f"MvDEC output hash does not match for {name!r}: {path}")
+        validate_run_output_format(name, path)
 
 
 def load_run_manifests(config_dir: Path) -> list[dict[str, object]]:

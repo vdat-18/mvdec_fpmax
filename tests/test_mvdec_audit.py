@@ -10,7 +10,9 @@ from pipeline.mvdec_audit import (
     validate_public_source,
 )
 from pipeline.mvdec_runs import (
+    HDF5_SIGNATURE,
     RUN_OUTPUT_NAMES,
+    WEIGHT_OUTPUT_NAMES,
     file_sha256,
     resolve_run_paths,
     write_run_manifest,
@@ -67,7 +69,8 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
     paths.artifact.write_bytes(b"artifact")
     paths.assignments.write_text("cluster\n0\n", encoding="utf-8")
     for name in RUN_OUTPUT_NAMES - {"artifact", "assignments"}:
-        getattr(paths, name).write_bytes(name.encode())
+        content = HDF5_SIGNATURE if name in WEIGHT_OUTPUT_NAMES else name.encode()
+        getattr(paths, name).write_bytes(content)
     output_paths = {name: getattr(paths, name).name for name in RUN_OUTPUT_NAMES}
     write_run_manifest(
         paths.manifest,

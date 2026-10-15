@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from pipeline.mvdec_runs import (
+    HDF5_SIGNATURE,
     RUN_OUTPUT_NAMES,
+    WEIGHT_OUTPUT_NAMES,
     build_summary_frames,
     canonical_config_hash,
     complete_run_manifests,
@@ -24,7 +26,8 @@ def _complete_outputs(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     hashes = {}
     for name in RUN_OUTPUT_NAMES:
         path = root / f"{name}.bin"
-        path.write_bytes(name.encode())
+        content = HDF5_SIGNATURE if name in WEIGHT_OUTPUT_NAMES else name.encode()
+        path.write_bytes(content)
         paths[name] = str(path)
         hashes[name] = file_sha256(path)
     return paths, hashes
@@ -277,6 +280,21 @@ def test_complete_manifest_output_hashes_are_verified(tmp_path):
     artifact.write_bytes(b"tampered")
 
     with pytest.raises(ValueError, match="output hash"):
+        validate_manifest_outputs(manifest)
+
+
+def test_complete_manifest_rejects_non_hdf5_weights(tmp_path):
+    paths, hashes = _complete_outputs(tmp_path)
+    weight_path = Path(paths["final_view1"])
+    weight_path.write_bytes(b"not-hdf5")
+    hashes["final_view1"] = file_sha256(weight_path)
+    manifest = {
+        "status": "complete",
+        "paths": paths,
+        "output_sha256": hashes,
+    }
+
+    with pytest.raises(ValueError, match="not HDF5"):
         validate_manifest_outputs(manifest)
 
 
