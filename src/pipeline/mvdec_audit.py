@@ -197,6 +197,29 @@ def validate_public_assignments(
     ):
         raise ValueError("MvDEC recorded ACC/NMI do not match assignments.")
 
+    representation_metric_names = (
+        "view1_acc",
+        "view1_nmi",
+        "view2_acc",
+        "view2_nmi",
+        "fused_acc",
+        "fused_nmi",
+    )
+    if any(
+        artifact.get(name) is None
+        or manifest_metrics.get(name) is None
+        or not np.isclose(
+            float(artifact[name]),
+            float(manifest_metrics[name]),
+            rtol=0.0,
+            atol=1e-12,
+        )
+        for name in representation_metric_names
+    ):
+        raise ValueError(
+            "MvDEC manifest representation metrics do not match the artifact."
+        )
+
 
 def validate_training_log(
     manifest: dict[str, object],

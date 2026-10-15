@@ -83,6 +83,8 @@ def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
         "h_view2": view2,
         "h_fused": (view1 + view2) / 2,
         "true_labels": np.array([0, 0, 1, 1]),
+        "view1_acc": 0.999,
+        "view1_nmi": 0.999,
     }
     artifact_path = tmp_path / "artifact.pkl"
     with artifact_path.open("wb") as file:
@@ -91,11 +93,42 @@ def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
     metrics, diagnostics = audit_artifact(artifact_path, tmp_path / "audit")
 
     assert set(metrics["representation"]) >= {"view1", "view2", "fused"}
-    assert metrics.set_index("representation").loc["fused", "acc"] == 1.0
+    indexed = metrics.set_index("representation")
+    assert indexed.loc["fused", "acc"] == 1.0
+    assert indexed.loc["view1", "recorded_acc"] == 0.999
+    assert indexed.loc["view1", "acc_delta"] == pytest.approx(0.001)
     assert diagnostics.paired_cosine_mean == pytest.approx(1.0)
     assert (tmp_path / "audit/test/view1_assignments.csv").is_file()
     assert (tmp_path / "audit/test/view2_assignments.csv").is_file()
     assert (tmp_path / "audit/test/fused_assignments.csv").is_file()
+
+
+def test_audit_artifact_rejects_recorded_metric_mismatch(tmp_path) -> None:
+    view = np.array([[-2.0, 0.0], [-1.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    artifact = {
+        "dataset": "TEST",
+        "protocol_id": "protocol",
+        "run_id": "run",
+        "training_commit": "a" * 40,
+        "source_id": "source",
+        "source_sha256": "b" * 64,
+        "fusion_contract": "mvdec2025_encoder_average",
+        "config": {"seed": 42},
+        "n_clusters": 2,
+        "kmeans_n_init": 100,
+        "h_view1": view,
+        "h_view2": view,
+        "h_fused": view,
+        "true_labels": np.array([0, 0, 1, 1]),
+        "view1_acc": 0.5,
+        "view1_nmi": 0.5,
+    }
+    artifact_path = tmp_path / "artifact.pkl"
+    with artifact_path.open("wb") as file:
+        pickle.dump(artifact, file)
+
+    with pytest.raises(ValueError, match="view1 metrics"):
+        audit_artifact(artifact_path, tmp_path / "audit")
 
 
 def test_audit_artifact_rejects_noncanonical_kmeans_restart_count(tmp_path) -> None:

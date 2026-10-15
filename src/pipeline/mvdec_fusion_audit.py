@@ -31,6 +31,8 @@ from pipeline.mvdec_runs import (
 )
 from pipeline.public_artifacts import load_public_artifact, write_public_frame
 
+INDEPENDENT_KMEANS_METRIC_ATOL = 0.01
+
 
 @dataclass(frozen=True)
 class AlignmentDiagnostics:
@@ -265,6 +267,34 @@ def audit_artifact(
             labels,
             n_clusters=n_clusters,
         )
+        recorded_acc = None
+        recorded_nmi = None
+        acc_delta = None
+        nmi_delta = None
+        if name in {"view1", "view2", "fused"}:
+            recorded_acc = artifact.get(f"{name}_acc")
+            recorded_nmi = artifact.get(f"{name}_nmi")
+            if (recorded_acc is None) != (recorded_nmi is None):
+                raise ValueError(f"Recorded MvDEC {name} metrics are incomplete.")
+            if recorded_acc is not None:
+                recorded_acc = float(recorded_acc)
+                recorded_nmi = float(recorded_nmi)
+                if not all(
+                    np.isfinite(value) and 0.0 <= value <= 1.0
+                    for value in (recorded_acc, recorded_nmi)
+                ):
+                    raise ValueError(
+                        f"Recorded MvDEC {name} metrics are invalid."
+                    )
+                acc_delta = metrics.acc - recorded_acc
+                nmi_delta = metrics.nmi - recorded_nmi
+                if max(abs(acc_delta), abs(nmi_delta)) > (
+                    INDEPENDENT_KMEANS_METRIC_ATOL
+                ):
+                    raise ValueError(
+                        f"Recorded MvDEC {name} metrics diverge materially from "
+                        "independent K-Means."
+                    )
         records.append(
             {
                 "dataset": artifact["dataset"],
@@ -277,6 +307,11 @@ def audit_artifact(
                 "representation": name,
                 "acc": metrics.acc,
                 "nmi": metrics.nmi,
+                "recorded_acc": recorded_acc,
+                "recorded_nmi": recorded_nmi,
+                "acc_delta": acc_delta,
+                "nmi_delta": nmi_delta,
+                "independent_metric_atol": INDEPENDENT_KMEANS_METRIC_ATOL,
                 "n_samples": len(true_labels),
                 "latent_width": representation.shape[1],
                 "seed": seed,
