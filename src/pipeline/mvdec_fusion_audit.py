@@ -9,12 +9,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.linalg import orthogonal_procrustes
+from sklearn import __version__ as sklearn_version
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 from pipeline.data import validate_mvdec_artifact
 from pipeline.external_metrics import compute_external_metrics
-from pipeline.mvdec_audit import validate_expected_run_set
+from pipeline.mvdec_audit import (
+    validate_expected_run_set,
+    validate_numerical_runtime,
+)
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
@@ -324,9 +328,16 @@ def audit_root(
     )
     frames = []
     for manifest in manifests:
+        validate_numerical_runtime(manifest)
         artifact_path = resolve_manifest_output_path(manifest, "artifact")
         validate_mvdec_artifact(artifact_path)
-        frames.append(audit_artifact(artifact_path, output_dir)[0])
+        frame = audit_artifact(artifact_path, output_dir)[0]
+        runtime = manifest["runtime"]
+        frame["training_numpy_version"] = runtime["numpy_version"]
+        frame["training_scikit_learn_version"] = runtime["scikit_learn_version"]
+        frame["audit_numpy_version"] = np.__version__
+        frame["audit_scikit_learn_version"] = sklearn_version
+        frames.append(frame)
     combined = pd.concat(frames, ignore_index=True)
     write_public_frame(combined, output_dir / "mvdec_fusion_audit_metrics.csv")
     return combined

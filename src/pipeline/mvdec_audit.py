@@ -41,7 +41,7 @@ def artifact_data_path(manifest: dict[str, object]) -> Path:
     return resolve_manifest_output_path(manifest, "assignments")
 
 
-def _validate_public_source_runtime(manifest: dict[str, object]) -> None:
+def validate_numerical_runtime(manifest: dict[str, object]) -> None:
     """Require the numerical runtime that produced exact source fingerprints."""
 
     runtime = manifest.get("runtime")
@@ -85,7 +85,7 @@ def validate_public_source(
     )
     if dataset_name == "20NEWS" and source_id != TWENTY_NEWS_SKLEARN_SOURCE:
         raise ValueError("Canonical MvDEC 20NEWS runs must use the sklearn source.")
-    _validate_public_source_runtime(manifest)
+    validate_numerical_runtime(manifest)
     contract = config.get("protocol_contract")
     normalization = (
         contract.get("preprocessing", {}).get("input_normalization")
