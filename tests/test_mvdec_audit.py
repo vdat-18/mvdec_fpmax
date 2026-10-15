@@ -46,6 +46,10 @@ def test_audit_retains_failed_manifest_without_loading_artifact(tmp_path):
         {
             "run_id": paths.run_id,
             "status": "failed",
+            "dataset": "TIKI",
+            "protocol_id": "mvdec_dekm_consistent_v1",
+            "seed": 42,
+            "run_index": 1,
             "config": config,
             "config_hash": paths.config_hash,
         },
@@ -78,6 +82,10 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
         {
             "run_id": paths.run_id,
             "status": "complete",
+            "dataset": "TIKI",
+            "protocol_id": "mvdec_dekm_consistent_v1",
+            "seed": 42,
+            "run_index": 1,
             "config": config,
             "config_hash": paths.config_hash,
             "paths": output_paths,

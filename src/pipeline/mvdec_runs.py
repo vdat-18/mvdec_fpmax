@@ -15,6 +15,7 @@ from pipeline.io import replace_with_retry
 RUN_MANIFEST_SCHEMA_VERSION = 1
 RUN_MANIFEST_FILENAME = "manifest.json"
 GIT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 RUN_OUTPUT_NAMES = frozenset(
     {
         "artifact",
@@ -199,6 +200,49 @@ def load_run_manifest(path: Path) -> dict[str, object]:
         raise ValueError(f"MvDEC run manifest config hash does not match: {path}")
     payload["_manifest_path"] = str(path.resolve())
     return payload
+
+
+def validate_manifest_identity(manifest: dict[str, object]) -> None:
+    """Verify run identity fields and their immutable directory layout."""
+
+    dataset = manifest.get("dataset")
+    protocol_id = manifest.get("protocol_id")
+    config_hash = manifest.get("config_hash")
+    seed = manifest.get("seed")
+    run_index = manifest.get("run_index")
+    manifest_path = manifest.get("_manifest_path")
+    if not all(
+        (
+            isinstance(dataset, str),
+            isinstance(protocol_id, str),
+            isinstance(config_hash, str),
+            SHA256_PATTERN.fullmatch(config_hash) is not None,
+            isinstance(seed, int),
+            isinstance(run_index, int) and run_index > 0,
+            isinstance(manifest_path, str),
+        )
+    ):
+        raise ValueError("MvDEC manifest has invalid run identity metadata.")
+    expected_run_id = build_run_id(
+        dataset,
+        protocol_id,
+        config_hash,
+        seed,
+        run_index,
+    )
+    if manifest.get("run_id") != expected_run_id:
+        raise ValueError("MvDEC manifest run_id does not match its identity fields.")
+
+    path = Path(manifest_path).resolve()
+    expected_parts = (
+        f"seed_{seed}",
+        config_hash[:12],
+        protocol_id.lower(),
+        dataset.lower(),
+    )
+    actual_parts = tuple(parent.name for parent in path.parents[:4])
+    if tuple(part.lower() for part in actual_parts) != expected_parts:
+        raise ValueError("MvDEC manifest path does not match its run identity.")
 
 
 def resolve_manifest_output_path(

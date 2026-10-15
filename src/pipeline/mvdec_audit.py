@@ -17,6 +17,7 @@ from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
     resolve_manifest_output_path,
+    validate_manifest_identity,
     validate_manifest_outputs,
 )
 from pipeline.public_data import (
@@ -261,6 +262,7 @@ def audit_run_root(
         raise ValueError(f"No MvDEC run manifests found below: {root}")
     for manifest_path in manifest_paths:
         manifest = load_run_manifest(manifest_path)
+        validate_manifest_identity(manifest)
         status = manifest.get("status")
         if status == "failed":
             failed += 1

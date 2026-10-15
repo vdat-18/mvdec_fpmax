@@ -16,6 +16,7 @@ from pipeline.mvdec_runs import (
     prepare_run_directory,
     resolve_run_paths,
     resolve_training_commit,
+    validate_manifest_identity,
     validate_manifest_outputs,
     write_run_manifest,
 )
@@ -330,3 +331,35 @@ def test_resolve_training_commit_returns_full_head() -> None:
 
     assert len(commit) == 40
     assert set(commit) <= set("0123456789abcdef")
+
+def test_manifest_identity_matches_immutable_run_layout(tmp_path) -> None:
+    config = {"batch_size": 256}
+    paths = resolve_run_paths(
+        tmp_path,
+        "REUTERS",
+        "mvdec_dekm_consistent_v1",
+        config,
+        seed=42,
+        run_index=1,
+    )
+    prepare_run_directory(paths)
+    write_run_manifest(
+        paths.manifest,
+        {
+            "run_id": paths.run_id,
+            "status": "failed",
+            "dataset": "REUTERS",
+            "protocol_id": "mvdec_dekm_consistent_v1",
+            "seed": 42,
+            "run_index": 1,
+            "config": config,
+            "config_hash": paths.config_hash,
+        },
+    )
+    manifest = load_run_manifest(paths.manifest)
+
+    validate_manifest_identity(manifest)
+
+    manifest["run_id"] = "tampered"
+    with pytest.raises(ValueError, match="run_id"):
+        validate_manifest_identity(manifest)
