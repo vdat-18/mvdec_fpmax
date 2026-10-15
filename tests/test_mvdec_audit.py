@@ -379,3 +379,24 @@ def test_validate_expected_run_set_rejects_wrong_dataset_order() -> None:
             manifests,
             expected_datasets=("REUTERS", "RCV1"),
         )
+
+def test_validate_expected_run_set_can_require_all_complete() -> None:
+    manifests = [
+        {
+            "dataset": "REUTERS",
+            "started_at_utc": "2026-10-15T00:00:00+00:00",
+            "status": "complete",
+        },
+        {
+            "dataset": "RCV1",
+            "started_at_utc": "2026-10-15T01:00:00+00:00",
+            "status": "failed",
+        },
+    ]
+
+    with pytest.raises(ValueError, match="incomplete run"):
+        validate_expected_run_set(
+            manifests,
+            expected_datasets=("REUTERS", "RCV1"),
+            require_all_complete=True,
+        )

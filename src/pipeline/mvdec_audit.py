@@ -255,6 +255,7 @@ def validate_expected_run_set(
     expected_protocol_id: str | None = None,
     expected_training_commit: str | None = None,
     expected_seed: int | None = None,
+    require_all_complete: bool = False,
 ) -> None:
     """Fail closed when a downloaded run set differs from the requested gate."""
 
@@ -271,6 +272,10 @@ def validate_expected_run_set(
             raise ValueError(
                 "MvDEC dataset execution order does not match the expected gate."
             )
+    if require_all_complete and any(
+        manifest.get("status") != "complete" for manifest in manifests
+    ):
+        raise ValueError("Expected MvDEC run set contains an incomplete run.")
     checks = (
         ("protocol_id", expected_protocol_id),
         ("training_commit", expected_training_commit),
@@ -290,6 +295,7 @@ def audit_run_root(
     expected_protocol_id: str | None = None,
     expected_training_commit: str | None = None,
     expected_seed: int | None = None,
+    require_all_complete: bool = False,
 ) -> tuple[int, int]:
     """Validate all complete runs and return completed/failed manifest counts."""
 
@@ -307,6 +313,7 @@ def audit_run_root(
         expected_protocol_id=expected_protocol_id,
         expected_training_commit=expected_training_commit,
         expected_seed=expected_seed,
+        require_all_complete=require_all_complete,
     )
     for manifest in manifests:
         status = manifest.get("status")
@@ -354,6 +361,11 @@ def main() -> None:
     parser.add_argument("--expected-protocol-id")
     parser.add_argument("--expected-training-commit")
     parser.add_argument("--expected-seed", type=int)
+    parser.add_argument(
+        "--require-all-complete",
+        action="store_true",
+        help="Fail when any discovered manifest is not complete.",
+    )
     args = parser.parse_args()
     completed, failed = audit_run_root(
         args.root,
@@ -364,6 +376,7 @@ def main() -> None:
         expected_protocol_id=args.expected_protocol_id,
         expected_training_commit=args.expected_training_commit,
         expected_seed=args.expected_seed,
+        require_all_complete=args.require_all_complete,
     )
     logger.info("Audit complete: {} complete, {} failed", completed, failed)
 
