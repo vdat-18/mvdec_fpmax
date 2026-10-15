@@ -301,6 +301,17 @@ def test_pretraining_dataset_repeats_seeded_epoch_order(monkeypatch):
     np.testing.assert_array_equal(first_order, second_order)
 
 
+def test_pretraining_dataset_has_import_safe_default_batch_size(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    values = np.arange(18, dtype=np.float32).reshape(6, 3)
+
+    batches = list(mvdec.make_pretraining_dataset(values, 42).as_numpy_iterator())
+
+    assert mvdec.pretrain_batch_size == 256
+    assert len(batches) == 1
+    assert batches[0][0].shape == (6, 3)
+
+
 def test_assignment_change_count_ignores_cluster_id_permutations(monkeypatch):
     mvdec = _load_mvdec(monkeypatch)
     monkeypatch.setattr(mvdec, "n_clusters", 3)

@@ -82,6 +82,7 @@ n_clusters = 4
 view1_filters = [500, 500, 2000]
 view2_base_units = 64
 pretrain_epochs = 200
+pretrain_batch_size = 256
 batch_size = 256
 UNLABELED_ASSIGNMENT_CHANGE_TOLERANCE = 0.01
 PUBLIC_ASSIGNMENT_CHANGE_TOLERANCE = 0.001

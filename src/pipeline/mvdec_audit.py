@@ -220,8 +220,31 @@ def validate_training_log(
         "L3_trace_logged",
         "L4_greedy",
     )
+    config = artifact.get("config")
+    loss_weights = config.get("loss_weights") if isinstance(config, dict) else None
+    if not isinstance(loss_weights, dict):
+        raise ValueError("MvDEC training log is missing objective weights.")
+    objective_weights = {
+        "L1_reconstruction": loss_weights.get("reconstruction"),
+        "L2_kmeans": loss_weights.get("kmeans"),
+        "L3_trace_logged": loss_weights.get("scatter_trace_diagnostic"),
+        "L4_greedy": loss_weights.get("greedy"),
+        "L5_alignment": loss_weights.get("cross_view_alignment", 0.0),
+    }
+    if any(
+        isinstance(weight, bool)
+        or not isinstance(weight, (int, float))
+        or not np.isfinite(weight)
+        or weight < 0
+        for weight in objective_weights.values()
+    ):
+        raise ValueError("MvDEC training log has invalid objective weights.")
+    if objective_weights["L5_alignment"] > 0:
+        required_loss_names += ("L5_alignment",)
+
     for row in step9_rows:
         encoded_row = ",".join(row)
+        parsed_losses = {}
         for loss_name in required_loss_names:
             pattern = rf"(?:^|[,\s])(?:loss:)?{loss_name}:([^,\s]+)"
             matches = re.findall(pattern, encoded_row)
@@ -233,8 +256,36 @@ def validate_training_log(
                 raise ValueError(
                     f"MvDEC training log has a non-finite {loss_name} value."
                 )
+            parsed_losses[loss_name] = float(matches[0])
 
-    config = artifact.get("config", {})
+        expected_total = sum(
+            objective_weights[name] * parsed_losses.get(name, 0.0)
+            for name in objective_weights
+        )
+        # Values come from float32 TensorFlow losses and are then rounded to
+        # five decimals. Bound both sources of representational error.
+        rounding_tolerance = 5e-6 * (
+            1.0 + sum(abs(weight) for weight in objective_weights.values())
+        )
+        weighted_magnitude = sum(
+            abs(objective_weights[name] * parsed_losses.get(name, 0.0))
+            for name in objective_weights
+        )
+        float32_tolerance = (
+            8.0
+            * np.finfo(np.float32).eps
+            * max(weighted_magnitude, abs(parsed_losses["total"]), 1.0)
+        )
+        if not np.isclose(
+            parsed_losses["total"],
+            expected_total,
+            rtol=0.0,
+            atol=rounding_tolerance + float32_tolerance,
+        ):
+            raise ValueError(
+                "MvDEC logged total loss does not match its weighted components."
+            )
+
     if config.get("refinement_batch_size_policy") == "full_dataset":
         update_interval = int(config.get("update_interval", 0))
         n_samples = int(artifact.get("n_samples", 0))
@@ -272,7 +323,6 @@ def validate_training_log(
     if any(field not in stop_fields_found for field in stop_fields):
         raise ValueError("MvDEC training-log stopping metadata does not match.")
 
-    loss_weights = config.get("loss_weights", {})
     if loss_weights.get("cross_view_alignment", 0) > 0:
         l5_values = []
         for row in step9_rows:

@@ -198,7 +198,7 @@ def _write_training_log(
     loss_samples: int = 40,
 ) -> None:
     loss = (
-        "loss:total:5.0, L1_reconstruction:1.0, L2_kmeans:1.0, "
+        "loss:total:53.0, L1_reconstruction:1.0, L2_kmeans:1.0, "
         "L3_trace_logged:1.0, L4_greedy:1.0"
     )
     if include_l5:
@@ -229,6 +229,20 @@ def _write_training_log(
     )
 
 
+def _training_audit_config() -> dict[str, object]:
+    return {
+        "loss_weights": {
+            "reconstruction": 1.0,
+            "kmeans": 1.0,
+            "scatter_trace_diagnostic": 0.0,
+            "greedy": 1.0,
+            "cross_view_alignment": 100.0,
+        },
+        "refinement_batch_size_policy": "full_dataset",
+        "update_interval": 10,
+    }
+
+
 def test_validate_training_log_checks_complete_l5_trajectory(tmp_path) -> None:
     log_path = tmp_path / "training_log.csv"
     _write_training_log(log_path)
@@ -244,11 +258,7 @@ def test_validate_training_log_checks_complete_l5_trajectory(tmp_path) -> None:
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
     validate_training_log(manifest, artifact)
@@ -269,14 +279,10 @@ def test_validate_training_log_rejects_missing_l5_trajectory(tmp_path) -> None:
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
-    with pytest.raises(ValueError, match="L5 trajectory"):
+    with pytest.raises(ValueError, match="L5_alignment"):
         validate_training_log(manifest, artifact)
 
 
@@ -295,11 +301,7 @@ def test_validate_training_log_rejects_prefix_only_provenance_match(tmp_path) ->
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
     with pytest.raises(ValueError, match="summary provenance"):
@@ -321,11 +323,7 @@ def test_validate_training_log_rejects_noncontiguous_windows(tmp_path) -> None:
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
     with pytest.raises(ValueError, match="not contiguous"):
@@ -347,11 +345,7 @@ def test_validate_training_log_rejects_nonfinite_l5(tmp_path) -> None:
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
     with pytest.raises(ValueError, match="non-finite L5"):
@@ -373,14 +367,60 @@ def test_validate_training_log_rejects_mini_batch_evidence(tmp_path) -> None:
         "refinement_progress_unit": "kmeans_refresh_windows",
         "stop_reason": "converged_assignment",
         "n_samples": 4,
-        "config": {
-            "loss_weights": {"cross_view_alignment": 100.0},
-            "refinement_batch_size_policy": "full_dataset",
-            "update_interval": 10,
-        },
+        "config": _training_audit_config(),
     }
 
     with pytest.raises(ValueError, match="full-dataset refinement batches"):
+        validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_invalid_objective_weights(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    config = _training_audit_config()
+    config["loss_weights"]["reconstruction"] = True
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "n_samples": 4,
+        "config": config,
+    }
+
+    with pytest.raises(ValueError, match="invalid objective weights"):
+        validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_inconsistent_weighted_total(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    content = log_path.read_text(encoding="utf-8").replace(
+        "loss:total:53.0", "loss:total:52.0"
+    )
+    log_path.write_text(content, encoding="utf-8")
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "n_samples": 4,
+        "config": _training_audit_config(),
+    }
+
+    with pytest.raises(ValueError, match="weighted components"):
         validate_training_log(manifest, artifact)
 
 
