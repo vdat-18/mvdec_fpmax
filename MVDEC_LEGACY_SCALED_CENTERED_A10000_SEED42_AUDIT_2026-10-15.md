@@ -105,7 +105,7 @@ numerically close to the published labels.
 
 ## Completed paper-figure fusion diagnostic
 
-The repository now defines two immutable post-training fusion contracts for the
+The repository defines two immutable post-training fusion contracts for the
 paper's diagram ambiguity:
 
 - `mvdec2025_figure1_full_output_average_diagnostic`: elementwise average of
@@ -122,12 +122,14 @@ implemented only as post-training diagnostic transformations; no existing
 training protocol or artifact identity was changed.
 
 Kaggle kernel
-`vandatzz/mvdec-2025-reuters-paper-figure-audit-seed-42`, Version 5, completed
+`vandatzz/mvdec-2025-reuters-paper-figure-audit-seed-42`, Version 7, completed
 successfully on CPU on 2026-10-15. It reused the complete centered A1.0 REUTERS
 seed-42 weights; it did not pretrain or refine either network. CPU execution was
-intentional: this bounded job only performs inference and scikit-learn K-Means,
-and scikit-learn K-Means is CPU-based. The retained log reached the final metric
-table after about 340 seconds.
+intentional: this bounded job only performs TensorFlow inference and
+scikit-learn K-Means, and scikit-learn K-Means is CPU-based. Version 6 had
+already computed the scientific outputs but failed only because a notebook
+assertion still expected three representations; Version 7 corrected that
+operational assertion and completed normally.
 
 Immutable source identity:
 
@@ -137,40 +139,73 @@ Immutable source identity:
 - Source: `dekm_google_drive_reuters_10k`
 - Source SHA-256: `7eb3f41aca38ffb93c104eef261adc3273d1da57c3750e04c92a67e335d423a1`
 - Numerical runtime: NumPy 2.1.3, scikit-learn 1.6.1
-- Audit runner commit: `0f282c502c75b6d3679e2e8d4d14531077c37d56`
+- Audit runner commit: `059ef8ca9e0c5594bc1c39ccf50063163af29c81`
 
-| Interpretation | Width | ACC / NMI | Delta from paper ACC / NMI |
+### Results and decomposition controls
+
+| Representation | Width | ACC / NMI | Delta from paper ACC / NMI |
 | --- | ---: | ---: | ---: |
 | Eq. 4 latent average | 10 | 44.65 / 10.69 | -33.48 / -50.72 pp |
 | Figure 1 full-output average | 2,010 | 54.73 / 43.51 | -23.40 / -17.90 pp |
 | Figure 2 full-output concatenation | 4,020 | 54.07 / 37.47 | -24.06 / -23.94 pp |
+| Raw input K-Means control | 2,000 | 54.05 / 41.94 | -24.08 / -19.47 pp |
+| Latent concatenation control | 20 | 65.45 / 39.23 | -12.68 / -22.18 pp |
+| Reconstruction-only average control | 2,000 | 54.65 / 43.20 | -23.48 / -18.21 pp |
 
-Figure 1 full-output averaging is the strongest of these three post-training
-diagnostics on this one seed, especially for NMI. It still remains far below
-the paper's REUTERS fused result of 78.13 ACC / 61.41 NMI. This does not identify
-the paper's hidden implementation and is not a reason to promote Figure 1 as the
-canonical protocol. The result only shows that including reconstruction outputs
-changes the clustering geometry substantially compared with Eq. 4 latent-only
-averaging.
+The apparent Figure 1 improvement is almost entirely reconstruction-driven.
+Figure 1 reaches 54.73 ACC / 43.51 NMI, while averaging only the two
+reconstructions reaches 54.65 / 43.20. Adding the latent coordinates therefore
+changes the result by only +0.08 percentage points ACC and +0.31 percentage
+points NMI. Figure 1 does not repair the learned fused latent representation; it
+mostly recovers ordinary input/reconstruction geometry.
 
-Independent local recomputation from all three assignment files exactly matches
-the reported ACC/NMI. Each file contains 10,000 row-aligned samples and four
-clusters. Assignment checksums also match the diagnostic manifest:
+The raw-input control reaches 54.05 ACC / 41.94 NMI, almost exactly the paper's
+REUTERS K-Means row of 54.05 / 41.91. This is strong evidence that the canonical
+REUTERS source and preprocessing used by this repository are correct. The
+remaining reproduction gap is therefore concentrated in MvDEC representation
+learning and fusion rather than in dataset identity or preprocessing.
+
+Latent concatenation reaches 65.45 ACC / 39.23 NMI, far above direct latent
+averaging at 44.65 / 10.69. This confirms that the two learned ten-dimensional
+coordinate systems contain useful information but are not compatible with
+coordinate-wise averaging. Concatenation avoids destructive cancellation, but
+it still remains below the paper's fused result of 78.13 / 61.41 and is only a
+diagnostic control, not a paper interpretation.
+
+Together with the earlier Procrustes-aligned average result of 67.26 / 40.43,
+the evidence narrows the failure: direct Eq. 4 averaging is destructive because
+the independently learned view spaces do not preserve a shared coordinate
+system. Full-output fusion only hides that failure behind reconstruction
+features. The next investigation should compare the older approximately
+76 / 60 REUTERS protocols against the centered Eq. 11 source to identify the
+specific training-objective or schedule change that destroyed cross-view
+compatibility. It should not spend more GPU quota on random alignment-weight
+sweeps or another full-output fusion variant.
+
+### Independent verification
+
+All six assignment files contain 10,000 row-aligned samples. Independent local
+recomputation exactly matches all six reported ACC/NMI values, and every
+assignment checksum matches the Version 7 diagnostic manifest:
 
 | Output | SHA-256 |
 | --- | --- |
 | Eq. 4 assignments | `f473378d1a7dc99ef91829cba37f5f26ff91eb0f14b21c017bbb47b59f3e15a3` |
 | Figure 1 assignments | `2ee2b19bd28ef622ecc75fd5e8b8a524ba2de09b309b59a8027fb8f074c53d04` |
 | Figure 2 assignments | `400fcb95be751b84d0dccda596d0967c506e0cb99e16d3948c8178f8d514b82f` |
-| Metrics CSV | `6abd58cdf46fd60bf3d0fa6b932930cb56b67e76f707f651683022cac347c520` |
-| Retained ZIP | `a99cc87f798ca58bc40c8f8bfe2a63ca9fe4911c1d9dbf11f0b3e448521ba07f` |
+| Raw-input assignments | `3f926d7b48132a0f893aefe345a718eeff52727c698bc20efa0e3a3b9e80dba6` |
+| Latent-concatenation assignments | `6220324246f8654fafaf50ea308ef32d6e30f869b9f68418b781d9b14b0df5f7` |
+| Reconstruction-average assignments | `af2adedccaa16117458544e387276f05ab85e60ac143e5dd699f7fe7d8dc15e7` |
+| Metrics CSV | `c8f935a157aa83975ea5b32474333f82d959682d131af9376bce7af897d6df4f` |
+| Retained ZIP | `dca59eb8e848da4c3f90f4e7c350a34801dcdec72a8d87ca146b66b3f973b47c` |
 
-The durable output is under
-`artifacts/kaggle/mvdec-2025-reuters-paper-figure-audit-seed42`.
+The retained ZIP checksum exactly matches its sidecar. Durable Version 7 output
+is under
+`artifacts/kaggle/mvdec-2025-reuters-paper-figure-audit-seed42/version7`.
 
 ### Bounded runner status
 
-The post-training runner is now implemented as
+The post-training runner is implemented as
 `pipeline.mvdec_paper_figure_audit` with CLI entry point
 `mvdec-audit-paper-figures`. It accepts exactly one complete run manifest and
 fails closed before inference unless the run identity, config hash, complete
@@ -180,15 +215,12 @@ view-input contract, seed, and K-Means restart count are consistent.
 
 Inference uses bounded batches and disk-backed temporary arrays rather than
 persisting both complete public outputs in memory. It evaluates the declared
-Eq. 4 latent fusion, Figure 1 full-output average, and Figure 2 full-output
-concatenation with independent K-Means (`n_init=100`) and the manifest seed. It
-exports per-representation ACC/NMI, row-aligned assignments, source/width/claim
+Eq. 4 latent fusion, Figure 1 full-output average, Figure 2 full-output
+concatenation, raw input, latent concatenation, and reconstruction-only average
+with independent K-Means (`n_init=100`) and the manifest seed. It exports
+per-representation ACC/NMI, row-aligned assignments, source/width/claim
 metadata, and a diagnostic manifest containing checksums for every retained
 output. Temporary full-output matrices are closed and removed after the audit.
 
-Focused validation passes with 54 tests across the new runner, fusion contracts,
-manifest handling, public data, and architecture suites. The runner completed
-on Kaggle CPU, and no GPU run or seed 43-44 run was created. The REUTERS-only
-notebook `notebooks/mvdec_2025_reuters_paper_figure_audit_seed42_kaggle.ipynb`
-pins the runner commit `0f282c502c75b6d3679e2e8d4d14531077c37d56` and enforces
-a 20-minute subprocess timeout.
+Focused validation for the decomposition change passes with 27 tests; Ruff and
+`git diff --check` also pass. No GPU run or seed 43-44 run was created.
