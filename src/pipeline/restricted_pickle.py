@@ -6,6 +6,11 @@ from typing import BinaryIO
 
 import numpy as np
 
+try:
+    from numpy._core import multiarray as _numpy_multiarray
+except ImportError:  # NumPy 1.x public compatibility path.
+    from numpy.core import multiarray as _numpy_multiarray
+
 
 def _safe_legacy_encode(
     value: str,
@@ -28,11 +33,11 @@ _ALLOWED_PICKLE_GLOBALS: dict[tuple[str, str], Callable | type] = {
     ("_codecs", "encode"): _safe_legacy_encode,
     ("numpy", "dtype"): np.dtype,
     ("numpy", "ndarray"): np.ndarray,
-    ("numpy._core.multiarray", "_reconstruct"): np._core.multiarray._reconstruct,
-    ("numpy._core.multiarray", "scalar"): np._core.multiarray.scalar,
+    ("numpy._core.multiarray", "_reconstruct"): _numpy_multiarray._reconstruct,
+    ("numpy._core.multiarray", "scalar"): _numpy_multiarray.scalar,
     # NumPy 1.x used this module path. NumPy 2 keeps it load-compatible.
-    ("numpy.core.multiarray", "_reconstruct"): np._core.multiarray._reconstruct,
-    ("numpy.core.multiarray", "scalar"): np._core.multiarray.scalar,
+    ("numpy.core.multiarray", "_reconstruct"): _numpy_multiarray._reconstruct,
+    ("numpy.core.multiarray", "scalar"): _numpy_multiarray.scalar,
 }
 
 
