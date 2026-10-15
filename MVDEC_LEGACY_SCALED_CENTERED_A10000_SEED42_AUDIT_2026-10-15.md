@@ -160,10 +160,11 @@ points NMI. Figure 1 does not repair the learned fused latent representation; it
 mostly recovers ordinary input/reconstruction geometry.
 
 The raw-input control reaches 54.05 ACC / 41.94 NMI, almost exactly the paper's
-REUTERS K-Means row of 54.05 / 41.91. This is strong evidence that the canonical
-REUTERS source and preprocessing used by this repository are correct. The
-remaining reproduction gap is therefore concentrated in MvDEC representation
-learning and fusion rather than in dataset identity or preprocessing.
+REUTERS K-Means row of 54.05 / 41.91. This strongly validates the dataset
+content, labels, row alignment, and feature geometry. It does not by itself
+resolve the neural-training normalization ambiguity: the release L2
+normalization and the paper's mean-squared-norm normalization differ only by the
+global factor `sqrt(2000)`, so K-Means produces the same partition under both.
 
 Latent concatenation reaches 65.45 ACC / 39.23 NMI, far above direct latent
 averaging at 44.65 / 10.69. This confirms that the two learned ten-dimensional
@@ -176,11 +177,30 @@ Together with the earlier Procrustes-aligned average result of 67.26 / 40.43,
 the evidence narrows the failure: direct Eq. 4 averaging is destructive because
 the independently learned view spaces do not preserve a shared coordinate
 system. Full-output fusion only hides that failure behind reconstruction
-features. The next investigation should compare the older approximately
-76 / 60 REUTERS protocols against the centered Eq. 11 source to identify the
-specific training-objective or schedule change that destroyed cross-view
-compatibility. It should not spend more GPU quota on random alignment-weight
-sweeps or another full-output fusion variant.
+features.
+
+A local contract comparison found an additional non-equivalence that must be
+isolated before another broad training run. The older architecture diagnostics
+that reached approximately 76 / 60 used release L2-normalized REUTERS features
+with source hash
+`427993db6b0544dfce1b8e3985e63e248d4d006de122cb202c504489d951706b` and
+mean row norm 1. The centered Eq. 11 source uses the paper's
+mean-squared-norm-one features with source hash
+`7eb3f41aca38ffb93c104eef261adc3273d1da57c3750e04c92a67e335d423a1` and
+mean row norm `sqrt(2000) = 44.721...`. This global scaling does not change raw
+K-Means, but it changes neural activations and reconstruction-loss magnitude by
+orders of magnitude.
+
+The standalone DEKM_F audit shows the same sensitivity: the earlier L2-scaled
+seed-42 run reached 75.63 ACC / 58.45 NMI, while the corrected paper-normalized
+seed-42 run reached only 51.01 / 21.38. Therefore the old approximately 76 / 60
+MvDEC result is not an apples-to-apples control for the current centered source.
+The next bounded GPU experiment should change exactly one variable on the
+paper-resolved full-batch seed-42 protocol: paper RMS normalization -> release
+L2 normalization. That isolates input scale before changing the Eq. 11
+objective, update schedule, fusion rule, or alignment loss. No seeds 43-44
+should run unless that gate is scientifically useful. Random alignment-weight
+sweeps and additional full-output fusion variants are no longer justified.
 
 ### Independent verification
 
