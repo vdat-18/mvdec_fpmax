@@ -104,6 +104,31 @@ def test_validate_public_source_rejects_noncanonical_20news(tmp_path) -> None:
         validate_public_source(manifest, tmp_path)
 
 
+def test_validate_public_source_rejects_runtime_mismatch(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(mvdec_audit.np, "__version__", "2.4.6")
+    monkeypatch.setattr(mvdec_audit, "sklearn_version", "1.6.1")
+    manifest = {
+        "dataset": "RCV1",
+        "source_id": "dekm_google_drive_indices_sklearn_rcv1",
+        "runtime": {
+            "numpy_version": "2.1.3",
+            "scikit_learn_version": "1.6.1",
+        },
+        "config": {
+            "protocol_contract": {
+                "preprocessing": {
+                    "input_normalization": "paper_mean_squared_norm_one"
+                }
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="NumPy expected '2.1.3', found '2.4.6'"):
+        validate_public_source(manifest, tmp_path)
+
+
 def test_validate_public_assignments_recomputes_metrics() -> None:
     assignments = pd.DataFrame(
         {

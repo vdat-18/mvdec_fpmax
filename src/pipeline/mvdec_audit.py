@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from loguru import logger
+from sklearn import __version__ as sklearn_version
 
 from config import DEKM_DATASET_DIR
 from pipeline.data import load_mvdec_result, validate_mvdec_artifact
@@ -36,6 +37,30 @@ def artifact_data_path(manifest: dict[str, object]) -> Path:
     return resolve_manifest_output_path(manifest, "assignments")
 
 
+def _validate_public_source_runtime(manifest: dict[str, object]) -> None:
+    """Require the numerical runtime that produced exact source fingerprints."""
+
+    runtime = manifest.get("runtime")
+    if not isinstance(runtime, dict):
+        raise ValueError("Public MvDEC manifest is missing runtime provenance.")
+    expected = {
+        "NumPy": runtime.get("numpy_version"),
+        "scikit-learn": runtime.get("scikit_learn_version"),
+    }
+    actual = {"NumPy": np.__version__, "scikit-learn": sklearn_version}
+    mismatches = [
+        f"{name} expected {expected[name]!r}, found {actual[name]!r}"
+        for name in expected
+        if expected[name] != actual[name]
+    ]
+    if mismatches:
+        details = "; ".join(mismatches)
+        raise ValueError(
+            "Exact public-source audit requires the recorded numerical runtime: "
+            f"{details}."
+        )
+
+
 def validate_public_source(
     manifest: dict[str, object],
     dataset_root: Path,
@@ -56,6 +81,7 @@ def validate_public_source(
     )
     if dataset_name == "20NEWS" and source_id != TWENTY_NEWS_SKLEARN_SOURCE:
         raise ValueError("Canonical MvDEC 20NEWS runs must use the sklearn source.")
+    _validate_public_source_runtime(manifest)
     contract = config.get("protocol_contract")
     normalization = (
         contract.get("preprocessing", {}).get("input_normalization")
