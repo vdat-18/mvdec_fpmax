@@ -9,12 +9,53 @@ VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID = (
 )
 FUSION_ENCODER_AVERAGE = "mvdec2025_encoder_average"
 FUSION_ENCODER_L2_NORMALIZED_AVERAGE = "mvdec2025_encoder_l2_normalized_average"
+FUSION_FIGURE1_FULL_OUTPUT_AVERAGE = (
+    "mvdec2025_figure1_full_output_average_diagnostic"
+)
+FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION = (
+    "mvdec2025_figure2_full_output_concatenation_diagnostic"
+)
+PAPER_FIGURE_FUSION_CONTRACTS = (
+    FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+    FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+)
 VIEW_INPUT_CONTRACT = "same_full_feature_matrix_both_views_v1"
 REPRESENTATION_METRIC_SEMANTICS = "jointly_trained_views_independent_kmeans_v1"
 REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS = "dataset_epochs"
 REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS = "kmeans_refresh_windows"
 ALIGNMENT_UNCENTERED_ROW_L2 = "uncentered_row_l2"
 ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2 = "full_batch_centered_row_l2"
+
+
+def paper_figure_fusion_metadata(
+    fusion_contract: str,
+    view_output_width: int,
+) -> dict[str, object]:
+    """Describe a non-training diagnostic for the paper's conflicting figures."""
+
+    if view_output_width < 1:
+        raise ValueError("view_output_width must be positive.")
+    if fusion_contract == FUSION_FIGURE1_FULL_OUTPUT_AVERAGE:
+        return {
+            "fusion_contract": fusion_contract,
+            "paper_source": "MvDEC 2025 Figure 1",
+            "operation": "elementwise_average",
+            "input_width_per_view": view_output_width,
+            "output_width": view_output_width,
+            "claim_scope": "post_training_diagnostic_not_exact_paper_truth",
+        }
+    if fusion_contract == FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION:
+        return {
+            "fusion_contract": fusion_contract,
+            "paper_source": "MvDEC 2025 Figure 2 final layer",
+            "operation": "column_concatenation",
+            "input_width_per_view": view_output_width,
+            "output_width": 2 * view_output_width,
+            "claim_scope": "post_training_diagnostic_not_exact_paper_truth",
+        }
+    raise ValueError(
+        f"Unsupported MvDEC paper-figure fusion contract: {fusion_contract!r}."
+    )
 
 
 LITERAL_EQUATION11_PROTOCOL_ID = "mvdec_2025_equation11_literal_v1"

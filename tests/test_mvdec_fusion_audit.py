@@ -3,12 +3,18 @@ import pickle
 import numpy as np
 import pytest
 
+from pipeline.mvdec_contract import (
+    FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+    FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+)
 from pipeline.mvdec_fusion_audit import (
     alignment_diagnostics,
     audit_artifact,
     audit_root,
     diagnostic_representations,
     fused_representation,
+    paper_figure_diagnostic_representations,
+    paper_figure_fused_representation,
 )
 
 
@@ -49,6 +55,65 @@ def test_l2_normalized_fusion_matches_declared_contract() -> None:
     )
 
     np.testing.assert_allclose(fused, [[0.5, 0.5], [0.0, 0.5]])
+
+
+@pytest.mark.parametrize(
+    ("fusion_contract", "expected"),
+    [
+        (
+            FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+            np.array([[5.5, 11.0, 16.5]]),
+        ),
+        (
+            FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+            np.array([[1.0, 2.0, 3.0, 10.0, 20.0, 30.0]]),
+        ),
+    ],
+)
+def test_paper_figure_fusion_records_source_and_width(
+    fusion_contract,
+    expected,
+) -> None:
+    fused, metadata = paper_figure_fused_representation(
+        np.array([[1.0, 2.0, 3.0]]),
+        np.array([[10.0, 20.0, 30.0]]),
+        fusion_contract,
+    )
+
+    np.testing.assert_allclose(fused, expected)
+    assert metadata["input_width_per_view"] == 3
+    assert metadata["output_width"] == expected.shape[1]
+    assert metadata["claim_scope"] == (
+        "post_training_diagnostic_not_exact_paper_truth"
+    )
+
+
+def test_paper_figure_diagnostic_representations_are_stably_named() -> None:
+    representations = paper_figure_diagnostic_representations(
+        np.ones((2, 3)),
+        np.full((2, 3), 3.0),
+    )
+
+    assert tuple(representations) == (
+        FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+        FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+    )
+    assert representations[FUSION_FIGURE1_FULL_OUTPUT_AVERAGE][0].shape == (
+        2,
+        3,
+    )
+    assert representations[
+        FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION
+    ][0].shape == (2, 6)
+
+
+def test_paper_figure_fusion_rejects_incompatible_outputs() -> None:
+    with pytest.raises(ValueError, match="equal two-dimensional"):
+        paper_figure_fused_representation(
+            np.ones((2, 3)),
+            np.ones((2, 4)),
+            FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+        )
 
 
 def test_procrustes_control_recovers_rotated_latent() -> None:

@@ -21,6 +21,10 @@ from pipeline.mvdec_audit import (
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+    FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+    PAPER_FIGURE_FUSION_CONTRACTS,
+    paper_figure_fusion_metadata,
 )
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
@@ -168,6 +172,57 @@ def fused_representation(
     if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
         return (_row_l2_normalize(view1) + _row_l2_normalize(view2)) / 2
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
+
+
+def paper_figure_fused_representation(
+    view1_output: np.ndarray,
+    view2_output: np.ndarray,
+    fusion_contract: str,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """Apply one figure-derived full-output fusion as a post-training diagnostic."""
+
+    view1_output = np.asarray(view1_output)
+    view2_output = np.asarray(view2_output)
+    if (
+        view1_output.ndim != 2
+        or view2_output.ndim != 2
+        or view1_output.shape != view2_output.shape
+    ):
+        raise ValueError(
+            "MvDEC paper-figure fusion requires equal two-dimensional view outputs."
+        )
+    if not np.isfinite(view1_output).all() or not np.isfinite(view2_output).all():
+        raise ValueError("MvDEC paper-figure view outputs must be finite.")
+
+    metadata = paper_figure_fusion_metadata(
+        fusion_contract,
+        view_output_width=view1_output.shape[1],
+    )
+    if fusion_contract == FUSION_FIGURE1_FULL_OUTPUT_AVERAGE:
+        fused = (view1_output + view2_output) / 2
+    elif fusion_contract == FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION:
+        fused = np.concatenate((view1_output, view2_output), axis=1)
+    else:  # pragma: no cover - metadata validation owns this branch.
+        raise AssertionError("Unhandled paper-figure fusion contract.")
+    if fused.shape[1] != metadata["output_width"]:
+        raise AssertionError("Paper-figure fusion width does not match its contract.")
+    return fused, metadata
+
+
+def paper_figure_diagnostic_representations(
+    view1_output: np.ndarray,
+    view2_output: np.ndarray,
+) -> dict[str, tuple[np.ndarray, dict[str, object]]]:
+    """Return both conflicting figure interpretations under stable names."""
+
+    return {
+        fusion_contract: paper_figure_fused_representation(
+            view1_output,
+            view2_output,
+            fusion_contract,
+        )
+        for fusion_contract in PAPER_FIGURE_FUSION_CONTRACTS
+    }
 
 
 def diagnostic_representations(

@@ -14,6 +14,8 @@ from pipeline.mvdec_contract import (
     ALIGNMENT_UNCENTERED_ROW_L2,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
+    FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+    FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -22,6 +24,7 @@ from pipeline.mvdec_contract import (
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     balanced_batch_count,
+    paper_figure_fusion_metadata,
 )
 
 
@@ -107,3 +110,33 @@ def test_balanced_batch_count_matches_training_contract() -> None:
     assert balanced_batch_count(3_765, 256) == 15
     with pytest.raises(ValueError, match="positive"):
         balanced_batch_count(0, 256)
+
+
+@pytest.mark.parametrize(
+    ("fusion_contract", "paper_source", "output_width"),
+    [
+        (
+            FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
+            "MvDEC 2025 Figure 1",
+            23,
+        ),
+        (
+            FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+            "MvDEC 2025 Figure 2 final layer",
+            46,
+        ),
+    ],
+)
+def test_paper_figure_fusion_metadata_is_explicitly_diagnostic(
+    fusion_contract,
+    paper_source,
+    output_width,
+) -> None:
+    metadata = paper_figure_fusion_metadata(fusion_contract, 23)
+
+    assert metadata["paper_source"] == paper_source
+    assert metadata["input_width_per_view"] == 23
+    assert metadata["output_width"] == output_width
+    assert metadata["claim_scope"] == (
+        "post_training_diagnostic_not_exact_paper_truth"
+    )
