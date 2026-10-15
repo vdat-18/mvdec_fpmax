@@ -211,6 +211,10 @@ def validate_archive_bundle(
         ) from error
     if failures != []:
         raise ValueError("MvDEC archive bundle records failed runs.")
+    if any(manifest.get("status") != "complete" for manifest in manifests):
+        raise ValueError(
+            "MvDEC archive bundle cannot declare success with incomplete manifests."
+        )
 
     summary_path = archive_root / "public_mvdec_matrix_runs.csv"
     try:

@@ -144,3 +144,12 @@ def test_validate_archive_bundle_rejects_recorded_failures(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="records failed runs"):
         validate_archive_bundle(archive_root, [])
+
+
+def test_validate_archive_bundle_rejects_incomplete_manifests(tmp_path) -> None:
+    archive_root = tmp_path / "archives"
+    archive_root.mkdir()
+    (archive_root / "failures.json").write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="incomplete manifests"):
+        validate_archive_bundle(archive_root, [{"status": "failed"}])
