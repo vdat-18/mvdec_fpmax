@@ -199,6 +199,10 @@ def audit_artifact(
     n_clusters = int(artifact["n_clusters"])
     seed = int(artifact["config"]["seed"])
     n_init = int(artifact["kmeans_n_init"])
+    if n_init != 100:
+        raise ValueError(
+            "Independent MvDEC fusion audit requires K-Means n_init=100."
+        )
     dataset_output = output_dir / str(artifact["dataset"]).lower()
     records = []
     for name, representation in diagnostic_representations(view1, view2).items():
