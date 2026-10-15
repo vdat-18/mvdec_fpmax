@@ -13,6 +13,7 @@ from sklearn import __version__ as sklearn_version
 from config import DEKM_DATASET_DIR
 from pipeline.data import load_mvdec_result, validate_mvdec_artifact
 from pipeline.external_metrics import compute_external_metrics
+from pipeline.mvdec_bundle_audit import validate_archive_bundle
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
     load_run_manifest,
@@ -403,6 +404,16 @@ def main() -> None:
         action="store_true",
         help="Fail when any discovered manifest is not complete.",
     )
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        help="Optional directory containing matrix summaries and run archives.",
+    )
+    parser.add_argument(
+        "--combined-zip",
+        type=Path,
+        help="Optional combined ZIP to verify against --archive-root.",
+    )
     args = parser.parse_args()
     completed, failed = audit_run_root(
         args.root,
@@ -415,6 +426,13 @@ def main() -> None:
         expected_seed=args.expected_seed,
         require_all_complete=args.require_all_complete,
     )
+    if args.combined_zip is not None and args.archive_root is None:
+        parser.error("--combined-zip requires --archive-root")
+    if args.archive_root is not None:
+        manifest_paths = sorted(args.root.rglob(RUN_MANIFEST_FILENAME))
+        manifests = [load_run_manifest(path) for path in manifest_paths]
+        validate_archive_bundle(args.archive_root, manifests, args.combined_zip)
+        logger.info("Archive bundle audit complete: {}", args.archive_root)
     logger.info("Audit complete: {} complete, {} failed", completed, failed)
 
 

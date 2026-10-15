@@ -91,8 +91,7 @@ def test_audit_validates_and_reloads_complete_artifact(tmp_path, monkeypatch):
             "config_hash": paths.config_hash,
             "paths": output_paths,
             "output_sha256": {
-                name: file_sha256(getattr(paths, name))
-                for name in RUN_OUTPUT_NAMES
+                name: file_sha256(getattr(paths, name)) for name in RUN_OUTPUT_NAMES
             },
         },
     )
@@ -122,9 +121,7 @@ def test_validate_public_source_rejects_noncanonical_20news(tmp_path) -> None:
         validate_public_source(manifest, tmp_path)
 
 
-def test_validate_public_source_rejects_runtime_mismatch(
-    tmp_path, monkeypatch
-) -> None:
+def test_validate_public_source_rejects_runtime_mismatch(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mvdec_audit.np, "__version__", "2.4.6")
     monkeypatch.setattr(mvdec_audit, "sklearn_version", "1.6.1")
     manifest = {
@@ -136,9 +133,7 @@ def test_validate_public_source_rejects_runtime_mismatch(
         },
         "config": {
             "protocol_contract": {
-                "preprocessing": {
-                    "input_normalization": "paper_mean_squared_norm_one"
-                }
+                "preprocessing": {"input_normalization": "paper_mean_squared_norm_one"}
             }
         },
     }
@@ -192,6 +187,7 @@ def test_validate_public_assignments_rejects_metric_mismatch() -> None:
 
     with pytest.raises(ValueError, match="ACC/NMI"):
         validate_public_assignments(manifest, artifact, assignments)
+
 
 def _write_training_log(
     path,
@@ -283,6 +279,7 @@ def test_validate_training_log_rejects_missing_l5_trajectory(tmp_path) -> None:
     with pytest.raises(ValueError, match="L5 trajectory"):
         validate_training_log(manifest, artifact)
 
+
 def test_validate_training_log_rejects_prefix_only_provenance_match(tmp_path) -> None:
     log_path = tmp_path / "training_log.csv"
     _write_training_log(log_path)
@@ -307,6 +304,7 @@ def test_validate_training_log_rejects_prefix_only_provenance_match(tmp_path) ->
 
     with pytest.raises(ValueError, match="summary provenance"):
         validate_training_log(manifest, artifact)
+
 
 def test_validate_training_log_rejects_noncontiguous_windows(tmp_path) -> None:
     log_path = tmp_path / "training_log.csv"
@@ -437,6 +435,7 @@ def test_validate_expected_run_set_rejects_wrong_dataset_order() -> None:
             manifests,
             expected_datasets=("REUTERS", "RCV1"),
         )
+
 
 def test_validate_expected_run_set_can_require_all_complete() -> None:
     manifests = [
