@@ -24,6 +24,8 @@ from sklearn.datasets import fetch_20newsgroups_vectorized
 from sklearn.feature_selection import chi2
 from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
 
+from pipeline.restricted_pickle import load_restricted_pickle
+
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
 USER_AGENT = "mvdec-fpmax-public-dataset-fetcher/1.0"
@@ -702,6 +704,29 @@ def make_text_processed_dataset(
     )
 
 
+def load_reuters10k_payload(path: Path) -> dict:
+    """Load the checksum-pinned legacy object NPY with restricted globals."""
+
+    with path.open("rb") as file:
+        version = np.lib.format.read_magic(file)
+        if version != (1, 0):
+            msg = f"Unsupported Reuters10K NPY version {version}: {path}."
+            raise ValueError(msg)
+        shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(file)
+        if shape != () or fortran_order or not dtype.hasobject:
+            msg = f"Unexpected Reuters10K object-array header: {path}."
+            raise ValueError(msg)
+        container = load_restricted_pickle(file)
+    if not isinstance(container, np.ndarray) or container.shape != ():
+        msg = f"Reuters10K NPY payload must be one scalar NumPy array: {path}."
+        raise ValueError(msg)
+    payload = container.item()
+    if not isinstance(payload, dict) or set(payload) != {"data", "label"}:
+        msg = f"Reuters10K NPY payload must contain only data and label: {path}."
+        raise ValueError(msg)
+    return payload
+
+
 def parse_reuters10k(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Fetch and parse the REUTERS-10K 2,000-dimensional text benchmark."""
 
@@ -723,7 +748,7 @@ def parse_reuters10k(raw_dir: Path, force: bool) -> ProcessedDataset:
         force=force,
         expected_sha256=REUTERS10K_SHA256["test.npy"],
     )
-    payload = np.load(train_path, allow_pickle=True).item()
+    payload = load_reuters10k_payload(train_path)
     X = MinMaxScaler().fit_transform(payload["data"])
     y = LabelEncoder().fit_transform(payload["label"])
     return make_text_processed_dataset(

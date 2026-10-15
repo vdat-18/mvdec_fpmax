@@ -2,51 +2,22 @@
 
 import pickle
 from pathlib import Path
-from typing import BinaryIO
 
 import numpy as np
 import pandas as pd
 
 from pipeline.external_metrics import ExternalMetrics
 from pipeline.io import replace_with_retry
+from pipeline.restricted_pickle import load_restricted_pickle
 
 PUBLIC_ARTIFACT_SCHEMA_VERSION = 1
-
-_ALLOWED_PICKLE_GLOBALS = {
-    ("numpy", "dtype"): np.dtype,
-    ("numpy", "ndarray"): np.ndarray,
-    ("numpy._core.multiarray", "_reconstruct"): np._core.multiarray._reconstruct,
-    ("numpy._core.multiarray", "scalar"): np._core.multiarray.scalar,
-    # NumPy 1.x used this module path. NumPy 2 keeps it load-compatible.
-    ("numpy.core.multiarray", "_reconstruct"): np._core.multiarray._reconstruct,
-    ("numpy.core.multiarray", "scalar"): np._core.multiarray.scalar,
-}
-
-
-class _PublicArtifactUnpickler(pickle.Unpickler):
-    """Deserialize artifact containers without importing arbitrary globals."""
-
-    def find_class(self, module: str, name: str) -> object:
-        allowed = _ALLOWED_PICKLE_GLOBALS.get((module, name))
-        if allowed is None:
-            msg = f"Pickle global {module}.{name} is forbidden in public artifacts."
-            raise pickle.UnpicklingError(msg)
-        return allowed
-
-
-def _load_restricted_pickle(file: BinaryIO) -> object:
-    payload = _PublicArtifactUnpickler(file).load()
-    if file.read(1):
-        msg = "Public artifact contains trailing bytes after its pickle payload."
-        raise pickle.UnpicklingError(msg)
-    return payload
 
 
 def load_public_artifact(path: Path) -> object:
     """Load one NumPy artifact while rejecting executable pickle globals."""
 
     with path.open("rb") as file:
-        return _load_restricted_pickle(file)
+        return load_restricted_pickle(file)
 
 
 def restore_original_order(values: object, shuffled_indices: object) -> np.ndarray:

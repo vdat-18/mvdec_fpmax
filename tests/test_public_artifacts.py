@@ -75,7 +75,7 @@ def test_restricted_public_artifact_loader_accepts_numpy_payload(tmp_path) -> No
         "array": np.array([[1.0, 2.0]], dtype=np.float32),
         "scalar": np.float32(3.0),
     }
-    artifact_path.write_bytes(pickle.dumps(expected))
+    artifact_path.write_bytes(pickle.dumps(expected, protocol=2))
 
     loaded = load_public_artifact(artifact_path)
 
