@@ -1,3 +1,13 @@
+# Historical plan - superseded
+
+> **Superseded on 2026-10-15.** This document preserves the original sequential
+> implementation plan and is not an operational runbook. In particular, its
+> continuous mini-batch refinement instructions conflict with the current
+> versioned, fail-closed full-batch diagnostic protocols. Use the immutable
+> protocol contracts in `src/representation_learning/MVDEC_dense.py`, the
+> validators in `src/pipeline/mvdec_audit.py`, and the latest dated MvDEC audit
+> report for current execution and claim boundaries.
+
 # Kế hoạch: Implement paper 2025 Multi-view DEKM (MVDEC) cho dữ liệu ô nhiễm không khí
 
 ## Bối cảnh

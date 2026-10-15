@@ -1,3 +1,12 @@
+# Supersession notice
+
+> This is a date-stamped historical audit. Its "Current decision" records the
+> repository state on 2026-10-14, including commit `9b0c89...` and the then-current
+> candidate protocol; it is not the current execution authority. Later controlled
+> diagnostics, fixes, and provenance checks are recorded in the newer dated audit
+> reports. Current behavior is defined by the immutable protocol contract and the
+> checked-in audit validators, not by stale instructions in this document.
+
 # MvDEC 2025 Deep Paper-Code Audit (2026-10-14)
 
 ## Current decision
