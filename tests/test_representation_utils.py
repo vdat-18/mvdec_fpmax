@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from scipy import sparse
 
 from representation_learning.utils import get_xy
 
@@ -31,4 +32,19 @@ def test_get_xy_rejects_pickled_object_20news_npz(tmp_path) -> None:
     _write_20news_files(tmp_path, object_data=True)
 
     with pytest.raises(ValueError, match="Object arrays cannot be loaded"):
+        get_xy("20NEWS", f"{tmp_path}/", log_print=False)
+
+
+def test_get_xy_does_not_hide_unexpected_sparse_loader_failures(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _write_20news_files(tmp_path)
+
+    def fail_unexpectedly(_path):
+        raise RuntimeError("unexpected sparse loader failure")
+
+    monkeypatch.setattr(sparse, "load_npz", fail_unexpectedly)
+
+    with pytest.raises(RuntimeError, match="unexpected sparse loader failure"):
         get_xy("20NEWS", f"{tmp_path}/", log_print=False)

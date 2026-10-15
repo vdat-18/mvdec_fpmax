@@ -35,7 +35,7 @@ def get_xy(ds_name='REUTERS', dir_path=r'datasets/', log_print=True, shuffle_see
             def load_npz_array(file_name):
                 try:
                     return sp.load_npz(dir_path + file_name).toarray()
-                except Exception:
+                except ValueError:
                     with np.load(dir_path + file_name, allow_pickle=False) as data:
                         return data[data.files[0]]
 

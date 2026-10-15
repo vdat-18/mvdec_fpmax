@@ -60,6 +60,8 @@ def test_public_artifact_and_assignments_use_canonical_row_order(tmp_path) -> No
         assignments_path,
     )
 
+    artifact_bytes = artifact_path.read_bytes()
+    assert artifact_bytes[:2] == b"\x80\x04"
     with artifact_path.open("rb") as file:
         saved = pickle.load(file)
     assert saved["row_indices"].tolist() == [0, 1, 2, 3]

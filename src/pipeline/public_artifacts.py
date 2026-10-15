@@ -11,6 +11,7 @@ from pipeline.io import replace_with_retry
 from pipeline.restricted_pickle import load_restricted_pickle
 
 PUBLIC_ARTIFACT_SCHEMA_VERSION = 1
+PUBLIC_ARTIFACT_PICKLE_PROTOCOL = 4
 
 
 def load_public_artifact(path: Path) -> object:
@@ -122,7 +123,7 @@ def write_public_artifact(payload: dict[str, object], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(f"{path.name}.tmp")
     with temporary_path.open("wb") as file:
-        pickle.dump(payload, file)
+        pickle.dump(payload, file, protocol=PUBLIC_ARTIFACT_PICKLE_PROTOCOL)
     replace_with_retry(temporary_path, path)
 
 
