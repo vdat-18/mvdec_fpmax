@@ -142,6 +142,62 @@ def test_validate_public_source_rejects_runtime_mismatch(tmp_path, monkeypatch) 
         validate_public_source(manifest, tmp_path)
 
 
+def _assignment_provenance_fixture() -> tuple[dict[str, object], pd.DataFrame]:
+    manifest = {
+        "dataset": "REUTERS",
+        "method": "MvDEC diagnostic",
+        "protocol_id": "protocol",
+        "run_id": "run",
+        "config_hash": "a" * 64,
+        "training_commit": "b" * 40,
+        "source_id": "source",
+        "source_sha256": "c" * 64,
+        "seed": 42,
+    }
+    assignments = pd.DataFrame(
+        {
+            "dataset": [manifest["dataset"]] * 2,
+            "method": [manifest["method"]] * 2,
+            "protocol_id": [manifest["protocol_id"]] * 2,
+            "run_id": [manifest["run_id"]] * 2,
+            "config_hash": [manifest["config_hash"]] * 2,
+            "training_commit": [manifest["training_commit"]] * 2,
+            "source_id": [manifest["source_id"]] * 2,
+            "source_sha256": [manifest["source_sha256"]] * 2,
+            "random_seed": [manifest["seed"]] * 2,
+        }
+    )
+    return manifest, assignments
+
+
+def test_assignment_provenance_accepts_complete_manifest_identity() -> None:
+    manifest, assignments = _assignment_provenance_fixture()
+
+    mvdec_audit._validate_assignment_provenance(manifest, assignments)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "dataset",
+        "method",
+        "protocol_id",
+        "run_id",
+        "config_hash",
+        "training_commit",
+        "source_id",
+        "source_sha256",
+        "random_seed",
+    ),
+)
+def test_assignment_provenance_rejects_manifest_mismatch(field) -> None:
+    manifest, assignments = _assignment_provenance_fixture()
+    assignments[field] = "tampered"
+
+    with pytest.raises(ValueError, match=field):
+        mvdec_audit._validate_assignment_provenance(manifest, assignments)
+
+
 def test_validate_public_assignments_recomputes_metrics() -> None:
     assignments = pd.DataFrame(
         {

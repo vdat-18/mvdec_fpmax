@@ -65,6 +65,30 @@ def validate_numerical_runtime(manifest: dict[str, object]) -> None:
         )
 
 
+def _validate_assignment_provenance(
+    manifest: dict[str, object],
+    assignments: pd.DataFrame,
+) -> None:
+    """Require every row-level identity field to match its owning manifest."""
+
+    expected_fields = {
+        "dataset": manifest.get("dataset"),
+        "method": manifest.get("method"),
+        "protocol_id": manifest.get("protocol_id"),
+        "run_id": manifest.get("run_id"),
+        "config_hash": manifest.get("config_hash"),
+        "training_commit": manifest.get("training_commit"),
+        "source_id": manifest.get("source_id"),
+        "source_sha256": manifest.get("source_sha256"),
+        "random_seed": manifest.get("seed"),
+    }
+    for field, expected in expected_fields.items():
+        if field not in assignments or assignments[field].nunique(dropna=False) != 1:
+            raise ValueError(f"MvDEC assignments are missing stable {field} metadata.")
+        if assignments[field].iloc[0] != expected:
+            raise ValueError(f"MvDEC assignments {field} does not match the manifest.")
+
+
 def validate_public_source(
     manifest: dict[str, object],
     dataset_root: Path,
@@ -116,11 +140,7 @@ def validate_public_source(
         )
 
     assignments = pd.read_csv(resolve_manifest_output_path(manifest, "assignments"))
-    for field in ("source_id", "source_sha256", "training_commit"):
-        if field not in assignments or assignments[field].nunique(dropna=False) != 1:
-            raise ValueError(f"MvDEC assignments are missing stable {field} metadata.")
-        if str(assignments[field].iloc[0]) != str(manifest.get(field)):
-            raise ValueError(f"MvDEC assignments {field} does not match the manifest.")
+    _validate_assignment_provenance(manifest, assignments)
     return assignments
 
 
