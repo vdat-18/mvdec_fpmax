@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import shutil
 import subprocess
@@ -26,6 +27,11 @@ from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_DIR / "configs" / "public_datasets.json"
 USER_AGENT = "mvdec-fpmax-public-dataset-fetcher/1.0"
+REUTERS10K_REVISION = "156133490a6c38685d5b0dcaa78c0a9e09b5d875"
+REUTERS10K_SHA256 = {
+    "train.npy": "d30184c950cc71f8fa943c0c61564db94ee090206508ea6279cf7032f4c53a07",
+    "test.npy": "5f85c13eac62427cfbbd8d7f5de51e91d70daa16868be2caa128cb036eb82e81",
+}
 
 
 @dataclass(frozen=True)
@@ -88,10 +94,40 @@ def safe_rmtree(path: Path, allowed_root: Path) -> None:
         shutil.rmtree(path)
 
 
-def download_file(url: str, output_path: Path, force: bool) -> None:
-    """Download a URL to a local file with an atomic replace."""
+def file_sha256(path: Path) -> str:
+    """Return the SHA-256 digest of one downloaded source file."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_download(path: Path, expected_sha256: str | None) -> None:
+    """Fail closed when a checksum-pinned download differs from its source."""
+
+    if expected_sha256 is None:
+        return
+    actual_sha256 = file_sha256(path)
+    if actual_sha256 != expected_sha256:
+        msg = (
+            f"SHA-256 mismatch for {path}: expected {expected_sha256}, "
+            f"got {actual_sha256}."
+        )
+        raise ValueError(msg)
+
+
+def download_file(
+    url: str,
+    output_path: Path,
+    force: bool,
+    expected_sha256: str | None = None,
+) -> None:
+    """Download a URL atomically and enforce an optional content checksum."""
 
     if output_path.exists() and not force:
+        verify_download(output_path, expected_sha256)
         return
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +145,11 @@ def download_file(url: str, output_path: Path, force: bool) -> None:
             [curl, "-L", url, "-o", str(tmp_path), "--retry", "2"],
             check=True,
         )
+    try:
+        verify_download(tmp_path, expected_sha256)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     tmp_path.replace(output_path)
 
 
@@ -618,6 +659,7 @@ def parse_waveform_raw_only(extract_dir: Path) -> ProcessedDataset:
         "or generated-data policy is added."
     )
 
+
 def top_k_chi2_features(X: sparse.spmatrix, y: np.ndarray, k: int) -> sparse.spmatrix:
     """Select up to k sparse text features by chi-square score."""
 
@@ -629,6 +671,7 @@ def top_k_chi2_features(X: sparse.spmatrix, y: np.ndarray, k: int) -> sparse.spm
     selected.sort()
     return X[:, selected]
 
+
 def balanced_label_indices(y: np.ndarray, per_class: int) -> np.ndarray:
     """Return first per-class indices in stable label order."""
 
@@ -637,6 +680,7 @@ def balanced_label_indices(y: np.ndarray, per_class: int) -> np.ndarray:
         label_indices = np.flatnonzero(y == label)[:per_class]
         indices.extend(label_indices.tolist())
     return np.asarray(indices, dtype=int)
+
 
 def make_text_processed_dataset(
     X: np.ndarray,
@@ -657,20 +701,27 @@ def make_text_processed_dataset(
         notes=[*notes, *clean_notes],
     )
 
+
 def parse_reuters10k(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Fetch and parse the REUTERS-10K 2,000-dimensional text benchmark."""
 
     train_path = raw_dir / "train.npy"
     test_path = raw_dir / "test.npy"
-    download_file(
-        "https://huggingface.co/datasets/wwydmanski/reuters10k/resolve/main/train.npy",
-        train_path,
-        force=force,
+    source_root = (
+        "https://huggingface.co/datasets/wwydmanski/reuters10k/resolve/"
+        f"{REUTERS10K_REVISION}"
     )
     download_file(
-        "https://huggingface.co/datasets/wwydmanski/reuters10k/resolve/main/test.npy",
+        f"{source_root}/train.npy",
+        train_path,
+        force=force,
+        expected_sha256=REUTERS10K_SHA256["train.npy"],
+    )
+    download_file(
+        f"{source_root}/test.npy",
         test_path,
         force=force,
+        expected_sha256=REUTERS10K_SHA256["test.npy"],
     )
     payload = np.load(train_path, allow_pickle=True).item()
     X = MinMaxScaler().fit_transform(payload["data"])
@@ -681,10 +732,14 @@ def parse_reuters10k(raw_dir: Path, force: bool) -> ProcessedDataset:
         dataset_name="reuters10k",
         notes=[
             "Fetched train.npy/test.npy from Hugging Face wwydmanski/reuters10k.",
+            f"Pinned Hugging Face revision: {REUTERS10K_REVISION}.",
+            f"train.npy SHA-256: {REUTERS10K_SHA256['train.npy']}.",
+            f"test.npy SHA-256: {REUTERS10K_SHA256['test.npy']}.",
             "Processed train.npy as the 10k benchmark split.",
             "Features are 2,000-dimensional and min-max scaled.",
         ],
     )
+
 
 def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Fetch and parse the 2,000-sample 20 Newsgroups text benchmark."""
@@ -712,6 +767,7 @@ def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
             "Selected top 2,000 features by chi-square against labels.",
         ],
     )
+
 
 def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Fetch and parse the RCV1-10K top-level four-class benchmark."""
@@ -796,6 +852,7 @@ def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
         ],
     )
 
+
 def parse_local_airpollution_demvk(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Export the local DEMVK air-pollution case study as paper-baseline input."""
 
@@ -840,6 +897,7 @@ def parse_local_airpollution_demvk(raw_dir: Path, force: bool) -> ProcessedDatas
             *notes,
         ],
     )
+
 
 def parse_local_tiki(raw_dir: Path, force: bool) -> ProcessedDataset:
     """Export the local preprocessed Tiki dataset as paper-baseline input."""
