@@ -276,7 +276,12 @@ def _write_training_log(
                     "training_steps_completed:20,refinement_epochs_completed:2,"
                     "refinement_progress_unit:kmeans_refresh_windows"
                 ),
-                "phase:final_recomputed_state",
+                (
+                    "phase:final_recomputed_state,loss:53.0,protocol_id:protocol,"
+                    "training_steps_completed:20,refinement_epochs_completed:2,"
+                    "refinement_progress_unit:kmeans_refresh_windows,"
+                    "stop_reason:converged_assignment"
+                ),
                 "run 1/1,seed:42,run_id:run,protocol_id:protocol",
             ]
         )
@@ -477,6 +482,60 @@ def test_validate_training_log_rejects_inconsistent_weighted_total(tmp_path) -> 
     }
 
     with pytest.raises(ValueError, match="weighted components"):
+        validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_final_loss_mismatch(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    content = log_path.read_text(encoding="utf-8").replace(
+        "phase:final_recomputed_state,loss:53.0",
+        "phase:final_recomputed_state,loss:52.0",
+    )
+    log_path.write_text(content, encoding="utf-8")
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "n_samples": 4,
+        "config": _training_audit_config(),
+    }
+
+    with pytest.raises(ValueError, match="final loss"):
+        validate_training_log(manifest, artifact)
+
+
+def test_validate_training_log_rejects_final_provenance_mismatch(tmp_path) -> None:
+    log_path = tmp_path / "training_log.csv"
+    _write_training_log(log_path)
+    content = log_path.read_text(encoding="utf-8").replace(
+        "phase:final_recomputed_state,loss:53.0,protocol_id:protocol",
+        "phase:final_recomputed_state,loss:53.0,protocol_id:tampered",
+    )
+    log_path.write_text(content, encoding="utf-8")
+    manifest = {
+        "seed": 42,
+        "run_id": "run",
+        "protocol_id": "protocol",
+        "paths": {"training_log": str(log_path)},
+    }
+    artifact = {
+        "training_steps_completed": 20,
+        "refinement_epochs_completed": 2,
+        "refinement_progress_unit": "kmeans_refresh_windows",
+        "stop_reason": "converged_assignment",
+        "n_samples": 4,
+        "config": _training_audit_config(),
+    }
+
+    with pytest.raises(ValueError, match="final training-log provenance"):
         validate_training_log(manifest, artifact)
 
 

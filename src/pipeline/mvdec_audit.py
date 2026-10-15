@@ -263,6 +263,7 @@ def validate_training_log(
     if objective_weights["L5_alignment"] > 0:
         required_loss_names += ("L5_alignment",)
 
+    logged_totals = []
     for row in step9_rows:
         encoded_row = ",".join(row)
         parsed_losses = {}
@@ -278,6 +279,7 @@ def validate_training_log(
                     f"MvDEC training log has a non-finite {loss_name} value."
                 )
             parsed_losses[loss_name] = float(matches[0])
+        logged_totals.append(parsed_losses["total"])
 
         expected_total = sum(
             objective_weights[name] * parsed_losses.get(name, 0.0)
@@ -343,6 +345,35 @@ def validate_training_log(
     )
     if any(field not in stop_fields_found for field in stop_fields):
         raise ValueError("MvDEC training-log stopping metadata does not match.")
+
+    final_fields_found = set(final_rows[0])
+    final_fields = (
+        f"protocol_id:{manifest.get('protocol_id')}",
+        f"training_steps_completed:{artifact.get('training_steps_completed')}",
+        f"refinement_epochs_completed:{expected_windows}",
+        f"refinement_progress_unit:{artifact.get('refinement_progress_unit')}",
+        f"stop_reason:{artifact.get('stop_reason')}",
+    )
+    if any(field not in final_fields_found for field in final_fields):
+        raise ValueError("MvDEC final training-log provenance does not match.")
+    final_losses = [
+        field.removeprefix("loss:")
+        for field in final_rows[0]
+        if field.startswith("loss:")
+    ]
+    if len(final_losses) != 1:
+        raise ValueError("MvDEC final training log is missing its unique loss.")
+    try:
+        final_loss = float(final_losses[0])
+    except ValueError as error:
+        raise ValueError("MvDEC final training log has an invalid loss.") from error
+    if not np.isfinite(final_loss) or not np.isclose(
+        final_loss,
+        logged_totals[-1],
+        rtol=0.0,
+        atol=5e-6,
+    ):
+        raise ValueError("MvDEC final loss does not match the last refinement window.")
 
     if loss_weights.get("cross_view_alignment", 0) > 0:
         l5_values = []
