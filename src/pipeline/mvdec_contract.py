@@ -76,6 +76,9 @@ EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID = (
     "mvdec_2025_equation11_largest_selected_only_full_batch_v1"
 )
 PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_resolved_full_batch_v1"
+PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID = (
+    "mvdec_2025_paper_resolved_release_l2_full_batch_v1"
+)
 PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"
 ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID = (
     "mvdec_2025_aligned_balanced_full_batch_v1"
@@ -172,6 +175,11 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",

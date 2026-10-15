@@ -42,6 +42,7 @@ from pipeline.mvdec_contract import (
     LITERAL_EQUATION11_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS,
     REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS,
     REPRESENTATION_METRIC_SEMANTICS,
@@ -140,6 +141,7 @@ PROTOCOL_IDS = (
     EQUATION11_SMALLEST_FROZEN_FULL_BATCH_PROTOCOL_ID,
     EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     *ALIGNED_BALANCED_PROTOCOL_IDS,
     CUSTOM_PROTOCOL_ID,
@@ -771,6 +773,31 @@ PAPER_RESOLVED_FULL_BATCH_PROTOCOL = replace(
 )
 
 
+PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL = replace(
+    PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+    protocol_id=PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
+    claim_scope=(
+        'Normalization diagnostic derived from the paper-resolved full-batch '
+        'protocol; only input normalization changes to release-style row L2 '
+        'normalization and this is not an exact-paper reproduction'
+    ),
+    refinement_source=(
+        'Controlled REUTERS seed-42 normalization diagnostic of the '
+        'paper-resolved full-batch protocol'
+    ),
+    input_normalization=RELEASE_L2_NORMALIZATION,
+    decision_provenance=(
+        *PAPER_RESOLVED_FULL_BATCH_PROTOCOL.decision_provenance,
+        (
+            'input_normalization',
+            'ablation',
+            'Changes only paper mean-squared-norm-one normalization to the '
+            'release row-L2 normalization to isolate global input scale.',
+        ),
+    ),
+)
+
+
 PAPER_INFORMED_FULL_BATCH_PROTOCOL = replace(
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
     protocol_id=PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -929,6 +956,9 @@ PUBLIC_PROTOCOLS = {
         EQUATION11_LARGEST_SELECTED_ONLY_FULL_BATCH_PROTOCOL
     ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID: (
+        PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL
+    ),
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_FULL_BATCH_PROTOCOL,
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_FULL_BATCH_PROTOCOL,
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
@@ -1230,6 +1260,8 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return 'MvDEC-2025-Eq11-literal'
     if protocol.protocol_id == PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-paper-resolved-full-batch'
+    if protocol.protocol_id == PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID:
+        return 'MvDEC-2025-paper-resolved-release-L2-full-batch-diagnostic'
     if protocol.protocol_id == PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID:
         return 'MvDEC-2025-paper-informed-full-batch'
     if protocol.protocol_id == ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID:

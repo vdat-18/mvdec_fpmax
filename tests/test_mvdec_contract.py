@@ -22,6 +22,7 @@ from pipeline.mvdec_contract import (
     LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     balanced_batch_count,
     paper_figure_fusion_metadata,
@@ -29,7 +30,7 @@ from pipeline.mvdec_contract import (
 
 
 def test_equation11_contract_is_complete_two_by_two_by_two_grid() -> None:
-    assert len(EQUATION11_PROTOCOL_IDS) == 9
+    assert len(EQUATION11_PROTOCOL_IDS) == 10
     assert set(EQUATION11_PROTOCOL_SETTINGS.values()) == {
         (direction, target, batch_policy)
         for direction in ("largest", "smallest")
@@ -51,6 +52,15 @@ def test_paper_informed_v2_preserves_historical_setting_without_overclaiming() -
     assert (
         EQUATION11_PROTOCOL_SETTINGS[PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID]
         == (EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID])
+    )
+
+
+def test_release_l2_diagnostic_preserves_paper_resolved_schedule() -> None:
+    assert (
+        EQUATION11_PROTOCOL_SETTINGS[
+            PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID
+        ]
+        == EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID]
     )
 
 

@@ -1,6 +1,6 @@
 import importlib
 import pickle
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -933,6 +933,68 @@ def test_paper_resolved_config_records_full_batch(monkeypatch):
         'max_training_steps': 14_000,
         'kmeans_n_init_policy': 'initial_100_then_twice_previous_n_iter',
         'batch_size_policy': 'full_dataset',
+    }
+
+
+def test_release_l2_diagnostic_changes_only_normalization_contract(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    base = mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL
+    diagnostic = mvdec.PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL
+
+    behavior_fields = {
+        field.name
+        for field in fields(base)
+        if field.name
+        not in {
+            'protocol_id',
+            'claim_scope',
+            'refinement_source',
+            'input_normalization',
+            'decision_provenance',
+        }
+    }
+    assert all(
+        getattr(base, name) == getattr(diagnostic, name)
+        for name in behavior_fields
+    )
+    assert base.input_normalization == mvdec.PAPER_RMS_NORMALIZATION
+    assert diagnostic.input_normalization == mvdec.RELEASE_L2_NORMALIZATION
+    assert diagnostic.protocol_id != base.protocol_id
+    assert mvdec.protocol_contract_sha256(
+        diagnostic.manifest_contract(0.001)
+    ) != mvdec.protocol_contract_sha256(base.manifest_contract(0.001))
+
+
+def test_release_l2_diagnostic_has_distinct_config_identity(monkeypatch):
+    mvdec = _load_mvdec(monkeypatch)
+    common = {
+        'dataset_name': 'REUTERS',
+        'tolerance': 0.001,
+        'max_refinement_epochs': 1400,
+        'source_sha256': 'a' * 64,
+        'source_id': 'dekm_google_drive_reuters_10k',
+        'training_commit': 'b' * 40,
+        'n_samples': 10_000,
+        'n_features': 2000,
+        'n_classes': 4,
+        'feature_columns': ['feature_1'],
+        'preprocessing_metadata': None,
+        'resolved_refinement_batch_size': 10_000,
+    }
+    base_config = mvdec.resolved_run_config(
+        protocol=mvdec.PAPER_RESOLVED_FULL_BATCH_PROTOCOL,
+        **common,
+    )
+    diagnostic_config = mvdec.resolved_run_config(
+        protocol=mvdec.PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL,
+        **common,
+    )
+
+    assert canonical_config_hash(base_config) != canonical_config_hash(
+        diagnostic_config
+    )
+    assert diagnostic_config['protocol_contract']['preprocessing'] == {
+        'input_normalization': mvdec.RELEASE_L2_NORMALIZATION,
     }
 
 
@@ -2050,6 +2112,16 @@ def test_public_mvdec_artifact_restores_release_row_order(tmp_path, monkeypatch)
             "mvdec_2025_paper_resolved_full_batch_v1",
             "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
             "MvDEC-2025-paper-resolved-full-batch",
+            "mvdec2025_encoder_average",
+            "smallest",
+            "selected_dimension_only",
+            4,
+        ),
+        (
+            "PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL",
+            "mvdec_2025_paper_resolved_release_l2_full_batch_v1",
+            "mvdec2025_post_skip_direct_latent_reconstruction_head_v1",
+            "MvDEC-2025-paper-resolved-release-L2-full-batch-diagnostic",
             "mvdec2025_encoder_average",
             "smallest",
             "selected_dimension_only",
