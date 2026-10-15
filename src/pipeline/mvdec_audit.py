@@ -212,6 +212,43 @@ def validate_training_log(
     if window_numbers != list(range(1, expected_windows + 1)):
         raise ValueError("MvDEC training log refinement windows are not contiguous.")
 
+    required_loss_names = (
+        "total",
+        "L1_reconstruction",
+        "L2_kmeans",
+        "L3_trace_logged",
+        "L4_greedy",
+    )
+    for row in step9_rows:
+        encoded_row = ",".join(row)
+        for loss_name in required_loss_names:
+            pattern = rf"(?:^|[,\s])(?:loss:)?{loss_name}:([^,\s]+)"
+            matches = re.findall(pattern, encoded_row)
+            if len(matches) != 1:
+                raise ValueError(
+                    f"MvDEC training log is missing unique {loss_name} values."
+                )
+            if not np.isfinite(float(matches[0])):
+                raise ValueError(
+                    f"MvDEC training log has a non-finite {loss_name} value."
+                )
+
+    config = artifact.get("config", {})
+    if config.get("refinement_batch_size_policy") == "full_dataset":
+        update_interval = int(config.get("update_interval", 0))
+        n_samples = int(artifact.get("n_samples", 0))
+        if update_interval < 1 or n_samples < 1:
+            raise ValueError("MvDEC full-batch audit metadata is incomplete.")
+        expected_batch_field = f"step9_loss_batches:{update_interval}"
+        expected_sample_field = f"step9_loss_samples:{update_interval * n_samples}"
+        if any(
+            expected_batch_field not in row or expected_sample_field not in row
+            for row in step9_rows
+        ):
+            raise ValueError(
+                "MvDEC training log does not prove full-dataset refinement batches."
+            )
+
     summary_rows = [row for row in rows if row and row[0].startswith("run ")]
     if len(summary_rows) != 1:
         raise ValueError("MvDEC training log is missing its unique run summary.")
@@ -234,7 +271,7 @@ def validate_training_log(
     if any(field not in stop_fields_found for field in stop_fields):
         raise ValueError("MvDEC training-log stopping metadata does not match.")
 
-    loss_weights = artifact.get("config", {}).get("loss_weights", {})
+    loss_weights = config.get("loss_weights", {})
     if loss_weights.get("cross_view_alignment", 0) > 0:
         l5_values = []
         for row in step9_rows:
