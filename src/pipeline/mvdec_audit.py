@@ -142,6 +142,13 @@ def validate_public_source(
 
     assignments = pd.read_csv(resolve_manifest_output_path(manifest, "assignments"))
     _validate_assignment_provenance(manifest, assignments)
+    if "true_label" not in assignments:
+        raise ValueError("MvDEC assignments are missing canonical true labels.")
+    if len(assignments) != len(dataset.y) or not np.array_equal(
+        assignments["true_label"],
+        dataset.y,
+    ):
+        raise ValueError("MvDEC assignments do not match canonical source labels.")
     return assignments
 
 

@@ -332,6 +332,44 @@ def test_resolve_training_commit_returns_full_head() -> None:
     assert len(commit) == 40
     assert set(commit) <= set("0123456789abcdef")
 
+@pytest.mark.parametrize(
+    ("seed", "run_index"),
+    ((True, 1), (42, True)),
+)
+def test_manifest_identity_rejects_boolean_integer_fields(
+    tmp_path,
+    seed,
+    run_index,
+) -> None:
+    config = {"batch_size": 256}
+    paths = resolve_run_paths(
+        tmp_path,
+        "REUTERS",
+        "mvdec_dekm_consistent_v1",
+        config,
+        seed=seed,
+        run_index=run_index,
+    )
+    prepare_run_directory(paths)
+    write_run_manifest(
+        paths.manifest,
+        {
+            "run_id": paths.run_id,
+            "status": "failed",
+            "dataset": "REUTERS",
+            "protocol_id": "mvdec_dekm_consistent_v1",
+            "seed": seed,
+            "run_index": run_index,
+            "config": config,
+            "config_hash": paths.config_hash,
+        },
+    )
+    manifest = load_run_manifest(paths.manifest)
+
+    with pytest.raises(ValueError, match="invalid run identity"):
+        validate_manifest_identity(manifest)
+
+
 def test_manifest_identity_matches_immutable_run_layout(tmp_path) -> None:
     config = {"batch_size": 256}
     paths = resolve_run_paths(

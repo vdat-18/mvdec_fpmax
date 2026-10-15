@@ -217,8 +217,10 @@ def validate_manifest_identity(manifest: dict[str, object]) -> None:
             isinstance(protocol_id, str),
             isinstance(config_hash, str),
             SHA256_PATTERN.fullmatch(config_hash) is not None,
-            isinstance(seed, int),
-            isinstance(run_index, int) and run_index > 0,
+            isinstance(seed, int) and not isinstance(seed, bool),
+            isinstance(run_index, int)
+            and not isinstance(run_index, bool)
+            and run_index > 0,
             isinstance(manifest_path, str),
         )
     ):

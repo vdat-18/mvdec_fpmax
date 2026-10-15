@@ -176,6 +176,55 @@ def test_assignment_provenance_accepts_complete_manifest_identity() -> None:
     mvdec_audit._validate_assignment_provenance(manifest, assignments)
 
 
+def test_public_source_rejects_noncanonical_assignment_labels(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manifest, assignments = _assignment_provenance_fixture()
+    assignments["true_label"] = [1, 0]
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    assignments.to_csv(run_dir / "assignments.csv", index=False)
+    manifest.update(
+        {
+            "n_samples": 2,
+            "n_features": 2,
+            "n_classes": 2,
+            "paths": {"assignments": "assignments.csv"},
+            "_manifest_path": str(run_dir / "manifest.json"),
+            "config": {
+                "source_id": manifest["source_id"],
+                "source_sha256": manifest["source_sha256"],
+                "n_samples": 2,
+                "n_features": 2,
+                "n_classes": 2,
+                "protocol_contract": {
+                    "preprocessing": {
+                        "input_normalization": "paper_mean_squared_norm_one"
+                    }
+                },
+            },
+        }
+    )
+
+    class CanonicalDataset:
+        source_id = manifest["source_id"]
+        source_sha256 = manifest["source_sha256"]
+        X = np.zeros((2, 2), dtype=np.float32)
+        y = np.array([0, 1], dtype=np.int32)
+        spec = type("Spec", (), {"n_clusters": 2})()
+
+    monkeypatch.setattr(mvdec_audit, "validate_numerical_runtime", lambda _: None)
+    monkeypatch.setattr(
+        mvdec_audit,
+        "load_dekm_public_dataset",
+        lambda *args, **kwargs: CanonicalDataset(),
+    )
+
+    with pytest.raises(ValueError, match="canonical source labels"):
+        validate_public_source(manifest, tmp_path)
+
+
 @pytest.mark.parametrize(
     "field",
     (
