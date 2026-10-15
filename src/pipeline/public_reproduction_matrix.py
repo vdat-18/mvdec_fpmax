@@ -175,10 +175,17 @@ def matching_complete_manifests(
 def require_single_complete_manifest(
     output_root: Path,
     spec: MatrixRunSpec,
+    expected_training_commit: str | None = None,
 ) -> dict[str, object]:
-    """Return the unique complete manifest produced for one specification."""
+    """Return the unique complete manifest produced for one code revision."""
 
     manifests = matching_complete_manifests(output_root, spec)
+    if expected_training_commit is not None:
+        manifests = [
+            manifest
+            for manifest in manifests
+            if manifest.get("training_commit") == expected_training_commit
+        ]
     if len(manifests) != 1:
         raise ValueError(
             "Expected exactly one complete manifest for "
@@ -195,21 +202,29 @@ def reusable_complete_manifest(
 ) -> dict[str, object] | None:
     """Return an auditable completed run, or require it to be rebuilt."""
 
-    manifests = matching_complete_manifests(output_root, spec)
+    discovered = matching_complete_manifests(output_root, spec)
+    current_commit = resolve_training_commit(PROJECT_DIR)
+    manifests = [
+        manifest
+        for manifest in discovered
+        if manifest.get("training_commit") == current_commit
+    ]
     if len(manifests) > 1:
-        require_single_complete_manifest(output_root, spec)
+        require_single_complete_manifest(
+            output_root,
+            spec,
+            expected_training_commit=current_commit,
+        )
     if not manifests:
+        if discovered:
+            logger.warning(
+                "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_commit",
+                spec.dataset,
+                spec.protocol_id,
+                spec.seed,
+            )
         return None
     manifest = manifests[0]
-    current_commit = resolve_training_commit(PROJECT_DIR)
-    if manifest.get("training_commit") != current_commit:
-        logger.warning(
-            "run_repair; dataset:{}; protocol:{}; seed:{}; reason:stale_commit",
-            spec.dataset,
-            spec.protocol_id,
-            spec.seed,
-        )
-        return None
     if spec.dataset == "20NEWS" and manifest.get("source_id") != (
         TWENTY_NEWS_SKLEARN_SOURCE
     ):
@@ -551,7 +566,11 @@ def run_public_matrix(
                 stdout_path=stdout_path,
                 heartbeat_seconds=heartbeat_seconds,
             )
-            manifest = require_single_complete_manifest(output_root, spec)
+            manifest = require_single_complete_manifest(
+                output_root,
+                spec,
+                expected_training_commit=resolve_training_commit(PROJECT_DIR),
+            )
 
         validate_manifest_outputs(manifest)
         archive_path, checksum_path = archive_paths(

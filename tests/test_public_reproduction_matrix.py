@@ -306,6 +306,49 @@ def test_reusable_manifest_rejects_stale_training_commit(
     )
 
 
+def test_reusable_manifest_ignores_stale_duplicate(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    current = {"status": "complete", "training_commit": "b" * 40}
+    stale = {"status": "complete", "training_commit": "a" * 40}
+    monkeypatch.setattr(
+        matrix,
+        "matching_complete_manifests",
+        lambda _output_root, _spec: [stale, current],
+    )
+    monkeypatch.setattr(matrix, "resolve_training_commit", lambda _root: "b" * 40)
+    monkeypatch.setattr(matrix, "validate_manifest_outputs", lambda _manifest: None)
+
+    reusable = matrix.reusable_complete_manifest(
+        tmp_path,
+        matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+    )
+
+    assert reusable is current
+
+
+def test_require_single_manifest_filters_stale_training_commit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    current = {"status": "complete", "training_commit": "b" * 40}
+    stale = {"status": "complete", "training_commit": "a" * 40}
+    monkeypatch.setattr(
+        matrix,
+        "matching_complete_manifests",
+        lambda _output_root, _spec: [stale, current],
+    )
+
+    selected = matrix.require_single_complete_manifest(
+        tmp_path,
+        matrix.MatrixRunSpec("REUTERS", "protocol_a", 42),
+        expected_training_commit="b" * 40,
+    )
+
+    assert selected is current
+
+
 def test_archive_path_is_bound_to_config_hash(tmp_path: Path) -> None:
     spec = matrix.MatrixRunSpec("REUTERS", "protocol_a", 42)
 
