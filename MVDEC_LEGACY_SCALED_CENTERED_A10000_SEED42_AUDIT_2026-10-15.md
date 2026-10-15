@@ -86,14 +86,13 @@ improves fused metrics over A1.0 on two datasets, but it does so by forcing the
 views toward a common low-quality geometry, fails badly against the paper, and
 is practically non-convergent on 20NEWS.
 
-The next reproduction work must return to paper-constrained ambiguities rather
-than continue tuning alignment weights. In particular, Figures 1-2 expose an
-untested fusion ambiguity: the diagrams show 23-wide per-view outputs (latent
-plus reconstruction for the 13-feature example), whereas Eq. 4 defines an
-average of encoded representations. Any test of full-output fusion must be a
-new, explicitly named diagnostic and must first be screened on seed 42 with a
-bounded runtime. Results may be compared with Table 2, but the protocol must not
-be selected solely because it is numerically close to the published labels.
+The next reproduction work therefore returned to a paper-constrained ambiguity
+rather than tuning alignment weights again. Figures 1-2 show 23-wide per-view
+outputs (latent plus reconstruction for the 13-feature example), whereas Eq. 4
+defines an average of encoded representations. The bounded, explicitly named
+seed-42 diagnostic below tests both full-output interpretations. Its results may
+be compared with Table 2, but no protocol is selected solely because it is
+numerically close to the published labels.
 
 ## Operational closure
 
@@ -104,7 +103,7 @@ be selected solely because it is numerically close to the published labels.
 - Resume GPU work only after quota refresh and only with a preregistered,
   bounded seed-42 diagnostic targeting a documented paper ambiguity.
 
-## Prepared next diagnostic (not launched)
+## Completed paper-figure fusion diagnostic
 
 The repository now defines two immutable post-training fusion contracts for the
 paper's diagram ambiguity:
@@ -122,11 +121,52 @@ and claim scope `post_training_diagnostic_not_exact_paper_truth`. They are
 implemented only as post-training diagnostic transformations; no existing
 training protocol or artifact identity was changed.
 
-The GPU experiment remains deliberately unlaunched. After quota refresh on
-2026-10-17, screen seed 42 on REUTERS first with a hard runtime bound. Only if
-that bounded screen is operationally healthy should 20NEWS be considered. The
-diagnostic must report both figure interpretations and the current Eq. 4 latent
-average together; it must not select a winner by proximity to Table 2.
+Kaggle kernel
+`vandatzz/mvdec-2025-reuters-paper-figure-audit-seed-42`, Version 5, completed
+successfully on CPU on 2026-10-15. It reused the complete centered A1.0 REUTERS
+seed-42 weights; it did not pretrain or refine either network. CPU execution was
+intentional: this bounded job only performs inference and scikit-learn K-Means,
+and scikit-learn K-Means is CPU-based. The retained log reached the final metric
+table after about 340 seconds.
+
+Immutable source identity:
+
+- Protocol: `mvdec_2025_legacy_scaled_centered_alignment_100_full_batch_v1`
+- Training commit: `499e4668264203ca24f70cdea6a3a2f132e86b90`
+- Config hash: `d93bd4f8ec3c217840519ee5d5ecb7499bdd955d75c2efbc2399cc16b9580b0d`
+- Source: `dekm_google_drive_reuters_10k`
+- Source SHA-256: `7eb3f41aca38ffb93c104eef261adc3273d1da57c3750e04c92a67e335d423a1`
+- Numerical runtime: NumPy 2.1.3, scikit-learn 1.6.1
+- Audit runner commit: `0f282c502c75b6d3679e2e8d4d14531077c37d56`
+
+| Interpretation | Width | ACC / NMI | Delta from paper ACC / NMI |
+| --- | ---: | ---: | ---: |
+| Eq. 4 latent average | 10 | 44.65 / 10.69 | -33.48 / -50.72 pp |
+| Figure 1 full-output average | 2,010 | 54.73 / 43.51 | -23.40 / -17.90 pp |
+| Figure 2 full-output concatenation | 4,020 | 54.07 / 37.47 | -24.06 / -23.94 pp |
+
+Figure 1 full-output averaging is the strongest of these three post-training
+diagnostics on this one seed, especially for NMI. It still remains far below
+the paper's REUTERS fused result of 78.13 ACC / 61.41 NMI. This does not identify
+the paper's hidden implementation and is not a reason to promote Figure 1 as the
+canonical protocol. The result only shows that including reconstruction outputs
+changes the clustering geometry substantially compared with Eq. 4 latent-only
+averaging.
+
+Independent local recomputation from all three assignment files exactly matches
+the reported ACC/NMI. Each file contains 10,000 row-aligned samples and four
+clusters. Assignment checksums also match the diagnostic manifest:
+
+| Output | SHA-256 |
+| --- | --- |
+| Eq. 4 assignments | `f473378d1a7dc99ef91829cba37f5f26ff91eb0f14b21c017bbb47b59f3e15a3` |
+| Figure 1 assignments | `2ee2b19bd28ef622ecc75fd5e8b8a524ba2de09b309b59a8027fb8f074c53d04` |
+| Figure 2 assignments | `400fcb95be751b84d0dccda596d0967c506e0cb99e16d3948c8178f8d514b82f` |
+| Metrics CSV | `6abd58cdf46fd60bf3d0fa6b932930cb56b67e76f707f651683022cac347c520` |
+| Retained ZIP | `a99cc87f798ca58bc40c8f8bfe2a63ca9fe4911c1d9dbf11f0b3e448521ba07f` |
+
+The durable output is under
+`artifacts/kaggle/mvdec-2025-reuters-paper-figure-audit-seed42`.
 
 ### Bounded runner status
 
@@ -147,9 +187,8 @@ metadata, and a diagnostic manifest containing checksums for every retained
 output. Temporary full-output matrices are closed and removed after the audit.
 
 Focused validation passes with 54 tests across the new runner, fusion contracts,
-manifest handling, public data, and architecture suites. The runner has not
-been executed on Kaggle, and no GPU run or seed 43-44 run was created. The
-prepared REUTERS-only notebook
-`notebooks/mvdec_2025_reuters_paper_figure_audit_seed42_kaggle.ipynb` pins the
-runner commit `0f282c502c75b6d3679e2e8d4d14531077c37d56` and enforces a
-45-minute hard timeout.
+manifest handling, public data, and architecture suites. The runner completed
+on Kaggle CPU, and no GPU run or seed 43-44 run was created. The REUTERS-only
+notebook `notebooks/mvdec_2025_reuters_paper_figure_audit_seed42_kaggle.ipynb`
+pins the runner commit `0f282c502c75b6d3679e2e8d4d14531077c37d56` and enforces
+a 20-minute subprocess timeout.
