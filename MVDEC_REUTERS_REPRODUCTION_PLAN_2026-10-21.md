@@ -12,7 +12,7 @@ Paper Table 2 (REUTERS) versus the best completed seed-42 runs:
 | --- | ---: | ---: | --- |
 | View1 | 0.7642 / 0.5999 | 0.7557 / 0.5932 | imported DEKM_F (seed 42) |
 | View2 | 0.6501 / 0.5129 | 0.7199 / 0.5154 | calibrated independent View2 |
-| View2 (no calibration) | 0.6501 / 0.5129 | 0.5155 / 0.3223 | joint Eq. 11, true bottleneck |
+| View2 (no calibration) | 0.6501 / 0.5129 | 0.5155 / 0.3223 | joint Eq. 11, true bottleneck (Kaggle snapshot, View1 trainable) |
 | Fused | 0.7813 / 0.6141 | 0.7560 / 0.5937 | calibrated independent View2 |
 
 DEKM_F View1 over seeds 42/43/44 (`dekm_f_2021_official_source_full_batch_v1`):
@@ -38,7 +38,20 @@ ACC 0.7557 / 0.7582 / 0.7484, NMI 0.5932 / 0.5903 / 0.5729. The spread is under
 4. **Operational limits.** Kaggle grants 30 GPU hours per week and one run
    was already refused for exhausted quota. A seed-42 REUTERS arm costs
    roughly 3-6 minutes of training; budget arms accordingly.
-5. **Repository state.** The protocols behind these runs live on
+5. **Frozen-View1 arm not yet run.** Commit `bf80610` defines the frozen
+   DEKM_F View1 + true-bottleneck protocol
+   (`mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1`).
+   The 0.515 View2 numbers above come from older joint-View1 snapshots kept
+   under `artifacts/kaggle/`, so this arm is the next unrun baseline (S0).
+6. **Latent inconsistency in `bf80610` (unverified end to end).** The
+   protocol object uses the frozen View1 policy, but `src/pipeline/data.py`
+   still treats the same protocol ID as "imported joint" (it expects a View1
+   refinement-transition proof and a joint refinement policy, and the ID is not
+   in `FROZEN_VIEW1_PROTOCOL_IDS`). Unit tests pass, but artifact loading after
+   a real run may reject the output. Resolve before spending GPU on S0/S1: either
+   register the ID as frozen everywhere, or restore the joint protocol from the
+   Kaggle snapshot that already passed audits (`largest_eigen` variant).
+7. **Repository state.** The protocols behind these runs live on
    `codex/frozen-view1-true-bottleneck`; they are merged into `dev` as of
    commit `cb2c775` (519 tests pass, 2 skipped).
 
@@ -63,6 +76,7 @@ named factor changes.
 
 | Arm | Change | Question answered |
 | --- | --- | --- |
+| S0 | Run the committed frozen-View1 true-bottleneck protocol unchanged | Baseline for the current code line |
 | S1 | Disable the assignment-change stop for the first N windows (fixed refinement budget, N preregistered) | Does a real refinement budget lift View2 without rescaling? |
 | S2 | Joint training from scratch: View1 not imported, both views pretrained, same Eq. 11 refinement | Does co-training raise the fusion gain over View1? |
 | S3 | Wider View2 stem (first layer not 64 for 2000-d input) | Is the 2000 to 64 compression what weakens View2? |
