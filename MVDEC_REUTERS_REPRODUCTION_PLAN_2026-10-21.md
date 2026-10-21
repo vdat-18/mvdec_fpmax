@@ -104,3 +104,35 @@ SHA-256, runs the tests, trains, audits, and fails if fewer than 500 updates ran
 Attach the dataset `datnguyends/mvdec-v1-true-bottleneck-largest-eigen-s42-input`
 for the checkpoint only. S0 (the plain frozen arm) has no separate notebook; run
 S1 first because S0's expected outcome (stop at update 10) is already known.
+
+## Results (REUTERS seed 42, run 2026-10-21)
+
+All arms: imported DEKM_F View1, true-bottleneck View2, full-batch Eq. 11 with
+1/1/1/1 weights, release row-L2 input, raw Eq. (4) average. ACC / NMI.
+
+| Arm | View1 | View2 | Fused | Audit |
+| --- | ---: | ---: | ---: | --- |
+| Paper Table 2 | 0.7642 / 0.5999 | 0.6501 / 0.5129 | 0.7813 / 0.6141 | - |
+| Joint, stop at update 10 (older snapshot) | 0.7561 / 0.5941 | 0.5151 / 0.3206 | 0.7562 / 0.5942 | passed |
+| **S1 frozen View1, floor 500** | 0.7557 / 0.5932 | **0.7404 / 0.5558** | 0.7563 / 0.5942 | passed, bit-identical on rerun |
+| S1j joint View1, floor 500 | 0.7563 / 0.5944 | 0.4588 / 0.1999 | 0.7563 / 0.5944 | training complete; loader hash bug on the joint path |
+
+Findings:
+
+1. The 10-update stall was the cause of the weak View2. A 500-update floor
+   lifts View2 from 0.515 to 0.740 ACC without any rescaling, and it exceeds
+   Table 2 (0.650). The run is deterministic: a second Kaggle run at a later
+   commit returned identical metrics.
+2. Fused never exceeds View1 in any arm. With the stronger View2, every
+   alternative fusion control (row-L2, z-score, Procrustes, centered-RMS,
+   concatenation) is equal to or worse than the raw average (0.634 to 0.753 ACC
+   against 0.756), so rescaling is not the missing ingredient.
+3. Training View1 jointly (S1j) hurts View2 (0.459) and does not improve fused.
+4. Remaining gap to Table 2: View1 -0.85 pp ACC (runtime offset, DEKM_F seeds
+   42-44 span under 1 pp), fused -2.5 pp ACC. The paper's +1.7 pp fusion gain
+   over View1 is not reproduced by any tested published-method variant.
+
+Open items: the joint path still fails `_load_validated_mvdec_artifact` with a
+config-hash mismatch (the joint transition proof is added after hashing); fix
+before any further joint arm. Multi-seed S1 needs DEKM_F checkpoints for seeds
+43-44 packaged like the seed-42 one.
