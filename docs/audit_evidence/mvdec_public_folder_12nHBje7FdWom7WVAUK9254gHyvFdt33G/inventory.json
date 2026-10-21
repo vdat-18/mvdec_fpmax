@@ -1,0 +1,146 @@
+{
+  "inventory_schema_version": 1,
+  "audited_at": "2026-10-15",
+  "source_folder_id": "12nHBje7FdWom7WVAUK9254gHyvFdt33G",
+  "source_folder_url": "https://drive.google.com/drive/folders/12nHBje7FdWom7WVAUK9254gHyvFdt33G",
+  "file_count": 16,
+  "content_summary": {
+    "pdf_files": 16,
+    "non_pdf_files": 0,
+    "code_files": 0,
+    "data_files": 0,
+    "notebooks": 0,
+    "model_weights": 0,
+    "logs": 0
+  },
+  "files": [
+    {
+      "google_drive_file_id": "1Uqijer3K9b24aHzM4erjuYlzEqAvD0-g",
+      "name": "2022_Clustering sequence graphs.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 1772715,
+      "sha256": "48b3e0a0627b5823ed904ccdc8be34b22eba529a69513d269794e2917b5e2576",
+      "source_url": "https://drive.google.com/uc?id=1Uqijer3K9b24aHzM4erjuYlzEqAvD0-g"
+    },
+    {
+      "google_drive_file_id": "1UZ-Uu29YmuXKbn6nICayP5hTCpdJU7w-",
+      "name": "2023_A community detection model using node embedding approach and graph convolutional network with clustering technique.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 916707,
+      "sha256": "bbb6deae6a02d741a5be7511ad50e8192581ce17fcd953afe82b9e9a51195754",
+      "source_url": "https://drive.google.com/uc?id=1UZ-Uu29YmuXKbn6nICayP5hTCpdJU7w-"
+    },
+    {
+      "google_drive_file_id": "1XyLz0-ZrOzTDxQB1KbsUkdtadLhhv9aD",
+      "name": "2024_A rapid review of clustering algorithms.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 2271471,
+      "sha256": "947c93190b5dc1ea6bf07f15162072fd5980fbce5e8b27c71ed719f9cd86e4e8",
+      "source_url": "https://drive.google.com/uc?id=1XyLz0-ZrOzTDxQB1KbsUkdtadLhhv9aD"
+    },
+    {
+      "google_drive_file_id": "1UZTNhwmKu6fYdMNu0PGprVQk8phfaYyc",
+      "name": "2024_A survey on semi-supervised graph clustering.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 3747434,
+      "sha256": "1ab7f23d9c4c759343058041314a2edf7e979aa7bb031443311ef820f6acafac",
+      "source_url": "https://drive.google.com/uc?id=1UZTNhwmKu6fYdMNu0PGprVQk8phfaYyc"
+    },
+    {
+      "google_drive_file_id": "1Xyq7fGK0cKqH60j7Aa7UFZvRvm38csnL",
+      "name": "2024_An overview on deep clustering.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 1923140,
+      "sha256": "a1bcaa38410fd3410d1fe8d56fff0959d51cb135bc32c37c17a75905df95517c",
+      "source_url": "https://drive.google.com/uc?id=1Xyq7fGK0cKqH60j7Aa7UFZvRvm38csnL"
+    },
+    {
+      "google_drive_file_id": "1UIFv3bWjeNgLQrQsepTDkR4rjA4T274b",
+      "name": "2024_Categorical data clustering A bibliometric analysis and taxonomy.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 3440435,
+      "sha256": "d0191fad385f1175c82dc320c9f71e2e5cdf8fee6654ee71a82bf3416350113e",
+      "source_url": "https://drive.google.com/uc?id=1UIFv3bWjeNgLQrQsepTDkR4rjA4T274b"
+    },
+    {
+      "google_drive_file_id": "1X9H-Gho60qsRTjhkqJeOc9qhAgiBLTbR",
+      "name": "2024_Clustering-Based Frequent Pattern Mining Framework for Solving Cold-Start Problem in Recommender Systems.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 3464769,
+      "sha256": "8ba8dada01dc71b81f3584718aaecec7a03d49f381bef12ef0667b23f33e3139",
+      "source_url": "https://drive.google.com/uc?id=1X9H-Gho60qsRTjhkqJeOc9qhAgiBLTbR"
+    },
+    {
+      "google_drive_file_id": "1XuhTiCgYv979dKa_NYzNIitZYwmjcGZv",
+      "name": "2024_Computational thematics- comparing algorithms for clustering the genres of literary fiction.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 2216642,
+      "sha256": "89cc12d9f875778093ecf3737cae30cb77ede836a070f638b168afd21ebef032",
+      "source_url": "https://drive.google.com/uc?id=1XuhTiCgYv979dKa_NYzNIitZYwmjcGZv"
+    },
+    {
+      "google_drive_file_id": "1Uubn921FxooVnNVqmWTdl2x8ANwHnkcD",
+      "name": "2024_Deep image clustering- A survey.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 5742052,
+      "sha256": "f9fb23d5c075c2aa695534188dcf2fe658f48e3ce25c1cf17fccad2a65923e6f",
+      "source_url": "https://drive.google.com/uc?id=1Uubn921FxooVnNVqmWTdl2x8ANwHnkcD"
+    },
+    {
+      "google_drive_file_id": "1UI6CmuCj_VXDHgRUstg7amwCr3G67qGR",
+      "name": "2024_Density peak clustering algorithms- A review on the decade 2014–2023.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 6630150,
+      "sha256": "2afffd947a29f79cf2224f8bd0b55c7bbbf402b22a13f36e3445083a9cf7df0b",
+      "source_url": "https://drive.google.com/uc?id=1UI6CmuCj_VXDHgRUstg7amwCr3G67qGR"
+    },
+    {
+      "google_drive_file_id": "1UITgWZwLU_63L1ZckWuGIP-1IMDPnkYc",
+      "name": "2024_DPC-DNG- Graph-based label propagation of k-nearest higher-density neighbors for density peaks clustering.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 3245031,
+      "sha256": "e4b13bdccf5a32fcf092cfd31ccf918237a132dbd4c32ae98145985fd7776a86",
+      "source_url": "https://drive.google.com/uc?id=1UITgWZwLU_63L1ZckWuGIP-1IMDPnkYc"
+    },
+    {
+      "google_drive_file_id": "1XDK_5gTks3y2JeWR5BGeoUogs5fbL1Xl",
+      "name": "2024_On the discovery of conceptual clustering models through pattern mining.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 334672,
+      "sha256": "6aa08c11a52f17ac4f0301f4079f0937a6fc3b9b44220b5a9a9837ccc0b5b2d0",
+      "source_url": "https://drive.google.com/uc?id=1XDK_5gTks3y2JeWR5BGeoUogs5fbL1Xl"
+    },
+    {
+      "google_drive_file_id": "1UOQ-kJzMk-mKyZf2Z1buIR_unXAUFl03",
+      "name": "2024_Survey of spectral clustering based on graph theory.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 1583189,
+      "sha256": "7b0543c13a2cb0ed14a969a0ff63d189319448792e0a6cae34191c40bd9abcce",
+      "source_url": "https://drive.google.com/uc?id=1UOQ-kJzMk-mKyZf2Z1buIR_unXAUFl03"
+    },
+    {
+      "google_drive_file_id": "1U_A2VgazbvvY_LrHwQz8DYh-V2nPrdzx",
+      "name": "2025_Deep multi-view clustering- A comprehensive survey of the contemporary techniques.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 3846922,
+      "sha256": "9a0c564c51892606c1bb077bebd4796e4d152dd0c2953d6f87e8609d347f3a21",
+      "source_url": "https://drive.google.com/uc?id=1U_A2VgazbvvY_LrHwQz8DYh-V2nPrdzx"
+    },
+    {
+      "google_drive_file_id": "1Xz3NnlwzGV-KmuqLp7uwODcHch24ab0I",
+      "name": "2025_Multi-view Deep Embedded Clustering- Exploring a new dimension of air pollution.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 5273595,
+      "sha256": "6dc04788c15e13637eac09e033b5d2134c0fdc0f446e9ef4ebd3cd692b1c90d3",
+      "source_url": "https://drive.google.com/uc?id=1Xz3NnlwzGV-KmuqLp7uwODcHch24ab0I"
+    },
+    {
+      "google_drive_file_id": "1URgQ-stU44deNUscOGUDFaRmRVWD_2jz",
+      "name": "2025_Rough neighborhood graph- A method for proximity modeling and data clustering.pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 1781955,
+      "sha256": "b43722eb1755f0093854aff8cd3fadf0c15006ea105c5d2b9a20bcf51347546f",
+      "source_url": "https://drive.google.com/uc?id=1URgQ-stU44deNUscOGUDFaRmRVWD_2jz"
+    }
+  ]
+}
