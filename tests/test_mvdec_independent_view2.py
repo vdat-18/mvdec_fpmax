@@ -487,6 +487,27 @@ def test_min_refinement_joint_protocol_differs_only_by_trainable_view1(monkeypat
     mvdec.validate_imported_view1_run_gate(joint, "REUTERS", 42, 1)
 
 
+def test_min_refinement_scratch_protocol_trains_both_views_with_true_bottleneck(
+    monkeypatch,
+):
+    _, mvdec = _load_mvdec(monkeypatch)
+    scratch = mvdec.MIN_REFINEMENT_SCRATCH_PROTOCOL
+    base = mvdec.PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL
+
+    assert scratch.min_training_steps == 500
+    assert scratch.view2_architecture_id == mvdec.VIEW2_ARCHITECTURE_ID
+    assert scratch.protocol_id in mvdec.PUBLIC_PROTOCOLS
+    for field in (
+        "view1_initialization_policy",
+        "greedy_eigen_direction",
+        "greedy_target_mode",
+        "refinement_batch_size_policy",
+        "input_normalization",
+        "fusion_contract",
+    ):
+        assert getattr(scratch, field) == getattr(base, field)
+
+
 def test_min_refinement_aligned_protocol_adds_only_a_preregistered_alignment_term(
     monkeypatch,
 ):

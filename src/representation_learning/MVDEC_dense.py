@@ -53,6 +53,7 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
@@ -179,6 +180,7 @@ PROTOCOL_IDS = (
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -1063,6 +1065,38 @@ MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_SCRATCH_PROTOCOL = replace(
+    PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: both views pretrained from scratch and refined "
+        "jointly under full-batch Eq. 11 with a true-bottleneck View2 and a "
+        "preregistered minimum refinement budget; not an exact-paper reproduction"
+    ),
+    refinement_source=(
+        "Paper-resolved release-L2 full-batch protocol with the true-bottleneck "
+        "View2 and at least a preregistered number of refinement updates"
+    ),
+    view2_architecture_id=VIEW2_ARCHITECTURE_ID,
+    min_training_steps=MIN_REFINEMENT_TRAINING_STEPS,
+    decision_provenance=(
+        *PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL.decision_provenance,
+        (
+            "view2_architecture",
+            "controlled_architecture_diagnostic",
+            "Replaces the direct 23-wide joint head with the true 10-D "
+            "bottleneck so View2 has a trainable latent.",
+        ),
+        (
+            "minimum_refinement_budget",
+            "ablation",
+            "A fixed minimum of 500 updates keeps the 0.1% assignment-change "
+            "stop from firing before View2 has been refined.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
@@ -1335,6 +1369,7 @@ PUBLIC_PROTOCOLS = {
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
+    MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
@@ -1967,6 +2002,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
     if protocol.protocol_id == MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID:
         return (
             "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-"
             "release-L2-diagnostic"
         )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
