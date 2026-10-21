@@ -150,6 +150,10 @@ IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID = (
 MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_min500_release_l2_seed42_v1"
 )
+MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID = (
+    "mvdec_2025_imported_dekm_f_view1_joint_eq11_true_bottleneck_min500_"
+    "release_l2_seed42_v1"
+)
 MIN_REFINEMENT_TRAINING_STEPS = 500
 INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_release_l2_v1"
@@ -172,9 +176,11 @@ FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     }
 )
-# No registered protocol keeps an imported View1 trainable; joint-transition
-# validation applies only to IDs added here.
-IMPORTED_JOINT_VIEW1_PROTOCOL_IDS = frozenset()
+# Imported-View1 protocols whose View1 stays trainable; joint-transition
+# validation applies only to these IDs.
+IMPORTED_JOINT_VIEW1_PROTOCOL_IDS = frozenset(
+    {MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID}
+)
 EXTERNAL_VIEW1_PROTOCOL_IDS = frozenset(
     {
         *FROZEN_VIEW1_PROTOCOL_IDS,
@@ -287,6 +293,11 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",

@@ -459,3 +459,29 @@ def test_every_registered_protocol_uses_loader_accepted_provenance_labels(
     for protocol in mvdec.PUBLIC_PROTOCOLS.values():
         labels = {category for _, category, _ in protocol.decision_provenance}
         assert labels <= DECISION_PROVENANCE_CLASSIFICATIONS, protocol.protocol_id
+
+
+def test_min_refinement_joint_protocol_differs_only_by_trainable_view1(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    frozen = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    joint = mvdec.MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL
+
+    assert joint.view1_refinement_policy == mvdec.VIEW1_REFINEMENT_JOINT
+    assert joint.view1_initialization_policy == (
+        mvdec.VIEW1_INITIALIZATION_IMPORTED_DEKM_F
+    )
+    assert mvdec.is_imported_joint_view1(joint)
+    assert not mvdec.is_imported_joint_view1(frozen)
+    assert joint.min_training_steps == frozen.min_training_steps == 500
+    for field in (
+        "view2_architecture_id",
+        "greedy_eigen_direction",
+        "greedy_target_mode",
+        "fusion_contract",
+        "max_training_steps",
+        "refinement_batch_size_policy",
+    ):
+        assert getattr(joint, field) == getattr(frozen, field)
+    provenance = {key: category for key, category, _ in joint.decision_provenance}
+    assert provenance["view1_refinement_policy"] == "paper_explicit"
+    mvdec.validate_imported_view1_run_gate(joint, "REUTERS", 42, 1)

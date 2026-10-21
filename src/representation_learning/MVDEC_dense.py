@@ -51,6 +51,7 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
@@ -176,6 +177,7 @@ PROTOCOL_IDS = (
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -1036,6 +1038,30 @@ MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
+    refinement_source=(
+        "Verified DEKM_F View1 initialization plus independently pretrained "
+        "true-bottleneck View2, followed by joint full-batch MvDEC Equation 11 "
+        "refinement with at least a preregistered number of updates"
+    ),
+    view1_refinement_policy=VIEW1_REFINEMENT_JOINT,
+    decision_provenance=replace_decision_provenance(
+        MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        {
+            "view1_refinement_policy": (
+                "view1_refinement_policy",
+                "paper_explicit",
+                "MvDEC states that the entire two-view model is jointly "
+                "optimized; the imported View1 therefore remains trainable "
+                "during Equation 11.",
+            )
+        },
+    ),
+)
+
+
 INDEPENDENT_DEKM_VIEW2_PROTOCOL = replace(
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL,
     protocol_id=INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -1278,6 +1304,7 @@ PUBLIC_PROTOCOLS = {
         IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL
@@ -1899,6 +1926,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
     if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID:
         return (
             "MvDEC-2025-frozen-DEKM_F-View1-Eq11-true-bottleneck-min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-min500-"
             "release-L2-diagnostic"
         )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
