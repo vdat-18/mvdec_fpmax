@@ -244,3 +244,17 @@ Protocol `mvdec_2025_frozen_dekm_f_view1_true_bottleneck_wide_view2_min500_relea
 
 A wider stem lowers View2 and the fused result still equals View1, so the 2000 to 64
 compression is not what limits the fused row.
+
+## S4: View2 sees only even-indexed input columns (frozen View1, 500-update floor, seed 42)
+
+Protocol `mvdec_2025_frozen_dekm_f_view1_true_bottleneck_even_columns_view2_min500_release_l2_seed42_v1`
+(deterministic label-free split, mask applied inside the View2 model). Kaggle run complete.
+
+| Row | Paper ACC / NMI | S4 ACC / NMI |
+| --- | ---: | ---: |
+| View1 | 0.7642 / 0.5999 | 0.7557 / 0.5932 |
+| View2 | 0.6501 / 0.5129 | 0.7353 / 0.5389 |
+| Fused | 0.7813 / 0.6141 | 0.7559 / 0.5929 |
+
+Half of the attributes still give View2 0.735 ACC, and the fused result again equals View1.
+This closes every screening arm in the original plan (S0-S4) plus S1j, S3-alignment and S3-wide.
