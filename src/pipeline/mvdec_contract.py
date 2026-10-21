@@ -21,6 +21,19 @@ PAPER_FIGURE_FUSION_CONTRACTS = (
     FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
 )
 VIEW_INPUT_CONTRACT = "same_full_feature_matrix_both_views_v1"
+DECISION_PROVENANCE_CLASSIFICATIONS = frozenset(
+    {
+        "paper_explicit",
+        "dekm_inherited",
+        "implementation_assumption",
+        "paper_explicit_conflicting_statement",
+        "paper_resolved_interpretation",
+        "paper_table_inference",
+        "ablation",
+        "cross_paper_inference",
+        "controlled_architecture_diagnostic",
+    }
+)
 VIEW1_INITIALIZATION_PRETRAINED_MVDEC = "pretrained_mvdec_view1"
 VIEW1_INITIALIZATION_IMPORTED_DEKM_F = "imported_dekm_f_view1"
 VIEW1_REFINEMENT_JOINT = "jointly_refined_views"

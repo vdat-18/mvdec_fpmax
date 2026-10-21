@@ -30,6 +30,7 @@ from pipeline.mvdec_contract import (
     ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
     ALIGNMENT_UNCENTERED_ROW_L2,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+    DECISION_PROVENANCE_CLASSIFICATIONS,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
     EXTERNAL_VIEW1_PROTOCOL_IDS,
@@ -1051,16 +1052,7 @@ def _validate_public_protocol_contract(
                 item.get("classification")
                 for item in contract.get("decision_provenance", {}).values()
             }
-            - {
-                "paper_explicit",
-                "dekm_inherited",
-                "implementation_assumption",
-                "paper_explicit_conflicting_statement",
-                "paper_resolved_interpretation",
-                "paper_table_inference",
-                "ablation",
-                "cross_paper_inference",
-            },
+            - DECISION_PROVENANCE_CLASSIFICATIONS,
             any(best_result.get(name) is None for name in metric_names),
             not np.isclose(
                 float(best_result.get("acc", np.nan)),

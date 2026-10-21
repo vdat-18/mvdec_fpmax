@@ -448,3 +448,14 @@ def test_refinement_stop_waits_for_the_minimum_step_floor(monkeypatch):
     assert not mvdec.refinement_converged(floored, 10, 0, 10_000, 0.001)
     assert not mvdec.refinement_converged(floored, 500, 11, 10_000, 0.001)
     assert mvdec.refinement_converged(floored, 500, 10, 10_000, 0.001)
+
+
+def test_every_registered_protocol_uses_loader_accepted_provenance_labels(
+    monkeypatch,
+):
+    from pipeline.mvdec_contract import DECISION_PROVENANCE_CLASSIFICATIONS
+
+    _, mvdec = _load_mvdec(monkeypatch)
+    for protocol in mvdec.PUBLIC_PROTOCOLS.values():
+        labels = {category for _, category, _ in protocol.decision_provenance}
+        assert labels <= DECISION_PROVENANCE_CLASSIFICATIONS, protocol.protocol_id
