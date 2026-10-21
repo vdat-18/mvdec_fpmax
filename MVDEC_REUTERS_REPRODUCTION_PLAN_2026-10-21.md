@@ -258,3 +258,28 @@ Protocol `mvdec_2025_frozen_dekm_f_view1_true_bottleneck_even_columns_view2_min5
 
 Half of the attributes still give View2 0.735 ACC, and the fused result again equals View1.
 This closes every screening arm in the original plan (S0-S4) plus S1j, S3-alignment and S3-wide.
+
+## Second line-by-line read of DEKM 2021 and MvDEC 2025 (2026-10-21)
+
+Both PDFs were re-rendered page by page (DEKM 9 pages, MvDEC 18) and every figure, table
+and equation was read again. New or sharpened findings:
+
+- **DEKM Table III protocol:** DEKM is run *three times* and the average is reported; DEKM_F
+  is the full-batch variant. REUTERS 76.28/59.06 (DEKM) and 76.42/59.99 (DEKM_F); 20NEWS
+  41.08/40.27 and 41.20/43.76; RCV1-10K 67.15/46.18 and 62.12/35.98. The text-data
+  normalisation is (1/d)||x||^2 ~ 1, not the release's row-L2 (already an ablation here).
+- **MvDEC Table 2 View1 rows are copied from DEKM_F** on all three datasets, i.e. they are
+  three-run averages of a different code base, while the "Proposed" row is described as
+  *the best performance metrics*. No run count, seed or selection rule is given.
+- **Table 1 sample counts (210 / 2000 / 10 000) are typos.** ACC 41.63 and 40.86 (20NEWS) and
+  78.13 (REUTERS) cannot be k/N for N = 2000 (resp. 210), while N = 18 846 and N = 10 000 fit.
+- **The RCV1 row is the strongest clue:** View1 62.12 and View2 62.35 fuse to 71.93 (+9.6 pp),
+  while REUTERS gains 1.7 pp and 20NEWS 0.4 pp. The repository's own DEKM replicas on RCV1
+  have std 8.7 pp across seeds, so a best-of-N selection can reach 71.9 without any fusion
+  gain. This motivates the 10-seed S2 runs below (label-guided best-of-N shown only to
+  locate the paper value inside the run-to-run spread).
+- **Prose vs equations:** Section 3.3.1 says the first autoencoder learns "from set of
+  features" and the second from "the second set", yet Eq. 3 feeds the same x_i to both
+  encoders and no feature split is named (S4 tested an even-column split for View2).
+- **Eq. 5** reconstructs x from each view's own latent (g1(f1(x)) and g2(f2(x))), never from
+  the fused embedding; Eq. 6-10 act on the fused h = (h1 + h2)/2 (Eq. 4).
