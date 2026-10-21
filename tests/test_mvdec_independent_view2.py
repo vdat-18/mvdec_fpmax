@@ -398,3 +398,53 @@ def test_view1_refinement_transition_is_tamper_evident(monkeypatch):
     altered_latent[0, 0] += 1.0
     with pytest.raises(ValueError, match="latent hash"):
         validate_view1_refinement_transition(proof, altered_latent)
+
+
+def test_min_refinement_protocol_only_adds_a_preregistered_step_floor(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    base = mvdec.IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL
+    protocol = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    base_contract = base.manifest_contract(0.001)
+    contract = protocol.manifest_contract(0.001)
+
+    assert protocol.claim_scope == "controlled_diagnostic_not_exact_paper_truth"
+    assert protocol.min_training_steps == 500
+    assert base.min_training_steps == 0
+    assert "min_training_steps" not in base_contract["stopping"]
+    assert contract["stopping"]["min_training_steps"] == 500
+    for field in (
+        "view1_refinement_policy",
+        "view2_architecture_id",
+        "greedy_eigen_direction",
+        "greedy_target_mode",
+        "fusion_contract",
+        "max_training_steps",
+        "refinement_batch_size_policy",
+    ):
+        assert getattr(protocol, field) == getattr(base, field)
+    mvdec.validate_imported_view1_run_gate(protocol, "REUTERS", 42, 1)
+    with pytest.raises(ValueError, match="REUTERS seed 42"):
+        mvdec.validate_imported_view1_run_gate(protocol, "REUTERS", 43, 1)
+
+
+@pytest.mark.parametrize("bad_floor", [-1, True, 14_001, 1.5])
+def test_min_training_steps_must_be_a_bounded_non_negative_int(
+    monkeypatch,
+    bad_floor,
+):
+    from dataclasses import replace
+
+    _, mvdec = _load_mvdec(monkeypatch)
+    with pytest.raises(ValueError, match="min_training_steps"):
+        replace(mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL, min_training_steps=bad_floor)
+
+
+def test_refinement_stop_waits_for_the_minimum_step_floor(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    base = mvdec.IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL
+    floored = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+
+    assert mvdec.refinement_converged(base, 10, 0, 10_000, 0.001)
+    assert not mvdec.refinement_converged(floored, 10, 0, 10_000, 0.001)
+    assert not mvdec.refinement_converged(floored, 500, 11, 10_000, 0.001)
+    assert mvdec.refinement_converged(floored, 500, 10, 10_000, 0.001)

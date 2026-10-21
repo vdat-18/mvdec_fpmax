@@ -50,6 +50,8 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -173,6 +175,7 @@ PROTOCOL_IDS = (
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -282,6 +285,7 @@ class MvdecProtocol:
     alignment_weight: float = 0.0
     alignment_mode: str = ALIGNMENT_UNCENTERED_ROW_L2
     loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
+    min_training_steps: int = 0
 
     def __post_init__(self) -> None:
         validate_loss_weights(
@@ -337,6 +341,19 @@ class MvdecProtocol:
             and self.view1_refinement_policy != VIEW1_REFINEMENT_FROZEN_DEKM_F
         ):
             raise ValueError("View2-only refinement requires an imported frozen View1.")
+        if (
+            isinstance(self.min_training_steps, bool)
+            or not isinstance(self.min_training_steps, int)
+            or self.min_training_steps < 0
+            or (
+                self.max_training_steps is not None
+                and self.min_training_steps > self.max_training_steps
+            )
+        ):
+            raise ValueError(
+                "min_training_steps must be a non-negative integer within "
+                "max_training_steps."
+            )
         valid_alignment_modes = {
             ALIGNMENT_UNCENTERED_ROW_L2,
             ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
@@ -420,6 +437,8 @@ class MvdecProtocol:
                 ),
             },
         }
+        if self.min_training_steps > 0:
+            contract["stopping"]["min_training_steps"] = self.min_training_steps
         if (
             self.alignment_weight > 0
             or self.loss_scale_policy != LEGACY_SUM_DIMENSIONS_POLICY
@@ -994,6 +1013,29 @@ IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL = replace(
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
+    refinement_source=(
+        "Frozen DEKM_F View1 with the true-bottleneck View2 refined under "
+        "full-batch MvDEC Equation 11 for at least a preregistered number of "
+        "updates before the assignment-change stop may fire"
+    ),
+    min_training_steps=MIN_REFINEMENT_TRAINING_STEPS,
+    decision_provenance=(
+        *IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL.decision_provenance,
+        (
+            "minimum_refinement_budget",
+            "ablation",
+            "Imported DEKM_F View1 is already converged, so fused assignments "
+            "do not change and the 0.1% stop fires after 10 updates, leaving "
+            "View2 at its pretrain state. A fixed minimum of 500 updates tests "
+            "whether Eq. 11 refinement can shape View2 without rescaling it.",
+        ),
+    ),
+)
+
+
 INDEPENDENT_DEKM_VIEW2_PROTOCOL = replace(
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL,
     protocol_id=INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -1235,6 +1277,7 @@ PUBLIC_PROTOCOLS = {
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID: (
         IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL
     ),
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL
@@ -1709,6 +1752,21 @@ def frozen_view1_integrity_proof(
 
 
 
+def refinement_converged(
+    protocol: MvdecProtocol,
+    training_step: int,
+    n_change_assignment: int,
+    n_samples: int,
+    tolerance: float,
+) -> bool:
+    """Return whether refinement may stop after the preregistered minimum."""
+
+    return (
+        training_step >= protocol.min_training_steps
+        and n_change_assignment <= n_samples * tolerance
+    )
+
+
 def is_imported_joint_view1(protocol: MvdecProtocol) -> bool:
     """Return whether a DEKM_F-initialized View1 remains jointly trainable."""
 
@@ -1838,6 +1896,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
     ):
         return "MvDEC-2025-frozen-DEKM_F-View1-Eq11-true-bottleneck-release-L2-diagnostic"
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-Eq11-true-bottleneck-min500-"
+            "release-L2-diagnostic"
+        )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
         return "MvDEC-2025-independent-DEKM-View2-release-L2-diagnostic"
     if protocol.protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
@@ -3789,7 +3852,13 @@ def train(
                 print_console=False,
             )
 
-        if n_change_assignment <= len(x) * assignment_change_tolerance:
+        if refinement_converged(
+            protocol,
+            ite,
+            n_change_assignment,
+            len(x),
+            assignment_change_tolerance,
+        ):
             stop_reason = "converged_assignment"
             training_steps_completed = ite
             refinement_epochs_completed = completed_refinement_progress(
