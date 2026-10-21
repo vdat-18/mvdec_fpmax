@@ -58,3 +58,9 @@ public_text_datasets.zip
 Thumbs.db
 .vscode/
 .idea/
+
+# Local scratch: extracted/OCR'd copyrighted papers, thread notes, plot drafts
+/_*
+/.tmp_*
+# Third-party clone with its own git history
+external_repos/s5p-tools/
