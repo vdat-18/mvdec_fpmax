@@ -157,3 +157,25 @@ paper's numbers under a published-method-only protocol with one preregistered
 refinement floor. The fused row is not, and no tested variant of Eq. (4) fusion
 closes it. Closing it needs information the paper does not give (how or whether
 the two latents are aligned during joint training, and the run-selection rule).
+
+## Linear alignment ablation (label-free, CPU, on the S1 latents)
+
+Approved by the user as an ablation, not as part of the paper's method. Each
+variant is fitted without labels on the 10,000 REUTERS latents; ACC / NMI:
+
+| Fusion of the S1 latents | ACC | NMI |
+| --- | ---: | ---: |
+| View1 | 0.7557 | 0.5932 |
+| View2 | 0.7403 | 0.5558 |
+| Raw average (Eq. 4) | **0.7563** | **0.5942** |
+| Least-squares map h2 to h1, then average | 0.7524 | 0.5878 |
+| Least-squares map h2 to h1, then concat | 0.7527 | 0.5881 |
+| CCA (k = 4, 6, 10), average of canonical variates | 0.7488 | 0.5793 |
+| CCA (k = 4, 6, 10), concat of canonical variates | 0.7482 | 0.5765 |
+
+No linear alignment (orthogonal, least-squares, or canonical) beats the raw
+average, and Procrustes (0.7528) and centered-RMS rescaling (0.6344) were
+already worse. The 15-17% of rows that only one view gets right is therefore
+not recoverable by linear coordinate alignment. A training-time alignment loss
+was not run: the existing L5 machinery does not match the loader's Eq. 11
+contract (about ten loader changes) and the evidence above predicts little gain.
