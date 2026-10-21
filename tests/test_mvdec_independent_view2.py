@@ -508,6 +508,27 @@ def test_min_refinement_scratch_protocol_trains_both_views_with_true_bottleneck(
         assert getattr(scratch, field) == getattr(base, field)
 
 
+def test_min_refinement_wide_view2_protocol_changes_only_the_stem_width(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    frozen = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    wide = mvdec.MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL
+
+    assert wide.view2_base_units == 256
+    assert frozen.view2_base_units == 0
+    assert "view2_base_units" not in frozen.manifest_contract(0.001)["architecture"]
+    assert wide.manifest_contract(0.001)["architecture"]["view2_base_units"] == 256
+    for field in (
+        "min_training_steps",
+        "view2_architecture_id",
+        "view1_refinement_policy",
+        "fusion_contract",
+        "scatter_trace_weight",
+    ):
+        assert getattr(wide, field) == getattr(frozen, field)
+    with pytest.raises(ValueError, match="view2_base_units"):
+        mvdec.replace(wide, view2_base_units=-1)
+
+
 def test_min_refinement_aligned_protocol_adds_only_a_preregistered_alignment_term(
     monkeypatch,
 ):

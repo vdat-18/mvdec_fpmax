@@ -161,6 +161,11 @@ MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID = (
 MIN_REFINEMENT_SCRATCH_PROTOCOL_ID = (
     "mvdec_2025_scratch_both_views_true_bottleneck_min500_release_l2_v1"
 )
+MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_true_bottleneck_wide_view2_min500_"
+    "release_l2_seed42_v1"
+)
+MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS = 256
 MIN_REFINEMENT_TRAINING_STEPS = 500
 INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_release_l2_v1"
@@ -181,6 +186,7 @@ FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
         IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
         MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
+        MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     }
 )
@@ -309,6 +315,11 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",

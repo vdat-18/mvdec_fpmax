@@ -54,6 +54,8 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
+    MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
@@ -181,6 +183,7 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -291,6 +294,7 @@ class MvdecProtocol:
     alignment_mode: str = ALIGNMENT_UNCENTERED_ROW_L2
     loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
     min_training_steps: int = 0
+    view2_base_units: int = 0
 
     def __post_init__(self) -> None:
         validate_loss_weights(
@@ -358,6 +362,15 @@ class MvdecProtocol:
             raise ValueError(
                 "min_training_steps must be a non-negative integer within "
                 "max_training_steps."
+            )
+        if (
+            isinstance(self.view2_base_units, bool)
+            or not isinstance(self.view2_base_units, int)
+            or self.view2_base_units < 0
+        ):
+            raise ValueError(
+                "view2_base_units must be a non-negative integer; 0 keeps the "
+                "dataset default."
             )
         valid_alignment_modes = {
             ALIGNMENT_UNCENTERED_ROW_L2,
@@ -444,6 +457,8 @@ class MvdecProtocol:
         }
         if self.min_training_steps > 0:
             contract["stopping"]["min_training_steps"] = self.min_training_steps
+        if self.view2_base_units > 0:
+            contract["architecture"]["view2_base_units"] = self.view2_base_units
         if (
             self.alignment_weight > 0
             or self.loss_scale_policy != LEGACY_SUM_DIMENSIONS_POLICY
@@ -1097,6 +1112,27 @@ MIN_REFINEMENT_SCRATCH_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
+    refinement_source=(
+        "Frozen DEKM_F View1 with a wider true-bottleneck View2 stem refined "
+        "under full-batch MvDEC Equation 11 with a preregistered update floor"
+    ),
+    view2_base_units=MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "view2_base_units",
+            "ablation",
+            "The 13-feature air-pollution network compresses REUTERS' 2000 "
+            "inputs through a 64-unit stem; widening the stem to 256 tests "
+            "whether that compression limits View2.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
@@ -1370,6 +1406,7 @@ PUBLIC_PROTOCOLS = {
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
@@ -2003,6 +2040,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return (
             "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-min500-"
             "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-wide-View2-min500-"
+            "release-L2-ablation"
         )
     if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_PROTOCOL_ID:
         return (
@@ -4679,6 +4721,9 @@ if __name__ == "__main__":
         input_shape = 2000
         n_clusters = 4
         hidden_units = 10
+
+    if protocol.view2_base_units:
+        view2_base_units = protocol.view2_base_units
 
     pretrain_epochs = 200
     pretrain_batch_size = 256

@@ -216,3 +216,17 @@ views stop being complementary), so fused gains nothing. Training finished (500 
 the Kaggle kernel ended in ERROR after training (post-training loader audit, not diagnosed because
 the science result is negative). Conclusion: fused 0.7813 is still not reproduced; closing it needs
 the authors' alignment/selection details (see `AUTHOR_REQUEST_2026-10-21.md`).
+
+## S2: both views from scratch, true bottleneck, 500-update floor (seed 42)
+
+Protocol `mvdec_2025_scratch_both_views_true_bottleneck_min500_release_l2_v1`
+(paper-resolved release-L2 full batch, no imported View1). Kaggle audit passed.
+
+| Row | Paper ACC / NMI | S2 ACC / NMI |
+| --- | ---: | ---: |
+| View1 | 0.7642 / 0.5999 | 0.7022 / 0.5165 |
+| View2 | 0.6501 / 0.5129 | 0.5057 / 0.2749 |
+| Fused | 0.7813 / 0.6141 | 0.7025 / 0.5168 |
+
+Training both views from scratch is worse than S1 on every row and the fused result again
+equals View1. The DEKM_F View1 checkpoint is therefore the better starting point.
