@@ -305,3 +305,20 @@ the paper's 0.7813, but its NMI 0.5414 is far below 0.6141, and the best NMI is 
 every seed fused tracks View1 rather than adding to it. So the paper's fused ACC is
 reachable by selecting the best of N from-scratch runs, but the fused NMI and the View2 row
 (0.6501 / 0.5129; best here 0.5843 / 0.3715) are not matched by the same selection.
+
+## S2 over 10 seeds, RCV1-10K (label-guided distribution check, 2026-10-22)
+
+Same protocol, seeds 42-51, one process per seed (zip SHA in
+`artifacts/kaggle/mvdec-s2ms-rcv1-run/output4/*.sha256`). The kernel status was ERROR because
+of the final exact audit step; all ten manifests are complete. ACC / NMI:
+
+| Row | Paper | Mean ACC (std) | Median | Best ACC | Mean NMI | Best NMI |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| View1 | 0.6212 / 0.3598 | 0.6793 (0.0425) | 0.6758 | 0.7630 | 0.4459 | 0.5293 |
+| View2 | 0.6235 / 0.3659 | 0.5216 (0.0840) | 0.5256 | 0.6605 | 0.3115 | 0.3968 |
+| Fused | 0.7193 / 0.4885 | 0.6721 (0.0485) | 0.6717 | 0.7631 | 0.4375 | 0.5286 |
+
+Per seed, fused again tracks View1 (seed 46: 0.7631 vs 0.7630; seed 42: 0.7129 / 0.4784, the
+closest to the paper's row). The paper's three RCV1 rows all fall inside the range of this
+distribution, and a +9.6 pp "fusion gain" over DEKM_F is explained by run selection: the
+from-scratch View1 itself spans 0.627-0.763.
