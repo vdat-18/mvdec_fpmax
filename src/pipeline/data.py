@@ -12,6 +12,13 @@ from sklearn.metrics import silhouette_score
 
 from config import H_FUSED_COLUMNS, PREPROCESSED_DATA_PATH
 from pipeline.clustering import compute_gower_distance, compute_silhouette_diagnostics
+from pipeline.dekm_checkpoint import validate_dekm_f_checkpoint_provenance
+from pipeline.mvdec_calibration import (
+    CENTERED_RMS_CALIBRATION_CLAIM_SCOPE,
+    CENTERED_RMS_CALIBRATION_METHOD,
+    CENTERED_RMS_CALIBRATION_SOURCE_PHASE,
+    CenteredRmsCalibration,
+)
 from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID,
     ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -22,10 +29,18 @@ from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
     ALIGNMENT_UNCENTERED_ROW_L2,
+    CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
+    EXTERNAL_VIEW1_PROTOCOL_IDS,
+    FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+    FROZEN_VIEW1_PROTOCOL_IDS,
     FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -35,12 +50,23 @@ from pipeline.mvdec_contract import (
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS,
-    REPRESENTATION_METRIC_SEMANTICS,
+    REFINEMENT_REPRESENTATION_FUSED,
+    REFINEMENT_REPRESENTATION_VIEW2,
+    VIEW1_INITIALIZATION_IMPORTED_DEKM_F,
+    VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+    VIEW1_REFINEMENT_FROZEN_DEKM_F,
+    VIEW1_REFINEMENT_JOINT,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
     VIEW_INPUT_CONTRACT,
     balanced_batch_count,
+    representation_metric_semantics,
+    view1_metric_semantics,
+)
+from pipeline.mvdec_integrity import (
+    validate_frozen_view1_proof,
+    validate_view1_refinement_transition,
 )
 from pipeline.mvdec_runs import (
     RUN_MANIFEST_FILENAME,
@@ -77,6 +103,21 @@ PAPER_RESOLVED_METHOD = "MvDEC-2025-paper-resolved-full-batch"
 PAPER_RESOLVED_RELEASE_L2_METHOD = (
     "MvDEC-2025-paper-resolved-release-L2-full-batch-diagnostic"
 )
+FROZEN_DEKM_F_VIEW1_RELEASE_L2_METHOD = (
+    "MvDEC-2025-frozen-DEKM_F-View1-release-L2-diagnostic"
+)
+IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_METHOD = (
+    "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-release-L2-diagnostic"
+)
+INDEPENDENT_DEKM_VIEW2_METHOD = (
+    "MvDEC-2025-independent-DEKM-View2-release-L2-diagnostic"
+)
+CALIBRATED_INDEPENDENT_DEKM_VIEW2_METHOD = (
+    "MvDEC-2025-independent-DEKM-View2-centered-RMS-calibrated-diagnostic"
+)
+INDEPENDENT_DEKM_VIEW2_OBJECTIVE = (
+    "mvdec_independent_view2_dekm_greedy_mse_then_eq4_fusion"
+)
 PAPER_INFORMED_METHOD = "MvDEC-2025-paper-informed-full-batch"
 ALIGNED_BALANCED_METHOD = "MvDEC-2025-aligned-balanced-full-batch"
 ALIGNED_BALANCED_WEAK_ALIGNMENT_METHOD = (
@@ -88,9 +129,7 @@ ALIGNED_BALANCED_NO_ALIGNMENT_METHOD = (
 LEGACY_SCALED_WEAK_ALIGNMENT_METHOD = (
     "MvDEC-2025-legacy-scaled-alignment-005-full-batch"
 )
-LEGACY_SCALED_ALIGNMENT_METHOD = (
-    "MvDEC-2025-legacy-scaled-alignment-100-full-batch"
-)
+LEGACY_SCALED_ALIGNMENT_METHOD = "MvDEC-2025-legacy-scaled-alignment-100-full-batch"
 LEGACY_SCALED_CENTERED_ALIGNMENT_METHOD = (
     "MvDEC-2025-legacy-scaled-centered-alignment-100-full-batch"
 )
@@ -100,6 +139,8 @@ LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_METHOD = (
 PUBLIC_PROTOCOL_ARCHITECTURES = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_REPRODUCTION_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
+    CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID: (VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID),
     PUBLIC_DIRECT_JOINT_HEAD_PROTOCOL_ID: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID: (
@@ -113,6 +154,7 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
         protocol_id: VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
         for protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
     },
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
 }
 PUBLIC_PROTOCOL_METHODS = {
     PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID: PUBLIC_DEKM_CONSISTENT_METHOD,
@@ -127,9 +169,17 @@ PUBLIC_PROTOCOL_METHODS = {
         for protocol_id in EQUATION11_PROTOCOL_IDS
     },
     LITERAL_EQUATION11_PROTOCOL_ID: LITERAL_EQUATION11_METHOD,
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID: (
+        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_METHOD
+    ),
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID: PAPER_RESOLVED_METHOD,
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID: (
         PAPER_RESOLVED_RELEASE_L2_METHOD
+    ),
+    FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID: (FROZEN_DEKM_F_VIEW1_RELEASE_L2_METHOD),
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_METHOD,
+    CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
+        CALIBRATED_INDEPENDENT_DEKM_VIEW2_METHOD
     ),
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID: PAPER_INFORMED_METHOD,
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: ALIGNED_BALANCED_METHOD,
@@ -155,6 +205,9 @@ PUBLIC_PROTOCOL_FUSIONS = {
 }
 PUBLIC_PROTOCOL_FUSIONS[PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID] = (
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE
+)
+PUBLIC_PROTOCOL_FUSIONS[CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID] = (
+    FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE
 )
 PUBLIC_MVDEC_DATASETS = {"REUTERS", "20NEWS", "RCV1"}
 PRIVATE_MVDEC_DATASETS = {"AIRPOLLUTION", "TIKI"}
@@ -401,6 +454,104 @@ def _protocol_contract_sha256(contract: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _validate_calibration_metadata(
+    best_result: dict,
+    h_view1: np.ndarray | None = None,
+) -> CenteredRmsCalibration | None:
+    """Validate calibrated-fusion metadata at the artifact trust boundary."""
+
+    config_value = best_result.get("config", {})
+    if not isinstance(config_value, dict):
+        raise ValueError("MvDEC artifact config must be a dictionary.")
+    config = config_value
+    protocol_id = best_result.get("protocol_id")
+    artifact_metadata = best_result.get("calibration")
+    config_metadata = config.get("calibration")
+    is_calibrated = protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID
+    if not is_calibrated:
+        if artifact_metadata is not None or config_metadata is not None:
+            raise ValueError(
+                "Non-calibrated MvDEC artifacts must not contain calibration metadata."
+            )
+        return None
+    calibration = CenteredRmsCalibration.from_metadata(artifact_metadata)
+    if config_metadata != calibration.to_metadata():
+        raise ValueError("MvDEC calibration metadata is inconsistent with config.")
+    if calibration.claim_scope != CENTERED_RMS_CALIBRATION_CLAIM_SCOPE:
+        raise ValueError("MvDEC calibration claim scope is invalid.")
+    if h_view1 is not None and (
+        calibration.n_samples != h_view1.shape[0]
+        or calibration.latent_width != h_view1.shape[1]
+    ):
+        raise ValueError("MvDEC calibration dimensions do not match h_view1.")
+    return calibration
+
+
+def _validate_frozen_view1_proof_metadata(
+    best_result: dict,
+    h_view1: np.ndarray,
+) -> dict[str, object] | None:
+    """Validate an optional frozen-View1 proof and require it for calibration."""
+
+    config_value = best_result.get("config", {})
+    if not isinstance(config_value, dict):
+        raise ValueError("MvDEC artifact config must be a dictionary.")
+    config = config_value
+    protocol_id = best_result.get("protocol_id")
+    artifact_proof = best_result.get("frozen_view1_proof")
+    config_proof = config.get("frozen_view1_proof")
+    is_frozen = protocol_id in FROZEN_VIEW1_PROTOCOL_IDS
+    is_calibrated = protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID
+    if not is_frozen:
+        if artifact_proof is not None or config_proof is not None:
+            raise ValueError(
+                "Non-frozen MvDEC artifacts must not contain a View1 proof."
+            )
+        return None
+    if artifact_proof is None:
+        if config_proof is not None or is_calibrated:
+            raise ValueError("Calibrated MvDEC artifacts require a View1 proof.")
+        return None
+    validated = validate_frozen_view1_proof(artifact_proof, h_view1)
+    if config_proof != validated:
+        raise ValueError("Frozen View1 proof is inconsistent with artifact config.")
+    return validated
+
+
+def _validate_view1_refinement_transition_metadata(
+    best_result: dict,
+    h_view1: np.ndarray,
+) -> dict[str, object] | None:
+    """Require transition evidence only for imported jointly refined View1."""
+
+    config_value = best_result.get("config", {})
+    if not isinstance(config_value, dict):
+        raise ValueError("MvDEC artifact config must be a dictionary.")
+    config = config_value
+    protocol_id = best_result.get("protocol_id")
+    artifact_transition = best_result.get("view1_refinement_transition")
+    config_transition = config.get("view1_refinement_transition")
+    is_imported_joint = (
+        protocol_id == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
+    )
+    if not is_imported_joint:
+        if artifact_transition is not None or config_transition is not None:
+            raise ValueError(
+                "Only imported-joint MvDEC artifacts may contain a View1 "
+                "refinement transition."
+            )
+        return None
+    validated = validate_view1_refinement_transition(
+        artifact_transition,
+        h_view1,
+    )
+    if config_transition != validated:
+        raise ValueError(
+            "View1 refinement transition is inconsistent with artifact config."
+        )
+    return validated
+
+
 def _validate_public_protocol_contract(
     best_result: dict,
     contract: dict,
@@ -417,11 +568,27 @@ def _validate_public_protocol_contract(
     expected_method = PUBLIC_PROTOCOL_METHODS[protocol_id]
     is_dekm_consistent = protocol_id == PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID
     is_equation11 = protocol_id in EQUATION11_PROTOCOL_IDS
+    is_independent_dekm_view2 = protocol_id in INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS
+    is_calibrated_independent_view2 = (
+        protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID
+    )
+    is_external_view1 = protocol_id in EXTERNAL_VIEW1_PROTOCOL_IDS
+    is_frozen_view1 = protocol_id in FROZEN_VIEW1_PROTOCOL_IDS
+    expected_initialization_policy = (
+        VIEW1_INITIALIZATION_IMPORTED_DEKM_F
+        if is_external_view1
+        else VIEW1_INITIALIZATION_PRETRAINED_MVDEC
+    )
+    expected_view1_policy = (
+        VIEW1_REFINEMENT_FROZEN_DEKM_F if is_frozen_view1 else VIEW1_REFINEMENT_JOINT
+    )
+    expected_metric_semantics = representation_metric_semantics(
+        expected_view1_policy,
+        expected_initialization_policy,
+    )
     is_aligned_balanced = protocol_id in ALIGNED_BALANCED_PROTOCOL_IDS
     alignment_weight = ALIGNED_BALANCED_PROTOCOL_SETTINGS.get(protocol_id, 0.0)
-    expected_alignment_mode = ALIGNED_BALANCED_PROTOCOL_ALIGNMENT_MODES.get(
-        protocol_id
-    )
+    expected_alignment_mode = ALIGNED_BALANCED_PROTOCOL_ALIGNMENT_MODES.get(protocol_id)
     legacy_alignment_default = (
         ALIGNMENT_UNCENTERED_ROW_L2
         if expected_alignment_mode == ALIGNMENT_UNCENTERED_ROW_L2
@@ -438,6 +605,8 @@ def _validate_public_protocol_contract(
         expected_objective = ALIGNED_BALANCED_OBJECTIVE
     elif is_equation11:
         expected_objective = LITERAL_EQUATION11_OBJECTIVE
+    elif is_independent_dekm_view2:
+        expected_objective = INDEPENDENT_DEKM_VIEW2_OBJECTIVE
     elif is_dekm_consistent:
         expected_objective = PRIMARY_MVDEC_OBJECTIVE
     else:
@@ -454,7 +623,9 @@ def _validate_public_protocol_contract(
     )
     expected_pretrain_shuffle_buffer = None if is_dekm_consistent else 8000
     expected_refinement_objective = (
-        "joint_reconstruction_plus_greedy"
+        "independent_view2_dekm_greedy_mse"
+        if is_independent_dekm_view2
+        else "joint_reconstruction_plus_greedy"
         if is_dekm_consistent or is_equation11 or is_aligned_balanced
         else "release_reconstruction_plus_greedy_mse"
     )
@@ -486,11 +657,25 @@ def _validate_public_protocol_contract(
                 "definition": (
                     "mean_batch(||L2_normalize(h_view1-mean_batch(h_view1)) - "
                     "L2_normalize(h_view2-mean_batch(h_view2))||^2)"
-                    if expected_alignment_mode
-                    == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+                    if expected_alignment_mode == ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
                     else "mean_batch(||L2_normalize(h_view1) - "
                     "L2_normalize(h_view2)||^2)"
                 ),
+            },
+        }
+    elif is_independent_dekm_view2:
+        expected_loss_terms = {
+            "L1_reconstruction": {"weight": 0.0, "optimized": False},
+            "L2_kmeans": {"weight": 0.0, "optimized": False},
+            "L3_scatter_trace": {
+                "weight": 0.0,
+                "optimized": False,
+                "mathematically_equivalent_to_L2": True,
+            },
+            "L4_greedy": {
+                "weight": 1.0,
+                "optimized": True,
+                "reduction": expected_l4_reduction,
             },
         }
     elif is_equation11:
@@ -560,7 +745,7 @@ def _validate_public_protocol_contract(
     )
     expected_batch_policy = (
         "full_dataset"
-        if is_aligned_balanced
+        if is_aligned_balanced or is_independent_dekm_view2
         else EQUATION11_PROTOCOL_SETTINGS[protocol_id][2]
         if is_equation11
         else "fixed_256"
@@ -609,24 +794,55 @@ def _validate_public_protocol_contract(
             "clustering": "independent_kmeans_n_init_100",
             "metrics": ["acc", "nmi"],
             "ground_truth_usage": "final_evaluation_only",
-            "metric_semantics": REPRESENTATION_METRIC_SEMANTICS,
-            "view1_semantics": "jointly_trained_view1_not_dekm_f",
+            "metric_semantics": expected_metric_semantics,
+            "view1_semantics": view1_metric_semantics(
+                expected_view1_policy,
+                expected_initialization_policy,
+            ),
         },
     }
+    if is_external_view1:
+        expected_schedule["pretraining"]["view1_initialization_policy"] = (
+            expected_initialization_policy
+        )
+        expected_schedule["refinement"]["view1_refinement_policy"] = (
+            expected_view1_policy
+        )
+    if is_independent_dekm_view2:
+        if is_calibrated_independent_view2:
+            expected_schedule["refinement"].update(
+                {
+                    "representation": REFINEMENT_REPRESENTATION_FUSED,
+                    "fusion_timing": "fixed_calibration_before_refinement",
+                    "calibration_policy": {
+                        "method": CENTERED_RMS_CALIBRATION_METHOD,
+                        "source_phase": CENTERED_RMS_CALIBRATION_SOURCE_PHASE,
+                        "label_free": True,
+                        "calibration_count": 1,
+                        "recomputed_during_refinement": False,
+                        "claim_scope": CENTERED_RMS_CALIBRATION_CLAIM_SCOPE,
+                    },
+                }
+            )
+        else:
+            expected_schedule["refinement"].update(
+                {
+                    "representation": REFINEMENT_REPRESENTATION_VIEW2,
+                    "fusion_timing": "final_evaluation_only",
+                }
+            )
     if (
-        is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
-    ) or is_aligned_balanced:
+        (is_equation11 and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID)
+        or is_aligned_balanced
+        or is_independent_dekm_view2
+    ):
         expected_schedule["refinement"]["batch_size_policy"] = expected_batch_policy
     expected_loss_weights = {
-        "reconstruction": 1.0,
+        "reconstruction": 0.0 if is_independent_dekm_view2 else 1.0,
         "kmeans": 1.0 if is_equation11 or is_aligned_balanced else 0.0,
         "scatter_trace_diagnostic": 1.0 if is_equation11 else 0.0,
         "greedy": 1.0,
-        **(
-            {"cross_view_alignment": alignment_weight}
-            if is_aligned_balanced
-            else {}
-        ),
+        **({"cross_view_alignment": alignment_weight} if is_aligned_balanced else {}),
     }
     training_steps_completed = int(best_result.get("training_steps_completed", -1))
     batches_per_epoch = int(best_result.get("batches_per_epoch", 0))
@@ -639,10 +855,7 @@ def _validate_public_protocol_contract(
         expected_refinement_progress = training_steps_completed // max(
             batches_per_epoch, 1
         )
-    elif (
-        refinement_progress_unit
-        == REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS
-    ):
+    elif refinement_progress_unit == REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS:
         expected_refinement_progress = (
             training_steps_completed // expected_update_interval
         )
@@ -656,17 +869,39 @@ def _validate_public_protocol_contract(
         "fused_acc",
         "fused_nmi",
     )
+    external_checkpoint = best_result.get("external_view1_checkpoint")
+    config_external_checkpoint = config.get("external_view1_checkpoint")
+    if is_external_view1:
+        try:
+            validated_external_checkpoint = validate_dekm_f_checkpoint_provenance(
+                external_checkpoint,
+                expected_source_sha256=best_result.get("source_sha256"),
+            )
+        except ValueError as error:
+            raise ValueError(
+                "Imported DEKM_F View1 artifact has invalid checkpoint provenance."
+            ) from error
+        if validated_external_checkpoint != config_external_checkpoint:
+            raise ValueError(
+                "Imported DEKM_F View1 artifact has inconsistent checkpoint provenance."
+            )
+    elif external_checkpoint is not None or config_external_checkpoint is not None:
+        raise ValueError(
+            "Ordinary MvDEC artifact must not contain View1 checkpoint provenance."
+        )
     if any(
         (
             best_result.get("dataset") not in PUBLIC_MVDEC_DATASETS,
             best_result.get("algorithm_family") != "MvDEC",
             best_result.get("algorithm") != expected_method,
             best_result.get("method_name") != expected_method,
+            is_external_view1
+            and contract.get("claim_scope")
+            != "controlled_diagnostic_not_exact_paper_truth",
             objective.get("name") != expected_objective,
             objective.get("loss_terms") != expected_loss_terms,
             (
-                objective.get("loss_scale_policy")
-                != expected_loss_scale_policy
+                objective.get("loss_scale_policy") != expected_loss_scale_policy
                 if is_aligned_balanced
                 else "loss_scale_policy" in objective
             ),
@@ -688,15 +923,68 @@ def _validate_public_protocol_contract(
             contract.get("architecture", {}).get("view_input_contract")
             != VIEW_INPUT_CONTRACT,
             schedule.get("final_evaluation", {}).get("metric_semantics")
-            != REPRESENTATION_METRIC_SEMANTICS,
+            != expected_metric_semantics,
             schedule.get("final_evaluation", {}).get("view1_semantics")
-            != "jointly_trained_view1_not_dekm_f",
+            != view1_metric_semantics(
+                expected_view1_policy,
+                expected_initialization_policy,
+            ),
+            is_external_view1
+            and schedule.get("pretraining", {}).get("view1_initialization_policy")
+            != expected_initialization_policy,
+            is_external_view1
+            and schedule.get("refinement", {}).get("view1_refinement_policy")
+            != expected_view1_policy,
             best_result.get("view_input_contract") != VIEW_INPUT_CONTRACT,
             config.get("view_input_contract") != VIEW_INPUT_CONTRACT,
+            is_external_view1
+            and best_result.get("view1_initialization_policy")
+            != expected_initialization_policy,
+            is_external_view1
+            and config.get("view1_initialization_policy")
+            != expected_initialization_policy,
+            is_external_view1
+            and best_result.get("view1_refinement_policy") != expected_view1_policy,
+            is_external_view1
+            and config.get("view1_refinement_policy") != expected_view1_policy,
+            is_independent_dekm_view2
+            and not is_calibrated_independent_view2
+            and best_result.get("refinement_representation")
+            != REFINEMENT_REPRESENTATION_VIEW2,
+            is_independent_dekm_view2
+            and not is_calibrated_independent_view2
+            and config.get("refinement_representation")
+            != REFINEMENT_REPRESENTATION_VIEW2,
+            is_calibrated_independent_view2
+            and best_result.get(
+                "refinement_representation", REFINEMENT_REPRESENTATION_FUSED
+            )
+            != REFINEMENT_REPRESENTATION_FUSED,
+            is_calibrated_independent_view2
+            and config.get("refinement_representation", REFINEMENT_REPRESENTATION_FUSED)
+            != REFINEMENT_REPRESENTATION_FUSED,
+            not is_independent_dekm_view2
+            and "refinement_representation" in best_result,
+            not is_independent_dekm_view2 and "refinement_representation" in config,
+            not is_external_view1
+            and best_result.get(
+                "view1_initialization_policy", VIEW1_INITIALIZATION_PRETRAINED_MVDEC
+            )
+            != VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+            not is_external_view1
+            and config.get(
+                "view1_initialization_policy", VIEW1_INITIALIZATION_PRETRAINED_MVDEC
+            )
+            != VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+            not is_external_view1
+            and best_result.get("view1_refinement_policy", VIEW1_REFINEMENT_JOINT)
+            != VIEW1_REFINEMENT_JOINT,
+            not is_external_view1
+            and config.get("view1_refinement_policy", VIEW1_REFINEMENT_JOINT)
+            != VIEW1_REFINEMENT_JOINT,
             best_result.get("representation_metric_semantics")
-            != REPRESENTATION_METRIC_SEMANTICS,
-            config.get("representation_metric_semantics")
-            != REPRESENTATION_METRIC_SEMANTICS,
+            != expected_metric_semantics,
+            config.get("representation_metric_semantics") != expected_metric_semantics,
             eigen.get("order") != "ascending",
             eigen.get("direction") != expected_eigen_direction,
             greedy_target.get("mode") != expected_target_mode,
@@ -733,7 +1021,8 @@ def _validate_public_protocol_contract(
                 float(stopping.get("assignment_change_tolerance", np.nan)),
                 0.001,
             ),
-            is_equation11 and not contract.get("decision_provenance"),
+            (is_equation11 or is_independent_dekm_view2)
+            and not contract.get("decision_provenance"),
             is_equation11
             and protocol_id == LITERAL_EQUATION11_PROTOCOL_ID
             and (
@@ -742,7 +1031,7 @@ def _validate_public_protocol_contract(
                 or "refinement_batch_size_policy" in config
                 or "resolved_refinement_batch_size" in config
             ),
-            (is_equation11 or is_aligned_balanced)
+            (is_equation11 or is_aligned_balanced or is_independent_dekm_view2)
             and protocol_id != LITERAL_EQUATION11_PROTOCOL_ID
             and (
                 best_result.get("refinement_batch_size_policy") != expected_batch_policy
@@ -752,7 +1041,7 @@ def _validate_public_protocol_contract(
                 or config.get("resolved_refinement_batch_size")
                 != expected_resolved_batch_size
             ),
-            is_equation11
+            (is_equation11 or is_independent_dekm_view2)
             and {
                 item.get("classification")
                 for item in contract.get("decision_provenance", {}).values()
@@ -765,6 +1054,7 @@ def _validate_public_protocol_contract(
                 "paper_resolved_interpretation",
                 "paper_table_inference",
                 "ablation",
+                "cross_paper_inference",
             },
             any(best_result.get(name) is None for name in metric_names),
             not np.isclose(
@@ -940,6 +1230,26 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
     artifact_config = best_result.get("config", {})
     manifest_config = manifest.get("config", {})
     output_sha256 = manifest.get("output_sha256", {}).get("artifact")
+    protocol_id = best_result.get("protocol_id")
+    is_external_view1 = protocol_id in EXTERNAL_VIEW1_PROTOCOL_IDS
+    is_frozen_view1 = protocol_id in FROZEN_VIEW1_PROTOCOL_IDS
+    is_imported_joint = (
+        protocol_id == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
+    )
+    expected_initialization_policy = (
+        VIEW1_INITIALIZATION_IMPORTED_DEKM_F
+        if is_external_view1
+        else VIEW1_INITIALIZATION_PRETRAINED_MVDEC
+    )
+    expected_refinement_policy = (
+        VIEW1_REFINEMENT_FROZEN_DEKM_F if is_frozen_view1 else VIEW1_REFINEMENT_JOINT
+    )
+    metadata_locations = (
+        best_result,
+        artifact_config,
+        manifest,
+        manifest_config,
+    )
     provenance_fields = (
         "training_commit",
         "source_id",
@@ -956,10 +1266,118 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
         or artifact_config.get(field) != best_result.get(field)
         for field in provenance_fields
     )
+    if is_external_view1:
+        provenance_mismatch = provenance_mismatch or any(
+            location.get("view1_initialization_policy")
+            != expected_initialization_policy
+            or location.get("view1_refinement_policy")
+            != expected_refinement_policy
+            for location in metadata_locations
+        )
+    else:
+        provenance_mismatch = provenance_mismatch or any(
+            location.get(
+                "view1_initialization_policy",
+                VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+            )
+            != VIEW1_INITIALIZATION_PRETRAINED_MVDEC
+            or location.get("view1_refinement_policy", VIEW1_REFINEMENT_JOINT)
+            != VIEW1_REFINEMENT_JOINT
+            for location in metadata_locations
+        )
+
+    checkpoint_values = tuple(
+        location.get("external_view1_checkpoint") for location in metadata_locations
+    )
+    if is_external_view1:
+        try:
+            validated_external_checkpoint = validate_dekm_f_checkpoint_provenance(
+                checkpoint_values[0],
+                expected_source_sha256=best_result.get("source_sha256"),
+            )
+        except ValueError:
+            external_checkpoint_mismatch = True
+        else:
+            external_checkpoint_mismatch = any(
+                value != validated_external_checkpoint for value in checkpoint_values
+            )
+    else:
+        external_checkpoint_mismatch = any(
+            value is not None for value in checkpoint_values
+        )
+
+    is_calibrated = protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID
+    calibration_values = tuple(
+        location.get("calibration") for location in metadata_locations
+    )
+    if is_calibrated:
+        try:
+            validated_calibration = CenteredRmsCalibration.from_metadata(
+                calibration_values[0]
+            ).to_metadata()
+        except ValueError:
+            calibration_mismatch = True
+        else:
+            calibration_mismatch = any(
+                value != validated_calibration for value in calibration_values
+            )
+    else:
+        calibration_mismatch = any(value is not None for value in calibration_values)
+
+    proof_values = tuple(
+        location.get("frozen_view1_proof") for location in metadata_locations
+    )
+    if is_frozen_view1:
+        proof_mismatch = any(value is not None for value in proof_values) and (
+            proof_values[0] is None
+            or any(value != proof_values[0] for value in proof_values)
+        )
+        if not proof_mismatch and proof_values[0] is not None:
+            try:
+                validate_frozen_view1_proof(
+                    proof_values[0],
+                    np.asarray(best_result.get("h_view1")),
+                )
+            except ValueError:
+                proof_mismatch = True
+        if is_calibrated and proof_values[0] is None:
+            proof_mismatch = True
+    else:
+        proof_mismatch = any(value is not None for value in proof_values)
+
+    transition_values = tuple(
+        location.get("view1_refinement_transition")
+        for location in metadata_locations
+    )
+    if is_imported_joint:
+        transition_mismatch = transition_values[0] is None or any(
+            value != transition_values[0] for value in transition_values
+        )
+        if not transition_mismatch:
+            try:
+                validate_view1_refinement_transition(
+                    transition_values[0],
+                    np.asarray(best_result.get("h_view1")),
+                )
+            except ValueError:
+                transition_mismatch = True
+    else:
+        transition_mismatch = any(
+            value is not None for value in transition_values
+        )
+
+    required_public_provenance_fields = provenance_fields + (
+        (
+            "view1_initialization_policy",
+            "view1_refinement_policy",
+        )
+        if is_external_view1
+        else ()
+    )
     public_provenance_missing = best_result.get(
         "dataset"
     ) in PUBLIC_MVDEC_DATASETS and any(
-        best_result.get(field) is None for field in provenance_fields
+        best_result.get(field) is None for field in required_public_provenance_fields
     )
     if any(
         (
@@ -967,7 +1385,7 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
             manifest.get("run_id") != run_id,
             manifest.get("config_hash") != config_hash,
             manifest.get("dataset") != best_result.get("dataset"),
-            manifest.get("protocol_id") != best_result.get("protocol_id"),
+            manifest.get("protocol_id") != protocol_id,
             artifact_config.get("run_id") != run_id,
             artifact_config.get("config_hash") != config_hash,
             artifact_config.get("seed") != manifest.get("seed"),
@@ -977,12 +1395,15 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
             != result_path.resolve(),
             output_sha256 != file_sha256(result_path),
             provenance_mismatch,
+            external_checkpoint_mismatch,
+            calibration_mismatch,
+            proof_mismatch,
+            transition_mismatch,
             public_provenance_missing,
         )
     ):
         msg = "MvDEC artifact does not match its complete run manifest."
         raise ValueError(msg)
-
 
 def _validate_mvdec2025_contract(
     best_result: dict,
@@ -1021,6 +1442,10 @@ def _validate_mvdec2025_contract(
         )
         raise ValueError(msg)
 
+    calibration = _validate_calibration_metadata(best_result, h_view1)
+    _validate_frozen_view1_proof_metadata(best_result, h_view1)
+    _validate_view1_refinement_transition_metadata(best_result, h_view1)
+
     fusion_dim = best_result.get("fusion_dim", best_result.get("latent_dim"))
     if fusion_dim is not None and h_fused.shape[1] != int(fusion_dim):
         msg = (
@@ -1048,16 +1473,20 @@ def _validate_mvdec2025_contract(
         view1_normalized = h_view1 / np.sqrt(np.maximum(view1_squared_norm, 1e-12))
         view2_normalized = h_view2 / np.sqrt(np.maximum(view2_squared_norm, 1e-12))
         expected = (view1_normalized + view2_normalized) / 2
+    elif fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE:
+        if calibration is None:
+            raise ValueError("Calibrated MvDEC fusion requires calibration metadata.")
+        expected = (h_view1 + calibration.view2_scale_factor * h_view2) / 2
     else:
         msg = f"Unsupported MvDEC fusion contract: {fusion_contract!r}."
         raise ValueError(msg)
 
-    if h_fused.shape != expected.shape or not np.allclose(
-        h_fused,
-        expected,
-        rtol=1e-5,
-        atol=1e-6,
-    ):
+    fusion_matches = (
+        np.array_equal(h_fused, expected)
+        if fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE
+        else np.allclose(h_fused, expected, rtol=1e-5, atol=1e-6)
+    )
+    if h_fused.shape != expected.shape or not fusion_matches:
         msg = "h_fused does not match the declared MvDEC fusion contract."
         raise ValueError(msg)
 

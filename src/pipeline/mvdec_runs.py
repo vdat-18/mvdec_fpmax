@@ -31,6 +31,12 @@ HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
 WEIGHT_OUTPUT_NAMES = frozenset(
     {"pretrain_view1", "pretrain_view2", "final_view1", "final_view2"}
 )
+RUNTIME_CONFIG_METADATA_FIELDS = frozenset(
+    {
+        "calibration",
+        "frozen_view1_proof",
+    }
+)
 
 
 def resolve_training_commit(repository: Path) -> str:
@@ -89,7 +95,16 @@ def file_sha256(path: Path) -> str:
 def canonical_config_hash(config: dict[str, object]) -> str:
     """Return a stable SHA-256 for one resolved seed-independent config."""
 
-    encoded = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    identity_config = {
+        key: value
+        for key, value in config.items()
+        if key not in RUNTIME_CONFIG_METADATA_FIELDS
+    }
+    encoded = json.dumps(
+        identity_config,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 

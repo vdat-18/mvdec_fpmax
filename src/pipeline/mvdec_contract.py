@@ -9,9 +9,10 @@ VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID = (
 )
 FUSION_ENCODER_AVERAGE = "mvdec2025_encoder_average"
 FUSION_ENCODER_L2_NORMALIZED_AVERAGE = "mvdec2025_encoder_l2_normalized_average"
-FUSION_FIGURE1_FULL_OUTPUT_AVERAGE = (
-    "mvdec2025_figure1_full_output_average_diagnostic"
+FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE = (
+    "mvdec2025_encoder_centered_global_rms_calibrated_average"
 )
+FUSION_FIGURE1_FULL_OUTPUT_AVERAGE = "mvdec2025_figure1_full_output_average_diagnostic"
 FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION = (
     "mvdec2025_figure2_full_output_concatenation_diagnostic"
 )
@@ -20,7 +21,55 @@ PAPER_FIGURE_FUSION_CONTRACTS = (
     FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
 )
 VIEW_INPUT_CONTRACT = "same_full_feature_matrix_both_views_v1"
+VIEW1_INITIALIZATION_PRETRAINED_MVDEC = "pretrained_mvdec_view1"
+VIEW1_INITIALIZATION_IMPORTED_DEKM_F = "imported_dekm_f_view1"
+VIEW1_REFINEMENT_JOINT = "jointly_refined_views"
+VIEW1_REFINEMENT_FROZEN_DEKM_F = "frozen_imported_dekm_f_view1"
+REFINEMENT_REPRESENTATION_FUSED = "fused_latent"
+REFINEMENT_REPRESENTATION_VIEW2 = "view2_latent_only"
 REPRESENTATION_METRIC_SEMANTICS = "jointly_trained_views_independent_kmeans_v1"
+FROZEN_VIEW1_REPRESENTATION_METRIC_SEMANTICS = (
+    "frozen_dekm_f_view1_refined_view2_independent_kmeans_v1"
+)
+IMPORTED_JOINT_VIEW1_REPRESENTATION_METRIC_SEMANTICS = (
+    "imported_dekm_f_view1_jointly_refined_views_independent_kmeans_v1"
+)
+
+
+def representation_metric_semantics(
+    view1_refinement_policy: str,
+    view1_initialization_policy: str = VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+) -> str:
+    """Return metric semantics for the selected View1 refinement policy."""
+
+    if view1_refinement_policy == VIEW1_REFINEMENT_JOINT:
+        if view1_initialization_policy == VIEW1_INITIALIZATION_IMPORTED_DEKM_F:
+            return IMPORTED_JOINT_VIEW1_REPRESENTATION_METRIC_SEMANTICS
+        return REPRESENTATION_METRIC_SEMANTICS
+    if view1_refinement_policy == VIEW1_REFINEMENT_FROZEN_DEKM_F:
+        return FROZEN_VIEW1_REPRESENTATION_METRIC_SEMANTICS
+    raise ValueError(
+        f"Unsupported View1 refinement policy: {view1_refinement_policy!r}."
+    )
+
+
+def view1_metric_semantics(
+    view1_refinement_policy: str,
+    view1_initialization_policy: str = VIEW1_INITIALIZATION_PRETRAINED_MVDEC,
+) -> str:
+    """Describe whether View1 is jointly trained or imported and frozen."""
+
+    if view1_refinement_policy == VIEW1_REFINEMENT_JOINT:
+        if view1_initialization_policy == VIEW1_INITIALIZATION_IMPORTED_DEKM_F:
+            return "imported_dekm_f_checkpoint_then_jointly_refined"
+        return "jointly_trained_view1_not_dekm_f"
+    if view1_refinement_policy == VIEW1_REFINEMENT_FROZEN_DEKM_F:
+        return "frozen_imported_dekm_f_checkpoint_unchanged_during_refinement"
+    raise ValueError(
+        f"Unsupported View1 refinement policy: {view1_refinement_policy!r}."
+    )
+
+
 REFINEMENT_PROGRESS_UNIT_DATASET_EPOCHS = "dataset_epochs"
 REFINEMENT_PROGRESS_UNIT_KMEANS_REFRESH_WINDOWS = "kmeans_refresh_windows"
 ALIGNMENT_UNCENTERED_ROW_L2 = "uncentered_row_l2"
@@ -79,10 +128,39 @@ PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_resolved_full_batch_v1
 PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID = (
     "mvdec_2025_paper_resolved_release_l2_full_batch_v1"
 )
-PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"
-ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID = (
-    "mvdec_2025_aligned_balanced_full_batch_v1"
+FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_release_l2_v1"
 )
+IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1"
+)
+INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_release_l2_v1"
+)
+CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_"
+    "centered_rms_calibrated_release_l2_v1"
+)
+INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS = frozenset(
+    {
+        INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+        CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+    }
+)
+FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
+    {
+        FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+        *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
+    }
+)
+EXTERNAL_VIEW1_PROTOCOL_IDS = frozenset(
+    {
+        *FROZEN_VIEW1_PROTOCOL_IDS,
+        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    }
+)
+PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"
+ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_aligned_balanced_full_batch_v1"
 ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID = (
     "mvdec_2025_aligned_balanced_alignment_005_full_batch_v1"
 )
@@ -112,19 +190,11 @@ ALIGNED_BALANCED_PROTOCOL_SETTINGS = {
 }
 ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES = {
     ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: "mean_squared_dimensions",
-    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-        "mean_squared_dimensions"
-    ),
-    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-        "mean_squared_dimensions"
-    ),
-    LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-        "sum_squared_dimensions"
-    ),
+    ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("mean_squared_dimensions"),
+    ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("mean_squared_dimensions"),
+    LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("sum_squared_dimensions"),
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: "sum_squared_dimensions",
-    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-        "sum_squared_dimensions"
-    ),
+    LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("sum_squared_dimensions"),
     LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
         "sum_squared_dimensions"
     ),
@@ -180,6 +250,16 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",

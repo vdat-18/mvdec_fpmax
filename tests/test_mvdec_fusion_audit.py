@@ -15,6 +15,8 @@ from pipeline.mvdec_fusion_audit import (
     fused_representation,
     paper_figure_diagnostic_representations,
     paper_figure_fused_representation,
+    scale_alignment_diagnostics,
+    scale_alignment_representations,
 )
 
 
@@ -83,9 +85,7 @@ def test_paper_figure_fusion_records_source_and_width(
     np.testing.assert_allclose(fused, expected)
     assert metadata["input_width_per_view"] == 3
     assert metadata["output_width"] == expected.shape[1]
-    assert metadata["claim_scope"] == (
-        "post_training_diagnostic_not_exact_paper_truth"
-    )
+    assert metadata["claim_scope"] == ("post_training_diagnostic_not_exact_paper_truth")
 
 
 def test_paper_figure_diagnostic_representations_are_stably_named() -> None:
@@ -102,9 +102,7 @@ def test_paper_figure_diagnostic_representations_are_stably_named() -> None:
         2,
         3,
     )
-    assert representations[
-        FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION
-    ][0].shape == (2, 6)
+    assert representations[FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION][0].shape == (2, 6)
 
 
 def test_paper_figure_fusion_rejects_incompatible_outputs() -> None:
@@ -128,6 +126,39 @@ def test_procrustes_control_recovers_rotated_latent() -> None:
         view1,
         atol=1e-12,
     )
+
+
+def test_centered_rms_calibration_matches_reference_scale() -> None:
+    view1 = np.array([[1.0, 0.0], [0.0, 2.0], [-1.0, -2.0]])
+    view2 = view1 * 0.25 + np.array([10.0, -7.0])
+
+    representations = scale_alignment_representations(view1, view2)
+    calibrated = representations["centered_global_rms_matched_average"]
+
+    np.testing.assert_allclose(calibrated, view1, atol=1e-12)
+
+
+def test_centered_rms_and_procrustes_order_is_equivalent() -> None:
+    view1 = np.array([[1.0, 0.0], [0.0, 2.0], [-1.0, -2.0]])
+    rotation = np.array([[0.0, -1.0], [1.0, 0.0]])
+    view2 = (view1 @ rotation) * 0.1 + np.array([4.0, 9.0])
+
+    representations = scale_alignment_representations(view1, view2)
+    diagnostics = scale_alignment_diagnostics(view1, view2)
+
+    np.testing.assert_allclose(
+        representations["centered_rms_then_procrustes_average"],
+        view1,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        representations["centered_procrustes_then_rms_average"],
+        view1,
+        atol=1e-12,
+    )
+    assert diagnostics.view2_centered_rms_scale_factor == pytest.approx(10.0)
+    assert diagnostics.operation_order_max_abs_delta < 1e-12
+    assert diagnostics.procrustes_orthogonality_max_abs_error < 1e-12
 
 
 def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
@@ -166,6 +197,7 @@ def test_audit_artifact_exports_independent_assignments(tmp_path) -> None:
     assert (tmp_path / "audit/test/view1_assignments.csv").is_file()
     assert (tmp_path / "audit/test/view2_assignments.csv").is_file()
     assert (tmp_path / "audit/test/fused_assignments.csv").is_file()
+    assert (tmp_path / "audit/test/scale_alignment_diagnostics.json").is_file()
 
 
 def test_audit_artifact_rejects_recorded_metric_mismatch(tmp_path) -> None:
