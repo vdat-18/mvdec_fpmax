@@ -43,14 +43,10 @@ ACC 0.7557 / 0.7582 / 0.7484, NMI 0.5932 / 0.5903 / 0.5729. The spread is under
    (`mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1`).
    The 0.515 View2 numbers above come from older joint-View1 snapshots kept
    under `artifacts/kaggle/`, so this arm is the next unrun baseline (S0).
-6. **Latent inconsistency in `bf80610` (unverified end to end).** The
-   protocol object uses the frozen View1 policy, but `src/pipeline/data.py`
-   still treats the same protocol ID as "imported joint" (it expects a View1
-   refinement-transition proof and a joint refinement policy, and the ID is not
-   in `FROZEN_VIEW1_PROTOCOL_IDS`). Unit tests pass, but artifact loading after
-   a real run may reject the output. Resolve before spending GPU on S0/S1: either
-   register the ID as frozen everywhere, or restore the joint protocol from the
-   Kaggle snapshot that already passed audits (`largest_eigen` variant).
+6. **Fixed: loader/protocol mismatch in `bf80610`.** The protocol froze View1
+   but `data.py` classified its ID as imported-joint and would have rejected a
+   real run's artifact. The ID is now registered as frozen, with a regression
+   test that fails on the old code (commit after `4c78012`).
 7. **Repository state.** The protocols behind these runs live on
    `codex/frozen-view1-true-bottleneck`; they are merged into `dev` as of
    commit `cb2c775` (519 tests pass, 2 skipped).
@@ -94,3 +90,17 @@ Eigen direction is dropped as a factor: smallest and largest gave
 3. The run is started on the Kaggle website with GPU and Internet enabled.
 4. Output ZIP and its SHA-256 are returned for local `mvdec-audit-runs` and
    comparison with Table 2.
+
+## Status of S1
+
+S1 is implemented as `mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_min500_release_l2_seed42_v1`
+(code commit `ea219bf`): identical to the frozen true-bottleneck protocol except
+the assignment-change stop may not fire before update 500. The field defaults
+to 0, so every existing protocol's contract and config hash is unchanged. The
+Kaggle notebook is
+`notebooks/mvdec_2025_frozen_view1_true_bottleneck_min500_reuters_seed42_kaggle.ipynb`;
+it clones `dev`, checks out the pinned SHA, validates the DEKM_F checkpoint by
+SHA-256, runs the tests, trains, audits, and fails if fewer than 500 updates ran.
+Attach the dataset `datnguyends/mvdec-v1-true-bottleneck-largest-eigen-s42-input`
+for the checkpoint only. S0 (the plain frozen arm) has no separate notebook; run
+S1 first because S0's expected outcome (stop at update 10) is already known.
