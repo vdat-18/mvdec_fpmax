@@ -150,13 +150,17 @@ INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS = frozenset(
 FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
     {
         FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     }
 )
+# No registered protocol keeps an imported View1 trainable; joint-transition
+# validation applies only to IDs added here.
+IMPORTED_JOINT_VIEW1_PROTOCOL_IDS = frozenset()
 EXTERNAL_VIEW1_PROTOCOL_IDS = frozenset(
     {
         *FROZEN_VIEW1_PROTOCOL_IDS,
-        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+        *IMPORTED_JOINT_VIEW1_PROTOCOL_IDS,
     }
 )
 PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID = "mvdec_2025_paper_informed_full_batch_v2"

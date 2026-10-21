@@ -39,6 +39,7 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    IMPORTED_JOINT_VIEW1_PROTOCOL_IDS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -531,9 +532,7 @@ def _validate_view1_refinement_transition_metadata(
     protocol_id = best_result.get("protocol_id")
     artifact_transition = best_result.get("view1_refinement_transition")
     config_transition = config.get("view1_refinement_transition")
-    is_imported_joint = (
-        protocol_id == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
-    )
+    is_imported_joint = protocol_id in IMPORTED_JOINT_VIEW1_PROTOCOL_IDS
     if not is_imported_joint:
         if artifact_transition is not None or config_transition is not None:
             raise ValueError(
@@ -1233,9 +1232,7 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
     protocol_id = best_result.get("protocol_id")
     is_external_view1 = protocol_id in EXTERNAL_VIEW1_PROTOCOL_IDS
     is_frozen_view1 = protocol_id in FROZEN_VIEW1_PROTOCOL_IDS
-    is_imported_joint = (
-        protocol_id == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
-    )
+    is_imported_joint = protocol_id in IMPORTED_JOINT_VIEW1_PROTOCOL_IDS
     expected_initialization_policy = (
         VIEW1_INITIALIZATION_IMPORTED_DEKM_F
         if is_external_view1

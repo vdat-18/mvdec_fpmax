@@ -100,6 +100,7 @@ def test_frozen_dekm_f_view1_protocol_has_immutable_loader_contract() -> None:
 def test_independent_dekm_view2_protocol_has_immutable_loader_contract() -> None:
     assert FROZEN_VIEW1_PROTOCOL_IDS == {
         FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
         INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     }

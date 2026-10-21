@@ -27,6 +27,29 @@ from pipeline.mvdec_contract import FUSION_ENCODER_L2_NORMALIZED_AVERAGE
 from pipeline.mvdec_runs import canonical_config_hash, file_sha256, write_run_manifest
 
 
+@pytest.fixture(autouse=True)
+def _register_imported_joint_protocol(request, monkeypatch):
+    """Treat the imported-View1 protocol ID as jointly refined for joint tests.
+
+    The registered protocol freezes View1, so the joint-transition validators are
+    exercised only by tests that opt in through their name.
+    """
+
+    if "imported_joint" not in request.node.name:
+        return
+    joint_id = (
+        "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1"
+    )
+    monkeypatch.setattr(
+        data_module, "IMPORTED_JOINT_VIEW1_PROTOCOL_IDS", frozenset({joint_id})
+    )
+    monkeypatch.setattr(
+        data_module,
+        "FROZEN_VIEW1_PROTOCOL_IDS",
+        data_module.FROZEN_VIEW1_PROTOCOL_IDS - {joint_id},
+    )
+
+
 def _external_view1_provenance():
     return {
         "method": "DEKM_F",
@@ -743,6 +766,23 @@ def test_frozen_run_manifest_accepts_consistent_validated_provenance(tmp_path) -
         tmp_path,
         _external_view1_provenance(),
     )
+
+    _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_frozen_true_bottleneck_run_manifest_accepts_frozen_provenance(
+    tmp_path,
+) -> None:
+    artifact, artifact_path, manifest = _write_frozen_run_manifest(
+        tmp_path,
+        _external_view1_provenance(),
+    )
+    protocol_id = (
+        "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1"
+    )
+    artifact["protocol_id"] = protocol_id
+    manifest["protocol_id"] = protocol_id
+    write_run_manifest(tmp_path / "manifest.json", manifest)
 
     _validate_mvdec_run_manifest(artifact, artifact_path)
 
