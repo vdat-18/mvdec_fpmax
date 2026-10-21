@@ -26,6 +26,7 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -38,6 +39,7 @@ from pipeline.mvdec_contract import (
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
     VIEW1_REFINEMENT_FROZEN_DEKM_F,
     VIEW2_ARCHITECTURE_ID,
+    VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     balanced_batch_count,
     paper_figure_fusion_metadata,
@@ -60,7 +62,9 @@ def test_equation11_contract_is_complete_two_by_two_by_two_grid() -> None:
 def test_all_equation11_artifacts_have_loader_contracts() -> None:
     for protocol_id in EQUATION11_PROTOCOL_IDS:
         expected_architecture = (
-            VIEW2_ARCHITECTURE_ID
+            VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID
+            if protocol_id == MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID
+            else VIEW2_ARCHITECTURE_ID
             if protocol_id
             in {
                 IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
@@ -116,6 +120,7 @@ def test_independent_dekm_view2_protocol_has_immutable_loader_contract() -> None
         MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
+        MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
         INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     }

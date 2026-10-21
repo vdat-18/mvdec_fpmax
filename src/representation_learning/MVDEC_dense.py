@@ -54,6 +54,7 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
@@ -77,6 +78,7 @@ from pipeline.mvdec_contract import (
     VIEW1_REFINEMENT_JOINT,
     VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
+    VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
     VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
     VIEW_INPUT_CONTRACT,
     balanced_batch_count,
@@ -184,6 +186,7 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
+    MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
@@ -1133,6 +1136,28 @@ MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
+    refinement_source=(
+        "Frozen full-feature DEKM_F View1 with a View2 that sees only the "
+        "even-indexed input columns, refined under full-batch MvDEC Equation 11 "
+        "with a preregistered update floor"
+    ),
+    view2_architecture_id=VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "view_attribute_split",
+            "ablation",
+            "MvDEC prose says each autoencoder extracts features from a "
+            "specific set of attributes but names none; a deterministic "
+            "even-column split is the simplest label-free reading.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
@@ -1407,6 +1432,7 @@ PUBLIC_PROTOCOLS = {
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_PROTOCOL,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
+    MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
@@ -2040,6 +2066,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return (
             "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-min500-"
             "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-even-columns-View2-"
+            "min500-release-L2-ablation"
         )
     if protocol.protocol_id == MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID:
         return (
@@ -3226,18 +3257,26 @@ def model_view2(
 
     if architecture_id not in {
         VIEW2_ARCHITECTURE_ID,
+        VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
         VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
         VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID,
     }:
         raise ValueError(f"Unsupported View2 architecture: {architecture_id!r}.")
+    sees_even_columns_only = architecture_id == VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID
+    if sees_even_columns_only:
+        architecture_id = VIEW2_ARCHITECTURE_ID
 
     init = "glorot_uniform"
     activation = "relu"
     output_activation = "linear"
     input = layers.Input(shape=(input_shape,))
     b = view2_base_units
+    view_input = input
+    if sees_even_columns_only:
+        even_columns = tf.constant(np.arange(input_shape) % 2 == 0, dtype=tf.float32)
+        view_input = layers.Lambda(lambda t: t * even_columns)(input)
 
-    e1 = layers.Dense(b, activation=activation, kernel_initializer=init)(input)
+    e1 = layers.Dense(b, activation=activation, kernel_initializer=init)(view_input)
     e1 = layers.Dense(b, activation=activation, kernel_initializer=init)(e1)
     e2 = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(e1)
     e2 = layers.Dense(2 * b, activation=activation, kernel_initializer=init)(e2)

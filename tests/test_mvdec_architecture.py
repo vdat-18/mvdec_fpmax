@@ -167,3 +167,28 @@ def test_view2_direct_joint_head_matches_figure_output(monkeypatch):
     reconstruction_gradient = gradient[:, mvdec.hidden_units :]
     assert float(tensorflow.linalg.norm(latent_gradient)) == 0.0
     assert float(tensorflow.linalg.norm(reconstruction_gradient)) > 0.0
+
+
+def test_even_columns_view2_ignores_odd_input_columns(monkeypatch):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("tensorflow")
+    representation_dir = (
+        Path(__file__).resolve().parents[1] / "src" / "representation_learning"
+    )
+    monkeypatch.syspath_prepend(str(representation_dir))
+    mvdec = importlib.import_module("MVDEC_dense")
+    monkeypatch.setattr(mvdec, "input_shape", 16)
+    monkeypatch.setattr(mvdec, "hidden_units", 4)
+    monkeypatch.setattr(mvdec, "view2_base_units", 8)
+
+    model = mvdec.model_view2(
+        load_weights=False,
+        architecture_id=mvdec.VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
+    )
+    x = np.random.default_rng(0).normal(size=(5, 16)).astype("float32")
+    changed = x.copy()
+    changed[:, 1::2] += 10.0
+
+    np.testing.assert_allclose(model(x).numpy(), model(changed).numpy(), atol=1e-5)
+    changed[:, ::2] += 1.0
+    assert not np.allclose(model(x).numpy(), model(changed).numpy(), atol=1e-5)

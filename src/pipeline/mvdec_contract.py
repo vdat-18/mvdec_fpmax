@@ -1,6 +1,9 @@
 """Versioned architecture identifiers shared by MvDEC runners and loaders."""
 
 VIEW2_ARCHITECTURE_ID = "mvdec2025_post_skip_latent_bottleneck_v2"
+VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID = (
+    "mvdec2025_post_skip_latent_bottleneck_even_columns_v1"
+)
 VIEW2_ENCODER_BOTTLENECK_ARCHITECTURE_ID = (
     "mvdec2025_encoder_bottleneck_skip_decoder_v1"
 )
@@ -166,6 +169,10 @@ MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID = (
     "release_l2_seed42_v1"
 )
 MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS = 256
+MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_view1_true_bottleneck_even_columns_view2_min500_"
+    "release_l2_seed42_v1"
+)
 MIN_REFINEMENT_TRAINING_STEPS = 500
 INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_release_l2_v1"
@@ -187,6 +194,7 @@ FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
         MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
+        MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     }
 )
@@ -315,6 +323,11 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",
