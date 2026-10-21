@@ -283,3 +283,25 @@ and equation was read again. New or sharpened findings:
   encoders and no feature split is named (S4 tested an even-column split for View2).
 - **Eq. 5** reconstructs x from each view's own latent (g1(f1(x)) and g2(f2(x))), never from
   the fused embedding; Eq. 6-10 act on the fused h = (h1 + h2)/2 (Eq. 4).
+
+## S2 over many seeds, REUTERS (label-guided distribution check, 2026-10-22)
+
+`mvdec_2025_scratch_both_views_true_bottleneck_min500_release_l2_v1`, seeds 42-48 (the Kaggle
+kernel ended in ERROR after 7 of 10 runs; cause not recoverable from the empty log, the
+seven manifests are complete). ACC / NMI:
+
+| Seed | View1 | View2 | Fused |
+| ---: | ---: | ---: | ---: |
+| 42 | 0.7022 / 0.5165 | 0.5057 / 0.2749 | 0.7025 / 0.5168 |
+| 43 | 0.7458 / 0.4560 | 0.4965 / 0.2402 | 0.6128 / 0.4487 |
+| 44 | 0.6902 / 0.4933 | 0.5515 / 0.3280 | 0.6892 / 0.4894 |
+| 45 | 0.6746 / 0.4809 | 0.4949 / 0.2241 | 0.6735 / 0.4783 |
+| 46 | 0.7802 / 0.5419 | 0.5843 / 0.2964 | 0.7842 / 0.5414 |
+| 47 | 0.7141 / 0.5262 | 0.3832 / 0.1893 | 0.7291 / 0.5357 |
+| 48 | 0.7412 / 0.5701 | 0.5351 / 0.3715 | 0.7443 / 0.5751 |
+
+Fused ACC ranges from 0.6128 to 0.7842 (mean 0.691). The best seed (46) reaches 0.7842, above
+the paper's 0.7813, but its NMI 0.5414 is far below 0.6141, and the best NMI is 0.5751. In
+every seed fused tracks View1 rather than adding to it. So the paper's fused ACC is
+reachable by selecting the best of N from-scratch runs, but the fused NMI and the View2 row
+(0.6501 / 0.5129; best here 0.5843 / 0.3715) are not matched by the same selection.
