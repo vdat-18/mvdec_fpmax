@@ -68,6 +68,62 @@ def test_run_paths_isolate_seed_and_config(tmp_path):
     assert seed_42.config_hash[:12] in seed_42.run_id
 
 
+def test_config_hash_excludes_fitted_runtime_metadata() -> None:
+    config = {"protocol": "calibrated", "batch_size": 10_000}
+    completed_config = {
+        **config,
+        "calibration": {"view2_scale_factor": 4.25},
+        "frozen_view1_proof": {"weights_bitwise_equal": True},
+    }
+
+    assert canonical_config_hash(completed_config) == canonical_config_hash(config)
+
+
+def test_manifest_loader_accepts_fitted_runtime_metadata(tmp_path) -> None:
+    config = {"protocol": "calibrated", "batch_size": 10_000}
+    paths = resolve_run_paths(
+        tmp_path,
+        "REUTERS",
+        "calibrated",
+        config,
+        seed=42,
+        run_index=1,
+    )
+    prepare_run_directory(paths)
+    write_run_manifest(
+        paths.manifest,
+        {
+            "run_id": paths.run_id,
+            "status": "complete",
+            "config": {
+                **config,
+                "calibration": {"view2_scale_factor": 4.25},
+                "frozen_view1_proof": {"weights_bitwise_equal": True},
+            },
+            "config_hash": paths.config_hash,
+        },
+    )
+
+    manifest = load_run_manifest(paths.manifest)
+
+    assert manifest["config_hash"] == paths.config_hash
+    assert manifest["config"]["calibration"]["view2_scale_factor"] == 4.25
+
+
+def test_config_hash_remains_sensitive_to_protocol_fields() -> None:
+    config = {
+        "protocol": "calibrated",
+        "batch_size": 10_000,
+        "protocol_contract": {"greedy_eigen_direction": "largest"},
+    }
+    changed = {
+        **config,
+        "protocol_contract": {"greedy_eigen_direction": "smallest"},
+    }
+
+    assert canonical_config_hash(changed) != canonical_config_hash(config)
+
+
 def test_prepare_run_directory_rejects_reuse_without_force(tmp_path):
     paths = resolve_run_paths(
         tmp_path,
@@ -331,6 +387,7 @@ def test_resolve_training_commit_returns_full_head() -> None:
 
     assert len(commit) == 40
     assert set(commit) <= set("0123456789abcdef")
+
 
 @pytest.mark.parametrize(
     ("seed", "run_index"),

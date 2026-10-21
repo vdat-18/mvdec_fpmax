@@ -11,9 +11,163 @@ from pipeline.clustering import compute_gower_distance, compute_silhouette_diagn
 from pipeline.data import (
     _validate_airpollution_preprocessing,
     _validate_mvdec2025_contract,
+    _validate_mvdec_run_manifest,
+    _validate_view1_refinement_transition_metadata,
     load_mvdec_result,
 )
+from pipeline.dekm_checkpoint import (
+    CHECKPOINT_PROVENANCE_SHA_FIELDS,
+    DEKM_F_CONFIG_HASH,
+    DEKM_F_MANIFEST_SHA256,
+    DEKM_F_PROTOCOL_ID,
+    DEKM_F_REUTERS_SOURCE_SHA256,
+    DEKM_F_WEIGHT_SHA256,
+)
 from pipeline.mvdec_contract import FUSION_ENCODER_L2_NORMALIZED_AVERAGE
+from pipeline.mvdec_runs import canonical_config_hash, file_sha256, write_run_manifest
+
+
+def _external_view1_provenance():
+    return {
+        "method": "DEKM_F",
+        "protocol_id": DEKM_F_PROTOCOL_ID,
+        "config_hash": DEKM_F_CONFIG_HASH,
+        "dataset": "REUTERS",
+        "seed": 42,
+        "source_sha256": DEKM_F_REUTERS_SOURCE_SHA256,
+        "manifest_sha256": DEKM_F_MANIFEST_SHA256,
+        "weight_sha256": DEKM_F_WEIGHT_SHA256,
+        "input_normalization": "release_l2_unit_norm",
+        "refinement_batching": "full_dataset_each_update",
+        "claim_scope": "controlled_diagnostic_not_exact_paper_truth",
+    }
+
+
+def _write_frozen_run_manifest(tmp_path, external_checkpoint):
+    artifact_path = tmp_path / "artifact.pkl"
+    artifact_path.write_bytes(b"artifact")
+    config = {
+        "training_commit": "f" * 40,
+        "source_id": "dekm_google_drive_reuters_10k",
+        "source_sha256": DEKM_F_REUTERS_SOURCE_SHA256,
+        "n_samples": 10_000,
+        "n_features": 2_000,
+        "n_classes": 4,
+        "view_input_contract": "same_full_feature_matrix_both_views_v1",
+        "representation_metric_semantics": (
+            "frozen_dekm_f_view1_refined_view2_independent_kmeans_v1"
+        ),
+        "view1_initialization_policy": "imported_dekm_f_view1",
+        "view1_refinement_policy": "frozen_imported_dekm_f_view1",
+        "external_view1_checkpoint": dict(external_checkpoint),
+    }
+    config_hash = canonical_config_hash(config)
+    artifact = {
+        **config,
+        "run_id": "reuters_frozen_seed_42",
+        "config_hash": config_hash,
+        "dataset": "REUTERS",
+        "protocol_id": "mvdec_2025_frozen_dekm_f_view1_release_l2_v1",
+        "config": {
+            **config,
+            "run_id": "reuters_frozen_seed_42",
+            "config_hash": config_hash,
+            "seed": 42,
+        },
+    }
+    manifest = {
+        **config,
+        "run_id": artifact["run_id"],
+        "status": "complete",
+        "dataset": artifact["dataset"],
+        "protocol_id": artifact["protocol_id"],
+        "config_hash": config_hash,
+        "config": config,
+        "seed": 42,
+        "paths": {"artifact": artifact_path.name},
+        "output_sha256": {"artifact": file_sha256(artifact_path)},
+    }
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+    return artifact, artifact_path, manifest
+
+
+
+
+def _imported_joint_transition(h_view1):
+    from pipeline.mvdec_integrity import array_sha256
+
+    final_latent_hash = array_sha256(h_view1)
+    return {
+        "schema_version": 1,
+        "weight_count": 2,
+        "initial_weights_sha256": "1" * 64,
+        "final_weights_sha256": "2" * 64,
+        "initial_latent_sha256": "3" * 64,
+        "final_latent_sha256": final_latent_hash,
+        "initial_view1_acc": 0.7557,
+        "initial_view1_nmi": 0.593243233623544,
+        "final_view1_acc": 0.76,
+        "final_view1_nmi": 0.60,
+        "view1_nonzero_gradient_observed": True,
+        "view1_max_abs_gradient": 0.25,
+        "weights_changed": True,
+        "latents_changed": True,
+        "h_view1_sha256": final_latent_hash,
+    }
+
+
+def _write_imported_joint_run_manifest(tmp_path):
+    artifact_path = tmp_path / "artifact.pkl"
+    artifact_path.write_bytes(b"artifact")
+    h_view1 = np.array([[0.0, 0.0], [0.1, 0.0], [5.0, 5.0], [5.2, 5.1]])
+    transition = _imported_joint_transition(h_view1)
+    config = {
+        "training_commit": "f" * 40,
+        "source_id": "dekm_google_drive_reuters_10k",
+        "source_sha256": DEKM_F_REUTERS_SOURCE_SHA256,
+        "n_samples": 10_000,
+        "n_features": 2_000,
+        "n_classes": 4,
+        "view_input_contract": "same_full_feature_matrix_both_views_v1",
+        "representation_metric_semantics": (
+            "imported_dekm_f_view1_jointly_refined_views_independent_kmeans_v1"
+        ),
+        "view1_initialization_policy": "imported_dekm_f_view1",
+        "view1_refinement_policy": "jointly_refined_views",
+        "external_view1_checkpoint": _external_view1_provenance(),
+        "view1_refinement_transition": transition,
+    }
+    config_hash = canonical_config_hash(config)
+    artifact = {
+        **config,
+        "h_view1": h_view1,
+        "run_id": "reuters_imported_joint_seed_42",
+        "config_hash": config_hash,
+        "dataset": "REUTERS",
+        "protocol_id": (
+            "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1"
+        ),
+        "config": {
+            **config,
+            "run_id": "reuters_imported_joint_seed_42",
+            "config_hash": config_hash,
+            "seed": 42,
+        },
+    }
+    manifest = {
+        **config,
+        "run_id": artifact["run_id"],
+        "status": "complete",
+        "dataset": artifact["dataset"],
+        "protocol_id": artifact["protocol_id"],
+        "config_hash": config_hash,
+        "config": dict(config),
+        "seed": 42,
+        "paths": {"artifact": artifact_path.name},
+        "output_sha256": {"artifact": file_sha256(artifact_path)},
+    }
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+    return artifact, artifact_path, manifest
 
 
 def _normalized_file_sha256(path) -> str:
@@ -582,3 +736,232 @@ def test_load_mvdec_result_rejects_legacy_concat_named_h_fused(tmp_path):
 
     with pytest.raises(ValueError, match="legacy concat representation"):
         load_mvdec_result(result_path=result_path, data_path=data_path)
+
+
+def test_frozen_run_manifest_accepts_consistent_validated_provenance(tmp_path) -> None:
+    artifact, artifact_path, _ = _write_frozen_run_manifest(
+        tmp_path,
+        _external_view1_provenance(),
+    )
+
+    _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+@pytest.mark.parametrize("sha_field", CHECKPOINT_PROVENANCE_SHA_FIELDS)
+def test_frozen_run_manifest_validates_every_checkpoint_sha(
+    tmp_path,
+    sha_field,
+) -> None:
+    artifact, artifact_path, _ = _write_frozen_run_manifest(
+        tmp_path,
+        _external_view1_provenance(),
+    )
+    artifact["external_view1_checkpoint"][sha_field] = "not-a-sha"
+    artifact["config"]["external_view1_checkpoint"][sha_field] = "not-a-sha"
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+@pytest.mark.parametrize("location", ["artifact_config", "manifest", "manifest_config"])
+def test_frozen_run_manifest_rejects_checkpoint_provenance_location_mismatch(
+    tmp_path,
+    location,
+) -> None:
+    provenance = _external_view1_provenance()
+    artifact, artifact_path, manifest = _write_frozen_run_manifest(
+        tmp_path,
+        provenance,
+    )
+    mismatched = {**provenance, "manifest_sha256": "b" * 64}
+    if location == "artifact_config":
+        artifact["config"]["external_view1_checkpoint"] = mismatched
+    elif location == "manifest":
+        manifest["external_view1_checkpoint"] = mismatched
+        write_run_manifest(tmp_path / "manifest.json", manifest)
+    else:
+        manifest["config"]["external_view1_checkpoint"] = mismatched
+        manifest["config_hash"] = canonical_config_hash(manifest["config"])
+        write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_non_frozen_run_manifest_rejects_external_checkpoint_provenance(
+    tmp_path,
+) -> None:
+    provenance = _external_view1_provenance()
+    artifact, artifact_path, manifest = _write_frozen_run_manifest(
+        tmp_path,
+        provenance,
+    )
+    artifact["view1_refinement_policy"] = "jointly_refined_views"
+    artifact["config"]["view1_refinement_policy"] = "jointly_refined_views"
+    manifest["view1_refinement_policy"] = "jointly_refined_views"
+    manifest["config"]["view1_refinement_policy"] = "jointly_refined_views"
+    manifest["config_hash"] = canonical_config_hash(manifest["config"])
+    artifact["config_hash"] = manifest["config_hash"]
+    artifact["config"]["config_hash"] = manifest["config_hash"]
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_imported_joint_run_manifest_requires_consistent_transition(tmp_path) -> None:
+    artifact, artifact_path, _ = _write_imported_joint_run_manifest(tmp_path)
+
+    _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+@pytest.mark.parametrize(
+    ("policy_field", "invalid_value"),
+    [
+        ("view1_initialization_policy", "pretrained_mvdec_view1"),
+        ("view1_refinement_policy", "frozen_imported_dekm_f_view1"),
+    ],
+)
+@pytest.mark.parametrize(
+    "location",
+    ["artifact", "artifact_config", "manifest", "manifest_config"],
+)
+def test_imported_joint_run_manifest_rejects_policy_location_mismatch(
+    tmp_path,
+    policy_field,
+    invalid_value,
+    location,
+) -> None:
+    artifact, artifact_path, manifest = _write_imported_joint_run_manifest(tmp_path)
+    locations = {
+        "artifact": artifact,
+        "artifact_config": artifact["config"],
+        "manifest": manifest,
+        "manifest_config": manifest["config"],
+    }
+    locations[location][policy_field] = invalid_value
+    if location in {"manifest", "manifest_config"}:
+        write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_ordinary_run_manifest_allows_historical_absent_view1_policies(
+    tmp_path,
+) -> None:
+    artifact, artifact_path, manifest = _write_imported_joint_run_manifest(tmp_path)
+    protocol_id = "mvdec_2025_paper_resolved_release_l2_full_batch_v1"
+    external_fields = (
+        "view1_initialization_policy",
+        "view1_refinement_policy",
+        "external_view1_checkpoint",
+        "view1_refinement_transition",
+    )
+    for location in (artifact, artifact["config"], manifest, manifest["config"]):
+        for field in external_fields:
+            location.pop(field, None)
+    artifact["protocol_id"] = protocol_id
+    manifest["protocol_id"] = protocol_id
+    config_hash = canonical_config_hash(manifest["config"])
+    artifact["config_hash"] = config_hash
+    artifact["config"]["config_hash"] = config_hash
+    manifest["config_hash"] = config_hash
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["artifact", "artifact_config", "manifest", "manifest_config"],
+)
+def test_imported_joint_run_manifest_rejects_missing_transition(
+    tmp_path,
+    location,
+) -> None:
+    artifact, artifact_path, manifest = _write_imported_joint_run_manifest(tmp_path)
+    if location == "artifact":
+        artifact.pop("view1_refinement_transition")
+    elif location == "artifact_config":
+        artifact["config"].pop("view1_refinement_transition")
+    elif location == "manifest":
+        manifest.pop("view1_refinement_transition")
+        write_run_manifest(tmp_path / "manifest.json", manifest)
+    else:
+        manifest["config"].pop("view1_refinement_transition")
+        write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_imported_joint_run_manifest_rejects_tampered_final_latent(tmp_path) -> None:
+    artifact, artifact_path, manifest = _write_imported_joint_run_manifest(tmp_path)
+    tampered = dict(artifact["view1_refinement_transition"])
+    tampered["h_view1_sha256"] = "0" * 64
+    for location in (artifact, artifact["config"], manifest, manifest["config"]):
+        location["view1_refinement_transition"] = dict(tampered)
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_imported_joint_run_manifest_rejects_frozen_proof(tmp_path) -> None:
+    artifact, artifact_path, manifest = _write_imported_joint_run_manifest(tmp_path)
+    for location in (artifact, artifact["config"], manifest, manifest["config"]):
+        location["frozen_view1_proof"] = {"invalid": True}
+    write_run_manifest(tmp_path / "manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="run manifest"):
+        _validate_mvdec_run_manifest(artifact, artifact_path)
+
+
+def test_loader_requires_and_validates_imported_joint_transition() -> None:
+    h_view1 = np.array([[0.0, 0.0], [1.0, 1.0]])
+    transition = _imported_joint_transition(h_view1)
+    artifact = {
+        "protocol_id": (
+            "mvdec_2025_frozen_dekm_f_view1_eq11_true_bottleneck_release_l2_seed42_v1"
+        ),
+        "view1_refinement_transition": transition,
+        "config": {"view1_refinement_transition": dict(transition)},
+    }
+
+    assert (
+        _validate_view1_refinement_transition_metadata(artifact, h_view1)
+        == transition
+    )
+
+    missing = {**artifact, "view1_refinement_transition": None}
+    with pytest.raises(ValueError, match="transition fields"):
+        _validate_view1_refinement_transition_metadata(missing, h_view1)
+
+    tampered = {
+        **artifact,
+        "view1_refinement_transition": {
+            **transition,
+            "h_view1_sha256": "0" * 64,
+        },
+    }
+    tampered["config"] = {
+        "view1_refinement_transition": dict(
+            tampered["view1_refinement_transition"]
+        )
+    }
+    with pytest.raises(ValueError, match="latent hash"):
+        _validate_view1_refinement_transition_metadata(tampered, h_view1)
+
+
+def test_loader_rejects_transition_for_non_imported_joint_protocol() -> None:
+    h_view1 = np.array([[0.0, 0.0], [1.0, 1.0]])
+    transition = _imported_joint_transition(h_view1)
+    artifact = {
+        "protocol_id": "mvdec_2025_frozen_dekm_f_view1_release_l2_v1",
+        "view1_refinement_transition": transition,
+        "config": {"view1_refinement_transition": dict(transition)},
+    }
+
+    with pytest.raises(ValueError, match="Only imported-joint"):
+        _validate_view1_refinement_transition_metadata(artifact, h_view1)

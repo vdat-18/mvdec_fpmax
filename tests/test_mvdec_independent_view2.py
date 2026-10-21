@@ -286,15 +286,17 @@ def test_imported_joint_view1_protocol_pins_both_policies(monkeypatch):
     assert protocol.view1_initialization_policy == (
         mvdec.VIEW1_INITIALIZATION_IMPORTED_DEKM_F
     )
-    assert protocol.view1_refinement_policy == mvdec.VIEW1_REFINEMENT_JOINT
+    assert protocol.view1_refinement_policy == mvdec.VIEW1_REFINEMENT_FROZEN_DEKM_F
+    assert protocol.view2_architecture_id == mvdec.VIEW2_ARCHITECTURE_ID
+    assert contract["architecture"]["view2"] == mvdec.VIEW2_ARCHITECTURE_ID
     assert contract["schedule"]["pretraining"]["view1_initialization_policy"] == (
         mvdec.VIEW1_INITIALIZATION_IMPORTED_DEKM_F
     )
     assert contract["schedule"]["refinement"]["view1_refinement_policy"] == (
-        mvdec.VIEW1_REFINEMENT_JOINT
+        mvdec.VIEW1_REFINEMENT_FROZEN_DEKM_F
     )
     assert contract["schedule"]["final_evaluation"]["view1_semantics"] == (
-        "imported_dekm_f_checkpoint_then_jointly_refined"
+        "frozen_imported_dekm_f_checkpoint_unchanged_during_refinement"
     )
 
 
@@ -337,9 +339,10 @@ def test_imported_joint_refinement_optimizes_both_views(monkeypatch):
     variables = mvdec.refinement_trainable_variables(model1, model2, protocol)
     variable_ids = {id(variable) for variable in variables}
 
-    assert model1.trainable is True
-    assert {id(variable) for variable in model1.trainable_variables} <= variable_ids
+    assert model1.trainable is False
+    assert not model1.trainable_variables
     assert {id(variable) for variable in model2.trainable_variables} <= variable_ids
+    assert not ({id(variable) for variable in model1.weights} & variable_ids)
 
 
 def test_view1_refinement_transition_is_tamper_evident(monkeypatch):

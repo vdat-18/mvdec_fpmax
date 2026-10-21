@@ -12,10 +12,17 @@ from pipeline.mvdec_contract import (
     ALIGNED_BALANCED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
     ALIGNMENT_UNCENTERED_ROW_L2,
+    CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     EQUATION11_PROTOCOL_IDS,
     EQUATION11_PROTOCOL_SETTINGS,
+    FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+    FROZEN_VIEW1_PROTOCOL_IDS,
+    FROZEN_VIEW1_REPRESENTATION_METRIC_SEMANTICS,
+    FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
     FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
+    IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -23,6 +30,8 @@ from pipeline.mvdec_contract import (
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID,
     PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID,
+    VIEW1_REFINEMENT_FROZEN_DEKM_F,
+    VIEW2_ARCHITECTURE_ID,
     VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID,
     balanced_batch_count,
     paper_figure_fusion_metadata,
@@ -30,7 +39,10 @@ from pipeline.mvdec_contract import (
 
 
 def test_equation11_contract_is_complete_two_by_two_by_two_grid() -> None:
-    assert len(EQUATION11_PROTOCOL_IDS) == 10
+    assert (
+        IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
+        in EQUATION11_PROTOCOL_IDS
+    )
     assert set(EQUATION11_PROTOCOL_SETTINGS.values()) == {
         (direction, target, batch_policy)
         for direction in ("largest", "smallest")
@@ -41,9 +53,13 @@ def test_equation11_contract_is_complete_two_by_two_by_two_grid() -> None:
 
 def test_all_equation11_artifacts_have_loader_contracts() -> None:
     for protocol_id in EQUATION11_PROTOCOL_IDS:
-        assert data.PUBLIC_PROTOCOL_ARCHITECTURES[protocol_id] == (
-            VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+        expected_architecture = (
+            VIEW2_ARCHITECTURE_ID
+            if protocol_id
+            == IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID
+            else VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
         )
+        assert data.PUBLIC_PROTOCOL_ARCHITECTURES[protocol_id] == expected_architecture
         assert protocol_id in data.PUBLIC_PROTOCOL_METHODS
         assert protocol_id in data.PUBLIC_PROTOCOL_FUSIONS
 
@@ -57,10 +73,52 @@ def test_paper_informed_v2_preserves_historical_setting_without_overclaiming() -
 
 def test_release_l2_diagnostic_preserves_paper_resolved_schedule() -> None:
     assert (
-        EQUATION11_PROTOCOL_SETTINGS[
+        EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID]
+        == EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID]
+    )
+
+
+def test_frozen_dekm_f_view1_protocol_has_immutable_loader_contract() -> None:
+    assert (
+        EQUATION11_PROTOCOL_SETTINGS[FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID]
+        == EQUATION11_PROTOCOL_SETTINGS[
             PAPER_RESOLVED_RELEASE_L2_FULL_BATCH_PROTOCOL_ID
         ]
-        == EQUATION11_PROTOCOL_SETTINGS[PAPER_RESOLVED_FULL_BATCH_PROTOCOL_ID]
+    )
+    assert (
+        data.PUBLIC_PROTOCOL_ARCHITECTURES[FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID]
+        == VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+    )
+    assert FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID in data.PUBLIC_PROTOCOL_METHODS
+    assert FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID in data.PUBLIC_PROTOCOL_FUSIONS
+    assert VIEW1_REFINEMENT_FROZEN_DEKM_F == "frozen_imported_dekm_f_view1"
+    assert FROZEN_VIEW1_REPRESENTATION_METRIC_SEMANTICS == (
+        "frozen_dekm_f_view1_refined_view2_independent_kmeans_v1"
+    )
+
+
+def test_independent_dekm_view2_protocol_has_immutable_loader_contract() -> None:
+    assert FROZEN_VIEW1_PROTOCOL_IDS == {
+        FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
+        INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+        CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+    }
+    assert (
+        data.PUBLIC_PROTOCOL_ARCHITECTURES[INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID]
+        == VIEW2_ARCHITECTURE_ID
+    )
+    assert INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID in data.PUBLIC_PROTOCOL_METHODS
+    assert INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID in data.PUBLIC_PROTOCOL_FUSIONS
+    assert (
+        data.PUBLIC_PROTOCOL_ARCHITECTURES[
+            CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID
+        ]
+        == VIEW2_ARCHITECTURE_ID
+    )
+    assert CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID in data.PUBLIC_PROTOCOL_METHODS
+    assert (
+        data.PUBLIC_PROTOCOL_FUSIONS[CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID]
+        == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE
     )
 
 
@@ -82,12 +140,8 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
         ALIGNED_BALANCED_NO_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
             "mean_squared_dimensions"
         ),
-        LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-            "sum_squared_dimensions"
-        ),
-        LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
-            "sum_squared_dimensions"
-        ),
+        LEGACY_SCALED_WEAK_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("sum_squared_dimensions"),
+        LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: ("sum_squared_dimensions"),
         LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
             "sum_squared_dimensions"
         ),
@@ -147,6 +201,4 @@ def test_paper_figure_fusion_metadata_is_explicitly_diagnostic(
     assert metadata["paper_source"] == paper_source
     assert metadata["input_width_per_view"] == 23
     assert metadata["output_width"] == output_width
-    assert metadata["claim_scope"] == (
-        "post_training_diagnostic_not_exact_paper_truth"
-    )
+    assert metadata["claim_scope"] == ("post_training_diagnostic_not_exact_paper_truth")

@@ -27,6 +27,12 @@ mvdec-evaluate-native = "pipeline.native_evaluation:main"
 mvdec-audit-runs = "pipeline.mvdec_audit:main"
 mvdec-audit-fusion = "pipeline.mvdec_fusion_audit:main"
 mvdec-audit-paper-figures = "pipeline.mvdec_paper_figure_audit:main"
+mvdec-audit-airpollution = "pipeline.airpollution_forensic:main"
+mvdec-reconstruct-airpollution = "pipeline.airpollution_reconstruction:main"
+mvdec-fetch-airpollution = "pipeline.airpollution_sources:main"
+mvdec-sentinel-airpollution = "pipeline.airpollution_sentinel:main"
+mvdec-process-airpollution-no2 = "pipeline.airpollution_no2:main"
+mvdec-audit-airpollution-dataset = "pipeline.airpollution_dataset:main"
 mvdec-without-ffs = "pipeline.private_without_ffs:main"
 mvdec-ffs = "pipeline.private_ffs:main"
 mvdec-intuitive = "pipeline.private_intuitive:main"
@@ -42,6 +48,13 @@ dev = [
 dekm = [
     "gdown",
     "tensorflow>=2.16",
+]
+airpollution = [
+    "geopandas>=1.0",
+    "netcdf4>=1.7",
+    "rasterio>=1.4",
+    "rioxarray>=0.18",
+    "xarray>=2024",
 ]
 
 [build-system]

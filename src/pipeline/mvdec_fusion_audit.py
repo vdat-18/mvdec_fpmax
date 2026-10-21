@@ -18,8 +18,14 @@ from pipeline.mvdec_audit import (
     validate_expected_run_set,
     validate_numerical_runtime,
 )
+from pipeline.mvdec_calibration import (
+    CenteredRmsCalibration,
+    center_latent,
+    global_rms,
+)
 from pipeline.mvdec_contract import (
     FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
     FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
@@ -36,6 +42,7 @@ from pipeline.mvdec_runs import (
 from pipeline.public_artifacts import load_public_artifact, write_public_frame
 
 INDEPENDENT_KMEANS_METRIC_ATOL = 0.01
+POST_TRAINING_DIAGNOSTIC_CLAIM_SCOPE = "post_training_diagnostic_not_exact_paper_truth"
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,19 @@ class AlignmentDiagnostics:
     strongest_cross_coordinate_abs_correlation_mean: float
 
 
+@dataclass(frozen=True)
+class ScaleAlignmentDiagnostics:
+    """Label-free scale and orthogonal-alignment calibration metadata."""
+
+    view1_centered_global_rms: float
+    view2_centered_global_rms: float
+    view2_to_view1_centered_rms_ratio: float
+    view2_centered_rms_scale_factor: float
+    procrustes_rotation_determinant: float
+    procrustes_orthogonality_max_abs_error: float
+    operation_order_max_abs_delta: float
+
+
 def _validated_latents(artifact: dict[str, object]) -> tuple[np.ndarray, ...]:
     arrays = tuple(
         np.asarray(artifact[name]) for name in ("h_view1", "h_view2", "h_fused")
@@ -83,6 +103,97 @@ def _validated_latents(artifact: dict[str, object]) -> tuple[np.ndarray, ...]:
 def _row_l2_normalize(values: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(values, axis=1, keepdims=True)
     return np.divide(values, norms, out=np.zeros_like(values), where=norms > 0)
+
+
+def _center(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    array = np.asarray(values, dtype=np.float64)
+    return center_latent(array), array.mean(axis=0)
+
+
+def _global_rms(values: np.ndarray) -> float:
+    return global_rms(values)
+
+
+def _centered_rms_scale_factor(
+    reference_centered: np.ndarray,
+    target_centered: np.ndarray,
+) -> float:
+    reference_rms = _global_rms(reference_centered)
+    target_rms = _global_rms(target_centered)
+    if reference_rms == 0.0 or target_rms == 0.0:
+        raise ValueError(
+            "Centered RMS calibration requires non-constant latent spaces."
+        )
+    return reference_rms / target_rms
+
+
+def _orthogonal_alignment(
+    reference_centered: np.ndarray,
+    target_centered: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    rotation, _ = orthogonal_procrustes(target_centered, reference_centered)
+    return target_centered @ rotation, rotation
+
+
+def scale_alignment_representations(
+    view1: np.ndarray,
+    view2: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Return label-free scale/alignment controls using paired sample rows."""
+
+    centered1, mean1 = _center(np.asarray(view1, dtype=np.float64))
+    centered2, _ = _center(np.asarray(view2, dtype=np.float64))
+    scale = _centered_rms_scale_factor(centered1, centered2)
+    rms_matched2 = centered2 * scale
+    procrustes2, _ = _orthogonal_alignment(centered1, centered2)
+    scaled_then_aligned2, _ = _orthogonal_alignment(centered1, rms_matched2)
+    aligned_then_scaled2 = procrustes2 * _centered_rms_scale_factor(
+        centered1,
+        procrustes2,
+    )
+    return {
+        "centered_global_rms_matched_average": (view1 + rms_matched2 + mean1) / 2,
+        "centered_rms_then_procrustes_average": (view1 + scaled_then_aligned2 + mean1)
+        / 2,
+        "centered_procrustes_then_rms_average": (view1 + aligned_then_scaled2 + mean1)
+        / 2,
+    }
+
+
+def scale_alignment_diagnostics(
+    view1: np.ndarray,
+    view2: np.ndarray,
+) -> ScaleAlignmentDiagnostics:
+    """Describe label-free calibration and verify operation-order equivalence."""
+
+    centered1, _ = _center(np.asarray(view1, dtype=np.float64))
+    centered2, _ = _center(np.asarray(view2, dtype=np.float64))
+    view1_rms = _global_rms(centered1)
+    view2_rms = _global_rms(centered2)
+    scale = _centered_rms_scale_factor(centered1, centered2)
+    aligned2, rotation = _orthogonal_alignment(centered1, centered2)
+    scaled_then_aligned2, _ = _orthogonal_alignment(
+        centered1,
+        centered2 * scale,
+    )
+    aligned_then_scaled2 = aligned2 * _centered_rms_scale_factor(
+        centered1,
+        aligned2,
+    )
+    identity = np.eye(rotation.shape[0], dtype=np.float64)
+    return ScaleAlignmentDiagnostics(
+        view1_centered_global_rms=view1_rms,
+        view2_centered_global_rms=view2_rms,
+        view2_to_view1_centered_rms_ratio=view2_rms / view1_rms,
+        view2_centered_rms_scale_factor=scale,
+        procrustes_rotation_determinant=float(np.linalg.det(rotation)),
+        procrustes_orthogonality_max_abs_error=float(
+            np.max(np.abs(rotation.T @ rotation - identity))
+        ),
+        operation_order_max_abs_delta=float(
+            np.max(np.abs(scaled_then_aligned2 - aligned_then_scaled2))
+        ),
+    )
 
 
 def _paired_cosine(view1: np.ndarray, view2: np.ndarray) -> np.ndarray:
@@ -164,6 +275,7 @@ def fused_representation(
     view1: np.ndarray,
     view2: np.ndarray,
     fusion_contract: str,
+    calibration: CenteredRmsCalibration | dict[str, object] | None = None,
 ) -> np.ndarray:
     """Recompute the latent fusion declared by one immutable protocol."""
 
@@ -171,6 +283,16 @@ def fused_representation(
         return (view1 + view2) / 2
     if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
         return (_row_l2_normalize(view1) + _row_l2_normalize(view2)) / 2
+    if fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE:
+        resolved = (
+            calibration
+            if isinstance(calibration, CenteredRmsCalibration)
+            else CenteredRmsCalibration.from_metadata(calibration)
+        )
+        resolved.validate()
+        if view1.shape != (resolved.n_samples, resolved.latent_width):
+            raise ValueError("Calibration dimensions do not match audited latents.")
+        return (view1 + resolved.view2_scale_factor * view2) / 2
     raise ValueError(f"Unsupported MvDEC fusion contract: {fusion_contract!r}.")
 
 
@@ -229,6 +351,7 @@ def diagnostic_representations(
     view1: np.ndarray,
     view2: np.ndarray,
     fusion_contract: str = FUSION_ENCODER_AVERAGE,
+    calibration: CenteredRmsCalibration | dict[str, object] | None = None,
 ) -> dict[str, np.ndarray]:
     """Return declared fusion plus label-free controls for alignment faults."""
 
@@ -239,7 +362,7 @@ def diagnostic_representations(
     return {
         "view1": view1,
         "view2": view2,
-        "fused": fused_representation(view1, view2, fusion_contract),
+        "fused": fused_representation(view1, view2, fusion_contract, calibration),
         "row_l2_normalized_average": (
             _row_l2_normalize(view1) + _row_l2_normalize(view2)
         )
@@ -251,6 +374,7 @@ def diagnostic_representations(
         / 2,
         "procrustes_aligned_average": (view1 + aligned2) / 2,
         "concatenation_control": np.concatenate((view1, view2), axis=1),
+        **scale_alignment_representations(view1, view2),
     }
 
 
@@ -289,8 +413,19 @@ def audit_artifact(
     fusion_contract = artifact.get("fusion_contract")
     if not isinstance(fusion_contract, str):
         raise ValueError("MvDEC artifact is missing its fusion contract.")
-    expected_fused = fused_representation(view1, view2, fusion_contract)
-    if not np.allclose(fused, expected_fused, rtol=1e-6, atol=1e-6):
+    calibration_metadata = artifact.get("calibration")
+    expected_fused = fused_representation(
+        view1,
+        view2,
+        fusion_contract,
+        calibration_metadata,
+    )
+    fusion_matches = (
+        np.array_equal(fused, expected_fused)
+        if fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE
+        else np.allclose(fused, expected_fused, rtol=1e-6, atol=1e-6)
+    )
+    if not fusion_matches:
         raise ValueError("Saved fused latent does not implement its declared contract.")
 
     true_labels = np.asarray(artifact["true_labels"])
@@ -310,7 +445,10 @@ def audit_artifact(
     dataset_output = output_dir / str(artifact["dataset"]).lower()
     records = []
     for name, representation in diagnostic_representations(
-        view1, view2, fusion_contract
+        view1,
+        view2,
+        fusion_contract,
+        calibration_metadata,
     ).items():
         labels = KMeans(
             n_clusters=n_clusters,
@@ -338,9 +476,7 @@ def audit_artifact(
                     np.isfinite(value) and 0.0 <= value <= 1.0
                     for value in (recorded_acc, recorded_nmi)
                 ):
-                    raise ValueError(
-                        f"Recorded MvDEC {name} metrics are invalid."
-                    )
+                    raise ValueError(f"Recorded MvDEC {name} metrics are invalid.")
                 acc_delta = metrics.acc - recorded_acc
                 nmi_delta = metrics.nmi - recorded_nmi
                 if max(abs(acc_delta), abs(nmi_delta)) > (
@@ -360,6 +496,11 @@ def audit_artifact(
                 "source_sha256": artifact["source_sha256"],
                 "fusion_contract": fusion_contract,
                 "representation": name,
+                "claim_scope": (
+                    "saved_training_representation"
+                    if name in {"view1", "view2", "fused"}
+                    else POST_TRAINING_DIAGNOSTIC_CLAIM_SCOPE
+                ),
                 "acc": metrics.acc,
                 "nmi": metrics.nmi,
                 "recorded_acc": recorded_acc,
@@ -382,6 +523,11 @@ def audit_artifact(
     dataset_output.mkdir(parents=True, exist_ok=True)
     (dataset_output / "alignment_diagnostics.json").write_text(
         json.dumps(asdict(diagnostics), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    scale_diagnostics = scale_alignment_diagnostics(view1, view2)
+    (dataset_output / "scale_alignment_diagnostics.json").write_text(
+        json.dumps(asdict(scale_diagnostics), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     metrics_frame = pd.DataFrame.from_records(records)
