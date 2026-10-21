@@ -179,3 +179,22 @@ already worse. The 15-17% of rows that only one view gets right is therefore
 not recoverable by linear coordinate alignment. A training-time alignment loss
 was not run: the existing L5 machinery does not match the loader's Eq. 11
 contract (about ten loader changes) and the evidence above predicts little gain.
+
+## Paper-figure fusion audit on S1 (Kaggle, 2026-10-21)
+
+Literal Fig. 1 / Fig. 2 alternatives, evaluated on the S1 run (retrained
+bit-identically a third time; config hash `24205a27897e`). ACC / NMI:
+
+| Representation | ACC | NMI |
+| --- | ---: | ---: |
+| Eq. 4 latent average | 0.7563 | 0.5942 |
+| Fig. 1 full-output average | 0.7563 | 0.5942 |
+| Fig. 2 full-output concatenation | 0.7534 | 0.5893 |
+| Latent concatenation control | 0.7533 | 0.5894 |
+| Reconstruction-average control | 0.7565 | 0.5931 |
+| Raw input baseline | 0.5406 | 0.4197 |
+
+No published fusion variant exceeds the Eq. 4 average. Every fusion rule tried
+(Eq. 4, Fig. 1, Fig. 2, row-L2, z-score, Procrustes, centered-RMS, least squares,
+CCA) lands between 0.634 and 0.7565 ACC, so the fused ceiling for this View1
+and View2 is 0.7565, 2.5 pp below Table 2.
