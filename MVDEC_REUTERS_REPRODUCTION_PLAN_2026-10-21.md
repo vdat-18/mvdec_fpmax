@@ -198,3 +198,21 @@ No published fusion variant exceeds the Eq. 4 average. Every fusion rule tried
 (Eq. 4, Fig. 1, Fig. 2, row-L2, z-score, Procrustes, centered-RMS, least squares,
 CCA) lands between 0.634 and 0.7565 ACC, so the fused ceiling for this View1
 and View2 is 0.7565, 2.5 pp below Table 2.
+
+## S3: training-time centered alignment ablation (seed 42)
+
+Protocol `mvdec_2025_frozen_dekm_f_view1_true_bottleneck_centered_alignment_min500_release_l2_seed42_v1`
+(frozen DEKM_F View1, 500-update floor, centered row-L2 alignment weight 1.0 fixed a priori, L3 off).
+Label: `controlled_diagnostic_not_exact_paper_truth` (ablation, not paper protocol).
+
+| Row | Paper ACC / NMI | S3 ACC / NMI |
+| --- | ---: | ---: |
+| View1 | 0.7642 / 0.5999 | 0.7557 / 0.5932 |
+| View2 | 0.6501 / 0.5129 | 0.7559 / 0.5931 |
+| Fused | 0.7813 / 0.6141 | 0.7559 / 0.5933 |
+
+Alignment makes View2 collapse onto View1's partition (View2 ACC rises 0.740 -> 0.756, but the
+views stop being complementary), so fused gains nothing. Training finished (500 updates, 468 s);
+the Kaggle kernel ended in ERROR after training (post-training loader audit, not diagnosed because
+the science result is negative). Conclusion: fused 0.7813 is still not reproduced; closing it needs
+the authors' alignment/selection details (see `AUTHOR_REQUEST_2026-10-21.md`).
