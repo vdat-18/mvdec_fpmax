@@ -136,3 +136,24 @@ Open items: the joint path still fails `_load_validated_mvdec_artifact` with a
 config-hash mismatch (the joint transition proof is added after hashing); fix
 before any further joint arm. Multi-seed S1 needs DEKM_F checkpoints for seeds
 43-44 packaged like the seed-42 one.
+
+## CPU diagnostics on the S1 artifact (label-aware, diagnostic only)
+
+- K-Means seed variance is negligible: View1 and View2 give identical ACC for
+  30 seeds; fused spans 0.702 to 0.756 at n_init=1 and is 0.7563 at the
+  recorded n_init=100. Best-of-N K-Means cannot explain the paper's fused row.
+- The views are complementary: ARI(View1, View2) = 0.812; both correct 58.7%,
+  only View1 17.0%, only View2 15.3%, neither 9.1% (oracle best-of-two ACC
+  0.909). Raw coordinate averaging does not exploit this because the two
+  latents are independently trained and not axis-aligned; Procrustes and
+  rescaling controls do not recover it either.
+- Seeds 43-44 would need DEKM_F checkpoints with weights (only the seed-42
+  weights were kept; the validator is pinned to that single checkpoint) and a
+  gate generalization. That would test robustness of the View2 result but not
+  the fused gap, so it is deferred.
+
+Conclusion for REUTERS: View1 and View2 are reproduced to within or above the
+paper's numbers under a published-method-only protocol with one preregistered
+refinement floor. The fused row is not, and no tested variant of Eq. (4) fusion
+closes it. Closing it needs information the paper does not give (how or whether
+the two latents are aligned during joint training, and the run-selection rule).
