@@ -230,3 +230,17 @@ Protocol `mvdec_2025_scratch_both_views_true_bottleneck_min500_release_l2_v1`
 
 Training both views from scratch is worse than S1 on every row and the fused result again
 equals View1. The DEKM_F View1 checkpoint is therefore the better starting point.
+
+## S3-wide: View2 stem width 256 instead of 64 (frozen View1, 500-update floor, seed 42)
+
+Protocol `mvdec_2025_frozen_dekm_f_view1_true_bottleneck_wide_view2_min500_release_l2_seed42_v1`
+(`view2_base_units=256` fixed a priori). Kaggle audit passed.
+
+| Row | Paper ACC / NMI | S1 (64) | S3-wide (256) |
+| --- | ---: | ---: | ---: |
+| View1 | 0.7642 / 0.5999 | 0.7557 / 0.5932 | 0.7557 / 0.5932 |
+| View2 | 0.6501 / 0.5129 | 0.7404 / 0.5558 | 0.7251 / 0.5341 |
+| Fused | 0.7813 / 0.6141 | 0.7563 / 0.5942 | 0.7551 / 0.5909 |
+
+A wider stem lowers View2 and the fused result still equals View1, so the 2000 to 64
+compression is not what limits the fused row.
