@@ -485,3 +485,27 @@ def test_min_refinement_joint_protocol_differs_only_by_trainable_view1(monkeypat
     provenance = {key: category for key, category, _ in joint.decision_provenance}
     assert provenance["view1_refinement_policy"] == "paper_explicit"
     mvdec.validate_imported_view1_run_gate(joint, "REUTERS", 42, 1)
+
+
+def test_min_refinement_aligned_protocol_adds_only_a_preregistered_alignment_term(
+    monkeypatch,
+):
+    _, mvdec = _load_mvdec(monkeypatch)
+    frozen = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    aligned = mvdec.MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL
+    contract = aligned.manifest_contract(0.001)
+    terms = contract["objective"]["loss_terms"]
+
+    assert aligned.view1_refinement_policy == mvdec.VIEW1_REFINEMENT_FROZEN_DEKM_F
+    assert aligned.min_training_steps == frozen.min_training_steps == 500
+    assert aligned.alignment_weight == 1.0
+    assert aligned.alignment_mode == mvdec.ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+    assert aligned.scatter_trace_weight == 0.0
+    assert terms["L5_cross_view_alignment"]["optimized"]
+    assert not terms["L3_scatter_trace"]["optimized"]
+    assert contract["objective"]["loss_scale_policy"] == "sum_squared_dimensions"
+    assert aligned.view2_architecture_id == frozen.view2_architecture_id
+    assert aligned.refinement_batch_size_policy == mvdec.FULL_DATASET_BATCH_POLICY
+    provenance = {key: category for key, category, _ in aligned.decision_provenance}
+    assert provenance["cross_view_alignment"] == "ablation"
+    mvdec.validate_imported_view1_run_gate(aligned, "REUTERS", 42, 1)

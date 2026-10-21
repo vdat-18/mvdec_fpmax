@@ -22,6 +22,7 @@ from pipeline.mvdec_contract import (
     FUSION_FIGURE1_FULL_OUTPUT_AVERAGE,
     FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
@@ -109,6 +110,7 @@ def test_independent_dekm_view2_protocol_has_immutable_loader_contract() -> None
         FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
         IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
         MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
+        MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
         INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     }
@@ -140,6 +142,7 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
         LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 1.0,
         LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 1.0,
         LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: 100.0,
+        MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: 1.0,
     }
     assert ALIGNED_BALANCED_PROTOCOL_LOSS_SCALE_POLICIES == {
         ALIGNED_BALANCED_FULL_BATCH_PROTOCOL_ID: "mean_squared_dimensions",
@@ -157,6 +160,7 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
         LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
             "sum_squared_dimensions"
         ),
+        MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: "sum_squared_dimensions",
     }
     assert ALIGNED_BALANCED_PROTOCOL_ALIGNMENT_MODES == {
         **{
@@ -169,11 +173,17 @@ def test_aligned_balanced_protocols_have_public_loader_contracts() -> None:
         LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID: (
             ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
         ),
+        MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: (
+            ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2
+        ),
     }
     for protocol_id in ALIGNED_BALANCED_PROTOCOL_SETTINGS:
-        assert data.PUBLIC_PROTOCOL_ARCHITECTURES[protocol_id] == (
-            VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
+        expected_architecture = (
+            VIEW2_ARCHITECTURE_ID
+            if protocol_id == MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID
+            else VIEW2_DIRECT_JOINT_HEAD_ARCHITECTURE_ID
         )
+        assert data.PUBLIC_PROTOCOL_ARCHITECTURES[protocol_id] == expected_architecture
         assert protocol_id in data.PUBLIC_PROTOCOL_METHODS
         assert protocol_id in data.PUBLIC_PROTOCOL_FUSIONS
 

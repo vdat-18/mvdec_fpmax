@@ -50,6 +50,7 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
+    MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
@@ -1062,6 +1063,35 @@ MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled ablation adding a label-free cross-view alignment term to "
+        "the frozen-View1 min-500 arm; not an exact paper reproduction"
+    ),
+    refinement_source=(
+        "Frozen DEKM_F View1 with the true-bottleneck View2 refined for at "
+        "least 500 updates under L1 + L2 + L4 plus a centered row-L2 "
+        "cross-view alignment term (L3 omitted: equal to L2 for orthonormal V)"
+    ),
+    scatter_trace_weight=0.0,
+    alignment_weight=1.0,
+    alignment_mode=ALIGNMENT_FULL_BATCH_CENTERED_ROW_L2,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "cross_view_alignment",
+            "ablation",
+            "MvDEC does not describe how the two latent spaces are aligned. "
+            "Linear post-hoc alignment (Procrustes, least squares, CCA) did "
+            "not beat the raw average, so this tests a training-time term with "
+            "one preregistered weight (1.0) and no label-based tuning.",
+        ),
+    ),
+)
+
+
 INDEPENDENT_DEKM_VIEW2_PROTOCOL = replace(
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL,
     protocol_id=INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -1305,6 +1335,7 @@ PUBLIC_PROTOCOLS = {
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
+    MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL
@@ -1927,6 +1958,11 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return (
             "MvDEC-2025-frozen-DEKM_F-View1-Eq11-true-bottleneck-min500-"
             "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-centered-alignment-"
+            "min500-release-L2-ablation"
         )
     if protocol.protocol_id == MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID:
         return (
