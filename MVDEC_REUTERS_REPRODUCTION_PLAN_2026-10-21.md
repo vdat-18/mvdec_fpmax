@@ -346,3 +346,13 @@ ACC lies in the range (seed 46: 0.7842), the paper's fused NMI and View2 row do 
 
 On 20NEWS the from-scratch joint model does not reproduce the paper: View2 is far below the
 paper's 0.409, and fusion lowers ACC relative to View1 in every seed.
+
+## Label-free selection check on the REUTERS 10-seed S2 run (2026-10-22)
+
+Question: could a selection rule that does not use labels reproduce the paper's best-run numbers? Final Eq. 11 loss per seed (42-51) was compared with fused ACC/NMI.
+
+- corr(final loss, fused ACC) = -0.07; corr(final loss, fused NMI) = -0.24. Final loss is nearly constant (1.4633-1.4672) and says nothing about quality.
+- Picking the lowest-loss run (seed 47) gives fused 0.7291/0.5357, versus paper 0.7813/0.6141.
+- The best-ACC run (seed 46, 0.7842/0.5414) and best-NMI run (seed 48, 0.5751) are different seeds. No single seed in 10 reaches both paper values.
+
+Conclusion: the paper's row is not reproducible by an unsupervised selection rule on this protocol; it needs either a label-guided best-of-N or a different training procedure. Next diagnostic: 40 more seeds (52-91) on REUTERS (`datnguyends/mvdec-s2-multiseed-40-reuters`) to see whether fused NMI 0.614 ever occurs with ACC near 0.78.
