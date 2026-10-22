@@ -322,3 +322,27 @@ Per seed, fused again tracks View1 (seed 46: 0.7631 vs 0.7630; seed 42: 0.7129 /
 closest to the paper's row). The paper's three RCV1 rows all fall inside the range of this
 distribution, and a +9.6 pp "fusion gain" over DEKM_F is explained by run selection: the
 from-scratch View1 itself spans 0.627-0.763.
+
+## S2 over 10 seeds, REUTERS complete, and 20NEWS partial (2026-10-22)
+
+REUTERS seeds 42-51, one process per seed, full zip downloaded. ACC / NMI:
+
+| Row | Paper | Mean ACC (std) | Median | Best ACC | Mean NMI | Best NMI |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| View1 | 0.7642 / 0.5999 | 0.7198 (0.0308) | 0.7152 | 0.7802 | 0.5102 | 0.5701 |
+| View2 | 0.6501 / 0.5129 | 0.5152 (0.0589) | 0.5204 | 0.5843 | 0.2893 | 0.3715 |
+| Fused | 0.7813 / 0.6141 | 0.7085 (0.0459) | 0.7091 | 0.7842 | 0.5099 | 0.5751 |
+
+The earlier 7-seed table (seeds 42-48) is the first seven rows of this run. The paper's fused
+ACC lies in the range (seed 46: 0.7842), the paper's fused NMI and View2 row do not.
+
+20NEWS seeds 42-47 (first kernel, single process, stopped after six runs):
+
+| Row | Paper | Mean ACC | Best ACC | Mean NMI | Best NMI |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| View1 | 0.4120 / 0.4376 | 0.4385 | 0.4526 | 0.4150 | 0.4253 |
+| View2 | 0.4086 / 0.4032 | 0.2745 | 0.2925 | 0.2729 | 0.2934 |
+| Fused | 0.4163 / 0.4543 | 0.3548 | 0.3958 | 0.3011 | 0.3393 |
+
+On 20NEWS the from-scratch joint model does not reproduce the paper: View2 is far below the
+paper's 0.409, and fusion lowers ACC relative to View1 in every seed.
