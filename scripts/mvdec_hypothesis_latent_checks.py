@@ -20,9 +20,21 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import normalized_mutual_info_score
 
 PAPER = {
-    "REUTERS": {"view1": (0.7642, 0.5999), "view2": (0.6501, 0.5129), "fused": (0.7813, 0.6141)},
-    "RCV1": {"view1": (0.6212, 0.3598), "view2": (0.6235, 0.3659), "fused": (0.7193, 0.4885)},
-    "20NEWS": {"view1": (0.4120, 0.4376), "view2": (0.4086, 0.4032), "fused": (0.4163, 0.4543)},
+    "REUTERS": {
+        "view1": (0.7642, 0.5999),
+        "view2": (0.6501, 0.5129),
+        "fused": (0.7813, 0.6141),
+    },
+    "RCV1": {
+        "view1": (0.6212, 0.3598),
+        "view2": (0.6235, 0.3659),
+        "fused": (0.7193, 0.4885),
+    },
+    "20NEWS": {
+        "view1": (0.4120, 0.4376),
+        "view2": (0.4086, 0.4032),
+        "fused": (0.4163, 0.4543),
+    },
 }
 NMI_METHODS = ("arithmetic", "geometric", "min", "max")
 
@@ -105,9 +117,17 @@ def main() -> None:
     parser.add_argument("--restarts", type=int, default=30)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    runs = [analyse_run(p, args.restarts) for p in sorted(args.root.glob("seed_*/artifact.pkl"))]
+    runs = [
+        analyse_run(p, args.restarts)
+        for p in sorted(args.root.glob("seed_*/artifact.pkl"))
+    ]
     dataset = runs[0]["dataset"]
-    result = {"dataset": dataset, "paper": PAPER[dataset], "runs": runs, "summary": summarise(runs)}
+    result = {
+        "dataset": dataset,
+        "paper": PAPER[dataset],
+        "runs": runs,
+        "summary": summarise(runs),
+    }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result["summary"], indent=1))

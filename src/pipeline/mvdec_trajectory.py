@@ -46,7 +46,9 @@ def record_checkpoint(
     """Append ACC/NMI of the fused refinement assignment and of each view."""
 
     row: dict = {"seed": int(seed), "step": int(step), "n_changed": int(n_changed)}
-    fused = compute_external_metrics(true_labels, fused_assignment, n_clusters=n_clusters)
+    fused = compute_external_metrics(
+        true_labels, fused_assignment, n_clusters=n_clusters
+    )
     row["fused_acc"], row["fused_nmi"] = fused.acc, fused.nmi
     for name, latent in (("view1", h_view1), ("view2", h_view2)):
         labels = KMeans(
