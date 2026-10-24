@@ -1,0 +1,585 @@
+{
+  "dataset": "REUTERS",
+  "paper": {
+    "view1": [
+      0.7642,
+      0.5999
+    ],
+    "view2": [
+      0.6501,
+      0.5129
+    ],
+    "fused": [
+      0.7813,
+      0.6141
+    ]
+  },
+  "runs": [
+    {
+      "seed": 42,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7022,
+        "purity": 0.792,
+        "nmi_arithmetic": 0.5165410569766717,
+        "nmi_geometric": 0.5167214029203642,
+        "nmi_min": 0.5305573908175505,
+        "nmi_max": 0.5032462328430863
+      },
+      "view2": {
+        "acc": 0.5058,
+        "purity": 0.56,
+        "nmi_arithmetic": 0.2750517496330295,
+        "nmi_geometric": 0.2766798804299484,
+        "nmi_min": 0.3084665683609785,
+        "nmi_max": 0.24816872908297463
+      },
+      "fused": {
+        "acc": 0.7025,
+        "purity": 0.7923,
+        "nmi_arithmetic": 0.5168066806300484,
+        "nmi_geometric": 0.5169867727687162,
+        "nmi_min": 0.5308163910928833,
+        "nmi_max": 0.5035174642356587
+      },
+      "concat_fig2": {
+        "acc": 0.7023,
+        "purity": 0.792,
+        "nmi_arithmetic": 0.5159731126501921,
+        "nmi_geometric": 0.5161528837576097,
+        "nmi_min": 0.529959006393167,
+        "nmi_max": 0.5027064286056289
+      },
+      "fused_stored": {
+        "acc": 0.7025,
+        "nmi_arithmetic": 0.5168066806300484
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7025,
+        "max_nmi": 0.5168066806300484,
+        "nmi_at_max_acc": 0.5168066806300484
+      }
+    },
+    {
+      "seed": 43,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7457,
+        "purity": 0.7699,
+        "nmi_arithmetic": 0.4559000814064102,
+        "nmi_geometric": 0.4561538163826781,
+        "nmi_min": 0.47162865323062014,
+        "nmi_max": 0.4411867319238882
+      },
+      "view2": {
+        "acc": 0.4967,
+        "purity": 0.5216,
+        "nmi_arithmetic": 0.24068702513019993,
+        "nmi_geometric": 0.2415725192253282,
+        "nmi_min": 0.26320219505683595,
+        "nmi_max": 0.22172034709767485
+      },
+      "fused": {
+        "acc": 0.6129,
+        "purity": 0.7432,
+        "nmi_arithmetic": 0.4487001605038907,
+        "nmi_geometric": 0.4491902438957331,
+        "nmi_min": 0.47068093284308654,
+        "nmi_max": 0.4286807922987905
+      },
+      "concat_fig2": {
+        "acc": 0.8164,
+        "purity": 0.8405,
+        "nmi_arithmetic": 0.5603956625204558,
+        "nmi_geometric": 0.560403629970909,
+        "nmi_min": 0.5633999359952971,
+        "nmi_max": 0.557423259073982
+      },
+      "fused_stored": {
+        "acc": 0.6128,
+        "nmi_arithmetic": 0.4486629215629503
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7054,
+        "max_nmi": 0.448737439475397,
+        "nmi_at_max_acc": 0.4225653993188276
+      }
+    },
+    {
+      "seed": 44,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.6902,
+        "purity": 0.7825,
+        "nmi_arithmetic": 0.4932891185806593,
+        "nmi_geometric": 0.49360827040645416,
+        "nmi_min": 0.5116865081538228,
+        "nmi_max": 0.47616874928507114
+      },
+      "view2": {
+        "acc": 0.5516,
+        "purity": 0.5998,
+        "nmi_arithmetic": 0.32890389187864744,
+        "nmi_geometric": 0.330103517156433,
+        "nmi_min": 0.35952700341779265,
+        "nmi_max": 0.30308803234014525
+      },
+      "fused": {
+        "acc": 0.6892,
+        "purity": 0.781,
+        "nmi_arithmetic": 0.48935901350962363,
+        "nmi_geometric": 0.4896748962247093,
+        "nmi_min": 0.5075881210991914,
+        "nmi_max": 0.4723938445868839
+      },
+      "concat_fig2": {
+        "acc": 0.6903,
+        "purity": 0.7829,
+        "nmi_arithmetic": 0.49448697529576136,
+        "nmi_geometric": 0.49480532072647715,
+        "nmi_min": 0.5128817515623462,
+        "nmi_max": 0.47736599064681284
+      },
+      "fused_stored": {
+        "acc": 0.6892,
+        "nmi_arithmetic": 0.48935901350962363
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.6892,
+        "max_nmi": 0.4893590135096237,
+        "nmi_at_max_acc": 0.48935901350962363
+      }
+    },
+    {
+      "seed": 45,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.6746,
+        "purity": 0.7678,
+        "nmi_arithmetic": 0.48092108014936,
+        "nmi_geometric": 0.4813071826394898,
+        "nmi_min": 0.5009838907951317,
+        "nmi_max": 0.46240329942084896
+      },
+      "view2": {
+        "acc": 0.4949,
+        "purity": 0.524,
+        "nmi_arithmetic": 0.22414354917001303,
+        "nmi_geometric": 0.22528047650099334,
+        "nmi_min": 0.24914230650540498,
+        "nmi_max": 0.20370403487218902
+      },
+      "fused": {
+        "acc": 0.6735,
+        "purity": 0.7667,
+        "nmi_arithmetic": 0.47828859368887805,
+        "nmi_geometric": 0.47867220126738663,
+        "nmi_min": 0.49823126982812704,
+        "nmi_max": 0.45988096320250343
+      },
+      "concat_fig2": {
+        "acc": 0.6775,
+        "purity": 0.7707,
+        "nmi_arithmetic": 0.487482594756063,
+        "nmi_geometric": 0.48787267903545345,
+        "nmi_min": 0.5077843435871053,
+        "nmi_max": 0.4687418073345947
+      },
+      "fused_stored": {
+        "acc": 0.6735,
+        "nmi_arithmetic": 0.47828859368887816
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.6735,
+        "max_nmi": 0.47828859368887816,
+        "nmi_at_max_acc": 0.47828859368887816
+      }
+    },
+    {
+      "seed": 46,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7805,
+        "purity": 0.7975,
+        "nmi_arithmetic": 0.5424097464811173,
+        "nmi_geometric": 0.5428135769554415,
+        "nmi_min": 0.564167625780835,
+        "nmi_max": 0.522267790391829
+      },
+      "view2": {
+        "acc": 0.5858,
+        "purity": 0.6151,
+        "nmi_arithmetic": 0.29864228653865166,
+        "nmi_geometric": 0.29896819324015905,
+        "nmi_min": 0.31326551800736185,
+        "nmi_max": 0.28532339319638933
+      },
+      "fused": {
+        "acc": 0.7842,
+        "purity": 0.8051,
+        "nmi_arithmetic": 0.5413681728054414,
+        "nmi_geometric": 0.5417099367731971,
+        "nmi_min": 0.5613035288318748,
+        "nmi_max": 0.5228003041589947
+      },
+      "concat_fig2": {
+        "acc": 0.7819,
+        "purity": 0.8106,
+        "nmi_arithmetic": 0.5663158374825034,
+        "nmi_geometric": 0.5665248172317608,
+        "nmi_min": 0.5821259340829731,
+        "nmi_max": 0.5513418141129125
+      },
+      "fused_stored": {
+        "acc": 0.7842,
+        "nmi_arithmetic": 0.5413681728054414
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7842,
+        "max_nmi": 0.5413681728054414,
+        "nmi_at_max_acc": 0.5413681728054414
+      }
+    },
+    {
+      "seed": 47,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7141,
+        "purity": 0.8071,
+        "nmi_arithmetic": 0.5261583795473666,
+        "nmi_geometric": 0.5263937431046429,
+        "nmi_min": 0.542375770139708,
+        "nmi_max": 0.5108826537519227
+      },
+      "view2": {
+        "acc": 0.3844,
+        "purity": 0.4566,
+        "nmi_arithmetic": 0.1913766280985162,
+        "nmi_geometric": 0.19479964795175206,
+        "nmi_min": 0.23529199164371647,
+        "nmi_max": 0.16127579428876795
+      },
+      "fused": {
+        "acc": 0.7291,
+        "purity": 0.8162,
+        "nmi_arithmetic": 0.5356921281119277,
+        "nmi_geometric": 0.5359323875834276,
+        "nmi_min": 0.5522257589486743,
+        "nmi_max": 0.520119750675319
+      },
+      "concat_fig2": {
+        "acc": 0.7122,
+        "purity": 0.8056,
+        "nmi_arithmetic": 0.5235868340596727,
+        "nmi_geometric": 0.5238208154319876,
+        "nmi_min": 0.5397167328749224,
+        "nmi_max": 0.5083930698576672
+      },
+      "fused_stored": {
+        "acc": 0.7291,
+        "nmi_arithmetic": 0.5356921281119277
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7291,
+        "max_nmi": 0.5356921281119277,
+        "nmi_at_max_acc": 0.5356921281119277
+      }
+    },
+    {
+      "seed": 48,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7412,
+        "purity": 0.8374,
+        "nmi_arithmetic": 0.5701030095933866,
+        "nmi_geometric": 0.5701945093112583,
+        "nmi_min": 0.5805022067316065,
+        "nmi_max": 0.5600698406974803
+      },
+      "view2": {
+        "acc": 0.5355,
+        "purity": 0.6051,
+        "nmi_arithmetic": 0.371371624016711,
+        "nmi_geometric": 0.3746234898156437,
+        "nmi_min": 0.42758829163258355,
+        "nmi_max": 0.3282193686497031
+      },
+      "fused": {
+        "acc": 0.7443,
+        "purity": 0.8418,
+        "nmi_arithmetic": 0.5750699083470019,
+        "nmi_geometric": 0.575147276953477,
+        "nmi_min": 0.5846594133901533,
+        "nmi_max": 0.5657898985477461
+      },
+      "concat_fig2": {
+        "acc": 0.7482,
+        "purity": 0.8292,
+        "nmi_arithmetic": 0.5753130276085556,
+        "nmi_geometric": 0.5754637908893194,
+        "nmi_min": 0.588789791235714,
+        "nmi_max": 0.562439396120799
+      },
+      "fused_stored": {
+        "acc": 0.7443,
+        "nmi_arithmetic": 0.5750699083470019
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7806,
+        "max_nmi": 0.591377465114107,
+        "nmi_at_max_acc": 0.5912502265657091
+      }
+    },
+    {
+      "seed": 49,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7162,
+        "purity": 0.7537,
+        "nmi_arithmetic": 0.4475633108646959,
+        "nmi_geometric": 0.4479843727469698,
+        "nmi_min": 0.46784267291755244,
+        "nmi_max": 0.428968988600284
+      },
+      "view2": {
+        "acc": 0.5466,
+        "purity": 0.5759,
+        "nmi_arithmetic": 0.3663291872387953,
+        "nmi_geometric": 0.36869231077858966,
+        "nmi_min": 0.4130162186023218,
+        "nmi_max": 0.329125138202241
+      },
+      "fused": {
+        "acc": 0.7158,
+        "purity": 0.7495,
+        "nmi_arithmetic": 0.4446431751440936,
+        "nmi_geometric": 0.44504769035425834,
+        "nmi_min": 0.4644406912590727,
+        "nmi_max": 0.42646445588716625
+      },
+      "concat_fig2": {
+        "acc": 0.7294,
+        "purity": 0.7674,
+        "nmi_arithmetic": 0.4619571283394824,
+        "nmi_geometric": 0.46236227140173924,
+        "nmi_min": 0.48213626821616834,
+        "nmi_max": 0.443399271344438
+      },
+      "fused_stored": {
+        "acc": 0.7158,
+        "nmi_arithmetic": 0.4446431751440936
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7158,
+        "max_nmi": 0.4446431751440936,
+        "nmi_at_max_acc": 0.4446431751440936
+      }
+    },
+    {
+      "seed": 50,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7322,
+        "purity": 0.8279,
+        "nmi_arithmetic": 0.5590065043092168,
+        "nmi_geometric": 0.559175268012825,
+        "nmi_min": 0.5730853510337229,
+        "nmi_max": 0.5456028142984506
+      },
+      "view2": {
+        "acc": 0.4754,
+        "purity": 0.5813,
+        "nmi_arithmetic": 0.2460583414818077,
+        "nmi_geometric": 0.24729977086434607,
+        "nmi_min": 0.27342044060216886,
+        "nmi_max": 0.22367448657045633
+      },
+      "fused": {
+        "acc": 0.7329,
+        "purity": 0.8278,
+        "nmi_arithmetic": 0.5588066274116268,
+        "nmi_geometric": 0.5589723773944081,
+        "nmi_min": 0.572753674167773,
+        "nmi_max": 0.5455226789142037
+      },
+      "concat_fig2": {
+        "acc": 0.7428,
+        "purity": 0.8271,
+        "nmi_arithmetic": 0.570585517171965,
+        "nmi_geometric": 0.5707914119392851,
+        "nmi_min": 0.5863327378319311,
+        "nmi_max": 0.5556620241747992
+      },
+      "fused_stored": {
+        "acc": 0.7329,
+        "nmi_arithmetic": 0.5588066274116269
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7329,
+        "max_nmi": 0.563350922563526,
+        "nmi_at_max_acc": 0.558806627411627
+      }
+    },
+    {
+      "seed": 51,
+      "dataset": "REUTERS",
+      "view1": {
+        "acc": 0.7011,
+        "purity": 0.791,
+        "nmi_arithmetic": 0.5101937216528472,
+        "nmi_geometric": 0.5105459676796993,
+        "nmi_min": 0.5298733917326022,
+        "nmi_max": 0.49192352207325
+      },
+      "view2": {
+        "acc": 0.5784,
+        "purity": 0.6078,
+        "nmi_arithmetic": 0.3547137324732611,
+        "nmi_geometric": 0.3559574930020085,
+        "nmi_min": 0.3870403979468848,
+        "nmi_max": 0.32737083130444516
+      },
+      "fused": {
+        "acc": 0.7011,
+        "purity": 0.7913,
+        "nmi_arithmetic": 0.510235602017214,
+        "nmi_geometric": 0.5105866020216512,
+        "nmi_min": 0.5298799062351794,
+        "nmi_max": 0.4919957807350948
+      },
+      "concat_fig2": {
+        "acc": 0.7023,
+        "purity": 0.7916,
+        "nmi_arithmetic": 0.5120015220468719,
+        "nmi_geometric": 0.5123560321198121,
+        "nmi_min": 0.531780347927175,
+        "nmi_max": 0.49364122738418176
+      },
+      "fused_stored": {
+        "acc": 0.7011,
+        "nmi_arithmetic": 0.510235602017214
+      },
+      "fused_kmeans_restarts": {
+        "n": 30,
+        "max_acc": 0.7125,
+        "max_nmi": 0.5271619796534199,
+        "nmi_at_max_acc": 0.5271619796534199
+      }
+    }
+  ],
+  "summary": {
+    "view1": {
+      "acc": {
+        "mean": 0.7198,
+        "max": 0.7805
+      },
+      "purity": {
+        "mean": 0.79268,
+        "max": 0.8374
+      },
+      "nmi_arithmetic": {
+        "mean": 0.510208600956173,
+        "max": 0.5701030095933866
+      },
+      "nmi_geometric": {
+        "mean": 0.5104898110159823,
+        "max": 0.5701945093112583
+      },
+      "nmi_min": {
+        "mean": 0.5272703461333152,
+        "max": 0.5805022067316065
+      },
+      "nmi_max": {
+        "mean": 0.4942720623286111,
+        "max": 0.5600698406974803
+      }
+    },
+    "view2": {
+      "acc": {
+        "mean": 0.51551,
+        "max": 0.5858
+      },
+      "purity": {
+        "mean": 0.56472,
+        "max": 0.6151
+      },
+      "nmi_arithmetic": {
+        "mean": 0.2897278015659633,
+        "max": 0.371371624016711
+      },
+      "nmi_geometric": {
+        "mean": 0.2913977298965202,
+        "max": 0.3746234898156437
+      },
+      "nmi_min": {
+        "mean": 0.3229960931776049,
+        "max": 0.42758829163258355
+      },
+      "nmi_max": {
+        "mean": 0.26316701556049865,
+        "max": 0.329125138202241
+      }
+    },
+    "fused": {
+      "acc": {
+        "mean": 0.70855,
+        "max": 0.7842
+      },
+      "purity": {
+        "mean": 0.7914899999999999,
+        "max": 0.8418
+      },
+      "nmi_arithmetic": {
+        "mean": 0.5098970062169745,
+        "max": 0.5750699083470019
+      },
+      "nmi_geometric": {
+        "mean": 0.5101920385236964,
+        "max": 0.575147276953477
+      },
+      "nmi_min": {
+        "mean": 0.5272579687696015,
+        "max": 0.5846594133901533
+      },
+      "nmi_max": {
+        "mean": 0.4937165933242361,
+        "max": 0.5657898985477461
+      }
+    },
+    "concat_fig2": {
+      "acc": {
+        "mean": 0.73033,
+        "max": 0.8164
+      },
+      "purity": {
+        "mean": 0.80176,
+        "max": 0.8405
+      },
+      "nmi_arithmetic": {
+        "mean": 0.5268098211931523,
+        "max": 0.5753130276085556
+      },
+      "nmi_geometric": {
+        "mean": 0.5270553652504354,
+        "max": 0.5754637908893194
+      },
+      "nmi_min": {
+        "mean": 0.5424906849706799,
+        "max": 0.588789791235714
+      },
+      "nmi_max": {
+        "mean": 0.5121114288655816,
+        "max": 0.562439396120799
+      }
+    }
+  }
+}

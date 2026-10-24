@@ -24,6 +24,7 @@ from pipeline.dekm_checkpoint import (
     validate_dekm_f_view1_checkpoint,
 )
 from pipeline.external_metrics import ExternalMetrics, compute_external_metrics
+from pipeline.mvdec_trajectory import record_checkpoint, trajectory_path
 from pipeline.mvdec_calibration import (
     CENTERED_RMS_CALIBRATION_CLAIM_SCOPE,
     CENTERED_RMS_CALIBRATION_METHOD,
@@ -3989,6 +3990,19 @@ def train(
                 acc, nmi = metric_value
             else:
                 silhouette = metric_value
+            label_trajectory_path = trajectory_path()
+            if label_trajectory_path is not None and y is not None:
+                record_checkpoint(
+                    label_trajectory_path,
+                    seed=random_seed,
+                    step=ite,
+                    n_clusters=n_clusters,
+                    true_labels=np.asarray(y),
+                    fused_assignment=assignment,
+                    h_view1=latent_embedding(view1_output),
+                    h_view2=latent_embedding(view2_output),
+                    n_changed=n_change_assignment,
+                )
             checkpoint = ite // kmeans_refresh_interval
             checkpoint_unit = (
                 "epoch"
