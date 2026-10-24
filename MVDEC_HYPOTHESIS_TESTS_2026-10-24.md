@@ -116,8 +116,22 @@ training, no change to the global NumPy/TensorFlow random state (unit test
 `tests/test_mvdec_trajectory.py`), and no change to protocol contracts or config
 hashes.
 
-CPU check (seed 42, this container, not bit-identical to Kaggle GPU): the hook
-writes rows from the first refinement window; the fused ACC moved 0.7148 at step 70.
+CPU run (seed 42, 4-core container, 57 min, not bit-identical to the Kaggle GPU run
+which gave 0.7025/0.5168): final fused 0.7146/0.5104, View1 0.7140/0.5074, View2
+0.5020/0.2881. Trajectory over 51 refreshes (steps 0-500):
+
+| Step | Fused ACC / NMI | View2 ACC / NMI |
+| ---: | --- | --- |
+| 0 | 0.7109 / 0.4734 | 0.5284 / 0.3678 |
+| 10 | **0.7165** / 0.5106 | **0.5402 / 0.3687** |
+| 50 | 0.7150 / 0.5106 | 0.5168 / 0.2934 |
+| 200 | 0.7148 / 0.5107 | 0.4949 / 0.2641 |
+| 500 | 0.7146 / 0.5104 | 0.5022 / 0.2883 |
+
+On this seed the fused partition is fixed after about 10 updates: the best
+checkpoint gains only +0.2 pp ACC / +0.05 pp NMI over the final state, while View2
+is best right after pretraining and drifts down during refinement. Early evidence
+against H2 as the main explanation; the 40-seed GPU run decides.
 
 Kaggle notebook: `notebooks/mvdec_2025_s2_trajectory_reuters_seeds52_91_kaggle.ipynb`
 (pins training commit `231f72914c3ed5bd738443069437d8be698bc4a4`, branch
