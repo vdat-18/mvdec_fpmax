@@ -25,10 +25,10 @@ are left unchanged.
 | H3 | Best ACC and best NMI are taken from different runs | `inference` from "best performance metrics" | max over seeds per metric | rejected on REUTERS (NMI max 0.5751) |
 | H4 | NMI uses another normalisation (geometric/min/max) | `assumption` (older sklearn default was geometric) | recompute on saved latents | rejected |
 | H5 | "ACC" is purity | `assumption` | recompute on saved latents | weak, inconsistent across datasets |
-| H6 | Fusion is Fig. 2 concatenation, not Eq. 4 average | `paper_explicit_conflicting_statement` | K-Means on saved `[h1, h2]`; concat inside refinement, 10 seeds | rejected: inside refinement the fused partition equals View1 (NMI max 0.5948) |
+| H6 | Fusion is Fig. 2 concatenation, not Eq. 4 average | `paper_explicit_conflicting_statement` | K-Means on saved `[h1, h2]`; concat inside refinement, 10 seeds | rejected: raw concat gives fused = View1 (NMI max 0.5948); L2-balanced concat fused NMI max 0.5705 |
 | H7 | K-Means restart picked with labels | `inference` | 30 restarts, n_init=1 | rejected |
 | H8 | View2 row is a standalone single-view model ("considering the individual views independently", "single-view models") | `paper_explicit` wording, Sec. 4.2 | independent View2 DEKM, 20 seeds, frozen DEKM_F View1 | rejected: View2 max 0.5697/0.4537, fused max 0.7562/0.5941 |
-| H9 | Paper-text input normalisation `(1/d)||x||^2 = 1` | `dekm_inherited` (DEKM paper text) | MvDEC S2 under that normalisation | not run (DEKM_F evidence says it lowers ACC) |
+| H9 | Paper-text input normalisation `(1/d)||x||^2 = 1` | `dekm_inherited` (DEKM paper text) | MvDEC S2 under that normalisation, 10 seeds | rejected: fused mean 0.5114/0.2246, View1 drops to 0.5963/0.3284 |
 
 Already closed before this ledger (see `MVDEC_REUTERS_REPRODUCTION_PLAN_2026-10-21.md`):
 eigen direction, View2 stem width, even-column feature split, post-hoc linear
@@ -241,6 +241,34 @@ independent DEKM with the true 10-D bottleneck and DEKM's own stop rule, seeded 
 A standalone View2 stops after 10-370 updates and stays far below the paper's View2 row;
 the fused row barely moves from View1 (range 0.5915-0.5941 NMI). Verdict: rejected.
 
+## Test 4: L2-balanced concat in refinement (H6b) and paper-text input normalisation (H9)
+
+Code: commit `e84c305` (protocols), notebook commit `1d1d5d1`:
+`notebooks/mvdec_2025_s2_l2_concat_paper_rms_reuters_kaggle.ipynb` (Kaggle
+`datnguyends/mvdec-s2-l2concat-paperrms-reuters`, COMPLETE 2026-10-26, result zip SHA-256
+`d950ca35c23c341122b805dbeff11089b5b4b8b3e93c7f6cc59d2c6df5fce725`). Per-seed metrics,
+copied from the manifests: `l2_concat_paper_rms_reuters_final_metrics.csv`.
+
+| REUTERS, seeds 42-51 | View1 mean | View2 mean (best) | Fused mean | Fused best NMI |
+| --- | --- | --- | --- | --- |
+| S2 + L2-balanced concat | 0.7248/0.5345 | 0.6234/0.4289 (0.7244/0.5436) | 0.7218/0.5376 | 0.5705 |
+| S2 + paper-text RMS input | 0.5963/0.3284 | 0.5673/0.3153 (0.7267/0.4258) | 0.5114/0.2246 | 0.3820 |
+| Paper Table 2 | 0.7642/0.5999 | 0.6501/0.5129 | 0.7813/0.6141 | |
+
+- H6b, L2-balanced concat: rejected for the fused row. It is the first from-scratch arm
+  where View2 reaches the paper's View2 row (seeds 43, 46, 48: 0.71-0.72 ACC, 0.519-0.544
+  NMI), but in those seeds View2 converges to View1's partition (e.g. seed 43: 0.7232/0.5186
+  vs 0.7229/0.5191), so fusion adds nothing; fused equals View1 in 7 of 10 seeds. This is
+  consistent with Eq. 11 L4 pulling both views to one shared target: when the views agree
+  the fused row cannot exceed View1, and Table 2's fused > View1 NMI needs views that
+  disagree usefully.
+- H9, paper-text input normalisation: rejected. It degrades View1 by ~13 pp ACC and
+  ~21 pp NMI, as the earlier DEKM_F evidence predicted.
+- 20NEWS (L2 concat, seeds 42-44) failed in setup, not training: the notebook fetched only
+  the DEKM release files, while the official 20NEWS path needs the scikit-learn
+  20 Newsgroups cache (`OSError: 20Newsgroups dataset not found`). The same cause explains
+  the five failed 20NEWS runs in Test 3. Not rerun.
+
 ## Overall assessment (2026-10-26)
 
 | Item | Status |
@@ -248,8 +276,8 @@ the fused row barely moves from View1 (range 0.5915-0.5941 NMI). Verdict: reject
 | DEKM / DEKM_F baseline | reproduced (frozen, `DEKM_CANONICAL_BASELINE.md`) |
 | MvDEC architecture, Eq. 3-11 | implemented; several details are `inference`/`assumption` (see boundary doc) |
 | REUTERS View1 | within 1 pp via imported DEKM_F (S1) |
-| REUTERS View2 | not matched: S1 overshoots (0.740/0.556), S2 undershoots (≤0.586 mean regime, NMI ≤0.466) |
-| REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat in or after training), metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together; NMI ceiling 0.5948 |
+| REUTERS View2 | reachable only per seed: S1 overshoots (0.740/0.556); S2 + L2-balanced concat hits 0.72/0.52-0.54 in 3 of 10 seeds (mean 0.623/0.429), but then View2 copies View1's partition |
+| REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat raw or L2-balanced, in or after training), input normalisation, metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together; NMI ceiling 0.5948 |
 | RCV1 rows | inside the S2 seed distribution, so not discriminative |
 | 20NEWS rows | Eq. 4 fusion lowers ACC; Fig. 2 concat comes close on ACC (0.42) but not NMI (0.41 vs 0.454) |
 
@@ -260,7 +288,11 @@ Table 2. These need the authors' code or data.
 
 ## Open items
 
-- H8 and the H6 follow-up were run in Test 3 and rejected.
+- H8 and the H6 follow-up were run in Test 3 and rejected; H6b and H9 in Test 4.
+- A disjoint View1/View2 feature split was not run: Table 2 states View1 equals DEKM_F,
+  which uses all 2,000 features, so only a View2-side split is compatible with the
+  paper, and the even-columns View2 arm already covers it.
 - 20NEWS under the concat protocol failed silently on Kaggle (no manifest, empty log);
-  not rerun because the REUTERS result already rejects the hypothesis.
+  not rerun because the REUTERS result already rejects the hypothesis. Cause found in
+  Test 4: the notebooks did not fetch the scikit-learn 20 Newsgroups cache.
 - RCV1 trajectory run (10 seeds) once the REUTERS trajectory result is known.
