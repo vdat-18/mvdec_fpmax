@@ -25,9 +25,9 @@ are left unchanged.
 | H3 | Best ACC and best NMI are taken from different runs | `inference` from "best performance metrics" | max over seeds per metric | rejected on REUTERS (NMI max 0.5751) |
 | H4 | NMI uses another normalisation (geometric/min/max) | `assumption` (older sklearn default was geometric) | recompute on saved latents | rejected |
 | H5 | "ACC" is purity | `assumption` | recompute on saved latents | weak, inconsistent across datasets |
-| H6 | Fusion is Fig. 2 concatenation, not Eq. 4 average | `paper_explicit_conflicting_statement` | K-Means on saved `[h1, h2]` | partial support (from-scratch runs only) |
+| H6 | Fusion is Fig. 2 concatenation, not Eq. 4 average | `paper_explicit_conflicting_statement` | K-Means on saved `[h1, h2]`; concat inside refinement, 10 seeds | rejected: inside refinement the fused partition equals View1 (NMI max 0.5948) |
 | H7 | K-Means restart picked with labels | `inference` | 30 restarts, n_init=1 | rejected |
-| H8 | View2 row is a standalone single-view model ("considering the individual views independently", "single-view models") | `paper_explicit` wording, Sec. 4.2 | independent View2 DEKM | earlier run 0.5277/0.343 under the 10-update stall; needs a re-run with the true bottleneck |
+| H8 | View2 row is a standalone single-view model ("considering the individual views independently", "single-view models") | `paper_explicit` wording, Sec. 4.2 | independent View2 DEKM, 20 seeds, frozen DEKM_F View1 | rejected: View2 max 0.5697/0.4537, fused max 0.7562/0.5941 |
 | H9 | Paper-text input normalisation `(1/d)||x||^2 = 1` | `dekm_inherited` (DEKM paper text) | MvDEC S2 under that normalisation | not run (DEKM_F evidence says it lowers ACC) |
 
 Already closed before this ledger (see `MVDEC_REUTERS_REPRODUCTION_PLAN_2026-10-21.md`):
@@ -188,6 +188,50 @@ Verdicts:
   strong as DEKM_F *and* a real fusion gain on NMI. S1 (frozen DEKM_F View1) supplies
   the first but no tested fusion supplies the second (ceiling 0.5942 NMI).
 
+## Test 3: Fig. 2 concat inside refinement (H6) and independent View2 seed sweep (H8)
+
+Code: commit `11a34f5` (protocols), notebooks commit `cf282f2`:
+`notebooks/mvdec_2025_s2_figure2_concat_reuters_20news_kaggle.ipynb` (Kaggle
+`datnguyends/mvdec-s2-concat-reuters-20news`) and
+`notebooks/mvdec_2025_independent_view2_seed_sweep_reuters_kaggle.ipynb` (Kaggle
+`datnguyends/mvdec-indep-view2-sweep-reuters`, input dataset
+`datnguyends/mvdec-v1-true-bottleneck-largest-eigen-s42-input`). Both kernels ended
+COMPLETE on 2026-10-26; result zips matched their `.sha256` (concat `0e53473a...`, sweep
+`68cdc457...`). Per-seed metrics, copied from the run manifests:
+`concat_fig2_reuters_final_metrics.csv`, `independent_view2_sweep_reuters_final_metrics.csv`.
+
+### H6: `mvdec_2025_scratch_both_views_true_bottleneck_figure2_concat_min500_release_l2_v1`
+
+S2 with one change: the greedy eigen target, K-Means refresh and L4 use
+`concat(h_view1, h_view2)` instead of the Eq. 4 average. REUTERS 10 of 10 seeds complete;
+all 5 20NEWS runs (seeds 42-46) left no manifest and the Kaggle log was empty, so their
+failure cause is unknown.
+
+| REUTERS, seeds 42-51 | mean ACC | best ACC | paper ACC | mean NMI | best NMI | paper NMI |
+| --- | --- | --- | --- | --- | --- | --- |
+| View1 | 0.7338 | 0.8064 | 0.7642 | 0.5424 | 0.5948 | 0.5999 |
+| View2 | 0.5158 | 0.7414 | 0.6501 | 0.2902 | 0.4780 | 0.5129 |
+| Fused | 0.7338 | 0.8064 | 0.7813 | 0.5424 | 0.5948 | 0.6141 |
+
+In every seed the fused ACC/NMI equal View1's exactly, at every checkpoint (51 per seed,
+`n_changed = 0` at step 500). Joint training on the concatenated latent lets View1 decide
+the partition alone and leaves View2 weaker than in S2. Verdict: rejected. Concatenation
+helps only as a post-hoc read-out (Test 1), not as the training-time fusion.
+
+### H8: `mvdec_2025_frozen_dekm_f_s42_view1_independent_dekm_view2_seed_sweep_release_l2_v1`
+
+View1 is the frozen DEKM_F seed-42 checkpoint (0.7557/0.5932 in every run); View2 is an
+independent DEKM with the true 10-D bottleneck and DEKM's own stop rule, seeded 42-61.
+
+| REUTERS, 20 seeds | mean ACC | best ACC | paper ACC | mean NMI | best NMI | paper NMI |
+| --- | --- | --- | --- | --- | --- | --- |
+| View1 | 0.7557 | 0.7557 | 0.7642 | 0.5932 | 0.5932 | 0.5999 |
+| View2 | 0.5122 | 0.5697 | 0.6501 | 0.3285 | 0.4537 | 0.5129 |
+| Fused | 0.7555 | 0.7562 | 0.7813 | 0.5926 | 0.5941 | 0.6141 |
+
+A standalone View2 stops after 10-370 updates and stays far below the paper's View2 row;
+the fused row barely moves from View1 (range 0.5915-0.5941 NMI). Verdict: rejected.
+
 ## Overall assessment (2026-10-26)
 
 | Item | Status |
@@ -196,7 +240,7 @@ Verdicts:
 | MvDEC architecture, Eq. 3-11 | implemented; several details are `inference`/`assumption` (see boundary doc) |
 | REUTERS View1 | within 1 pp via imported DEKM_F (S1) |
 | REUTERS View2 | not matched: S1 overshoots (0.740/0.556), S2 undershoots (≤0.586 mean regime, NMI ≤0.466) |
-| REUTERS Fused | not reproduced: no protocol, fusion, metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together |
+| REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat in or after training), metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together; NMI ceiling 0.5948 |
 | RCV1 rows | inside the S2 seed distribution, so not discriminative |
 | 20NEWS rows | Eq. 4 fusion lowers ACC; Fig. 2 concat comes close on ACC (0.42) but not NMI (0.41 vs 0.454) |
 
@@ -207,7 +251,7 @@ Table 2. These need the authors' code or data.
 
 ## Open items
 
-- H8: rerun independent single-view View2 with the true bottleneck and DEKM's own stop
-  rule; it needs the DEKM_F View1 checkpoint dataset on Kaggle for the fused row.
-- H6 follow-up: an arm whose refinement uses the Fig. 2 concatenated embedding.
+- H8 and the H6 follow-up were run in Test 3 and rejected.
+- 20NEWS under the concat protocol failed silently on Kaggle (no manifest, empty log);
+  not rerun because the REUTERS result already rejects the hypothesis.
 - RCV1 trajectory run (10 seeds) once the REUTERS trajectory result is known.
