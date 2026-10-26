@@ -551,3 +551,73 @@ def test_min_refinement_aligned_protocol_adds_only_a_preregistered_alignment_ter
     provenance = {key: category for key, category, _ in aligned.decision_provenance}
     assert provenance["cross_view_alignment"] == "ablation"
     mvdec.validate_imported_view1_run_gate(aligned, "REUTERS", 42, 1)
+
+
+
+def test_scratch_concat_protocol_only_changes_fusion(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    concat = mvdec.MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL
+    scratch = mvdec.MIN_REFINEMENT_SCRATCH_PROTOCOL
+
+    assert concat.fusion_contract == mvdec.FUSION_ENCODER_CONCATENATION
+    assert concat.protocol_id in mvdec.PUBLIC_PROTOCOLS
+    assert concat.protocol_id in mvdec.PROTOCOL_IDS
+    for field in (
+        "min_training_steps",
+        "view2_architecture_id",
+        "view1_initialization_policy",
+        "greedy_eigen_direction",
+        "greedy_target_mode",
+        "refinement_batch_size_policy",
+        "input_normalization",
+        "loss_scale_policy",
+    ):
+        assert getattr(concat, field) == getattr(scratch, field)
+    contract = concat.manifest_contract(0.001)
+    assert contract["architecture"]["fusion"] == mvdec.FUSION_ENCODER_CONCATENATION
+
+
+def test_concat_fusion_matches_in_numpy_and_tensorflow(monkeypatch):
+    tensorflow, mvdec = _load_mvdec(monkeypatch)
+    rng = np.random.default_rng(0)
+    width = mvdec.hidden_units
+    view1 = rng.normal(size=(5, width + 3)).astype(np.float32)
+    view2 = rng.normal(size=(5, width + 3)).astype(np.float32)
+
+    fused_np = mvdec.fused_latent_embedding(
+        view1, view2, mvdec.FUSION_ENCODER_CONCATENATION
+    )
+    fused_tf = mvdec.fused_latent_embedding(
+        tensorflow.constant(view1),
+        tensorflow.constant(view2),
+        mvdec.FUSION_ENCODER_CONCATENATION,
+    ).numpy()
+
+    assert fused_np.shape == (5, 2 * width)
+    np.testing.assert_array_equal(fused_np[:, :width], view1[:, :width])
+    np.testing.assert_array_equal(fused_np[:, width:], view2[:, :width])
+    np.testing.assert_array_equal(fused_np, fused_tf)
+
+
+def test_independent_view2_seed_sweep_keeps_seed42_view1(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    sweep = mvdec.INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL
+    base = mvdec.INDEPENDENT_DEKM_VIEW2_PROTOCOL
+
+    assert sweep.protocol_id in mvdec.PUBLIC_PROTOCOLS
+    assert sweep.protocol_id in mvdec.INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS
+    for field in (
+        "view1_refinement_policy",
+        "refinement_representation",
+        "refinement_objective",
+        "greedy_eigen_direction",
+        "greedy_target_mode",
+        "fusion_contract",
+        "view2_architecture_id",
+    ):
+        assert getattr(sweep, field) == getattr(base, field)
+    mvdec.validate_imported_view1_run_gate(sweep, "REUTERS", 57, 1)
+    with pytest.raises(ValueError):
+        mvdec.validate_imported_view1_run_gate(sweep, "RCV1", 57, 1)
+    with pytest.raises(ValueError):
+        mvdec.validate_imported_view1_run_gate(base, "REUTERS", 57, 1)

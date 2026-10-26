@@ -48,12 +48,14 @@ from pipeline.mvdec_contract import (
     EQUATION11_SMALLEST_SELECTED_ONLY_PROTOCOL_ID,
     FROZEN_DEKM_F_VIEW1_RELEASE_L2_PROTOCOL_ID,
     FUSION_ENCODER_AVERAGE,
+    FUSION_ENCODER_CONCATENATION,
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
@@ -61,6 +63,7 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_TRAINING_STEPS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
+    INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
     LEGACY_SCALED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
     LEGACY_SCALED_CENTERED_SCALE_MATCHED_ALIGNMENT_FULL_BATCH_PROTOCOL_ID,
@@ -143,6 +146,7 @@ GREEDY_TARGET_MODES = ("selected_dimension_only", "frozen_snapshot")
 DEFAULT_GREEDY_EIGEN_DIRECTION = "largest"
 DEFAULT_GREEDY_TARGET_MODE = "frozen_snapshot"
 PRIMARY_PROTOCOL_ID = "mvdec_dekm_consistent_v1"
+DEKM_F_VIEW1_CHECKPOINT_SEED = 42
 PUBLIC_DEKM_CONSISTENT_PROTOCOL_ID = "mvdec_dekm_consistent_public_v1"
 PUBLIC_REPRODUCTION_PROTOCOL_ID = "mvdec_2025_public_reproduction_v1"
 PUBLIC_ENCODER_BOTTLENECK_PROTOCOL_ID = "mvdec_2025_view2_encoder_bottleneck_v1"
@@ -186,9 +190,11 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+    INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID,
     *ALIGNED_BALANCED_PROTOCOL_IDS,
@@ -1116,6 +1122,27 @@ MIN_REFINEMENT_SCRATCH_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol with the fused "
+        "refinement embedding taken as the Figure 2 concatenation of both 10-D "
+        "latents instead of the Eq. 4 average; not an exact-paper reproduction"
+    ),
+    fusion_contract=FUSION_ENCODER_CONCATENATION,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_PROTOCOL.decision_provenance,
+        (
+            "fusion",
+            "paper_explicit_conflicting_statement",
+            "Figure 2 concatenates the two view outputs while Eq. 4 averages "
+            "them; this arm tests the concatenation reading in training.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -1261,6 +1288,22 @@ CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL = replace(
             "After independent pretraining, center each full-dataset latent only "
             "to estimate global RMS, scale View2 once by RMS(View1)/RMS(View2), "
             "then refine and evaluate the raw uncentered calibrated average.",
+        ),
+    ),
+)
+
+
+INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL = replace(
+    INDEPENDENT_DEKM_VIEW2_PROTOCOL,
+    protocol_id=INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
+    decision_provenance=(
+        *INDEPENDENT_DEKM_VIEW2_PROTOCOL.decision_provenance,
+        (
+            "view2_seed_sweep",
+            "ablation",
+            "View1 stays the verified REUTERS DEKM_F seed-42 checkpoint for every "
+            "run; only the standalone View2 seed varies, so the run seed no "
+            "longer has to equal the checkpoint seed.",
         ),
     ),
 )
@@ -1432,10 +1475,14 @@ PUBLIC_PROTOCOLS = {
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: INDEPENDENT_DEKM_VIEW2_PROTOCOL,
+    INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID: (
+        INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL
+    ),
     CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID: (
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL
     ),
@@ -1756,6 +1803,12 @@ def validate_imported_view1_run_gate(
         protocol.view1_initialization_policy
         != VIEW1_INITIALIZATION_IMPORTED_DEKM_F
     ):
+        return
+    if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID:
+        if dataset_name != "REUTERS" or seed is None or runs != 1:
+            raise ValueError(
+                "The View2 seed sweep runs on REUTERS, one explicit seed per run."
+            )
         return
     if (dataset_name, seed, runs) != ("REUTERS", 42, 1):
         raise ValueError(
@@ -2083,8 +2136,15 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
             "MvDEC-2025-scratch-both-views-true-bottleneck-min500-"
             "release-L2-diagnostic"
         )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-figure2-concat-min500-"
+            "release-L2-diagnostic"
+        )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
         return "MvDEC-2025-independent-DEKM-View2-release-L2-diagnostic"
+    if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID:
+        return "MvDEC-2025-independent-DEKM-View2-seed-sweep-release-L2-diagnostic"
     if protocol.protocol_id == CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
         return "MvDEC-2025-centered-RMS-calibrated-independent-View2-diagnostic"
     if protocol.protocol_id == PAPER_INFORMED_FULL_BATCH_PROTOCOL_ID:
@@ -2249,6 +2309,10 @@ def fused_latent_embedding(
         return (h_view1 + h_view2) / 2
     if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
         return (l2_normalize_latent(h_view1) + l2_normalize_latent(h_view2)) / 2
+    if fusion_contract == FUSION_ENCODER_CONCATENATION:
+        if isinstance(h_view1, np.ndarray):
+            return np.concatenate([h_view1, h_view2], axis=1)
+        return tf.concat([h_view1, h_view2], axis=1)
     if fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE:
         if calibration is None:
             raise ValueError("Calibrated fusion requires fixed calibration metadata.")
@@ -2916,6 +2980,7 @@ def save_airpollution_mvdec_artifact(
         FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE: (
             "h_fused = (view1_latent + fixed_view2_scale * view2_latent) / 2"
         ),
+        FUSION_ENCODER_CONCATENATION: "h_fused = concat(view1_latent, view2_latent)",
     }
     fusion_expression = fusion_expressions[protocol.fusion_contract]
     calibration = None
@@ -4867,7 +4932,12 @@ if __name__ == "__main__":
             validated_view1_checkpoint = validate_dekm_f_view1_checkpoint(
                 view1_manifest,
                 expected_dataset=ds_name,
-                expected_seed=run_seed,
+                expected_seed=(
+                    DEKM_F_VIEW1_CHECKPOINT_SEED
+                    if protocol.protocol_id
+                    == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID
+                    else run_seed
+                ),
                 expected_source_sha256=source_sha256,
             )
             external_view1_checkpoint = validated_view1_checkpoint.provenance()

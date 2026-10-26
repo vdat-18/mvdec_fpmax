@@ -15,6 +15,7 @@ FUSION_ENCODER_L2_NORMALIZED_AVERAGE = "mvdec2025_encoder_l2_normalized_average"
 FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE = (
     "mvdec2025_encoder_centered_global_rms_calibrated_average"
 )
+FUSION_ENCODER_CONCATENATION = "mvdec2025_figure2_encoder_concatenation"
 FUSION_FIGURE1_FULL_OUTPUT_AVERAGE = "mvdec2025_figure1_full_output_average_diagnostic"
 FUSION_FIGURE2_FULL_OUTPUT_CONCATENATION = (
     "mvdec2025_figure2_full_output_concatenation_diagnostic"
@@ -164,6 +165,10 @@ MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID = (
 MIN_REFINEMENT_SCRATCH_PROTOCOL_ID = (
     "mvdec_2025_scratch_both_views_true_bottleneck_min500_release_l2_v1"
 )
+MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID = (
+    "mvdec_2025_scratch_both_views_true_bottleneck_figure2_concat_min500_"
+    "release_l2_v1"
+)
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_true_bottleneck_wide_view2_min500_"
     "release_l2_seed42_v1"
@@ -181,9 +186,14 @@ CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_independent_dekm_view2_"
     "centered_rms_calibrated_release_l2_v1"
 )
+INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_independent_dekm_view2_seed_sweep_"
+    "release_l2_v1"
+)
 INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS = frozenset(
     {
         INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
+        INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
         CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     }
 )
@@ -338,6 +348,11 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",
