@@ -668,3 +668,52 @@ def test_l2_concat_fusion_balances_views_in_numpy_and_tensorflow(monkeypatch):
     for block in (fused_np[:, :width], fused_np[:, width:]):
         np.testing.assert_allclose(np.linalg.norm(block, axis=1), 1, rtol=1e-6)
     np.testing.assert_allclose(fused_np, fused_tf, rtol=1e-6)
+
+
+def test_table1_subset_protocol_only_changes_sample_counts(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    scratch = mvdec.MIN_REFINEMENT_SCRATCH_PROTOCOL
+    subset = mvdec.MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL
+
+    assert subset.table1_sample_counts and not scratch.table1_sample_counts
+    assert subset.protocol_id in mvdec.PUBLIC_PROTOCOLS
+    assert mvdec.MVDEC_TABLE1_SAMPLE_COUNTS["REUTERS"] == 210
+    for field in ("fusion_contract", "input_normalization", "min_training_steps"):
+        assert getattr(subset, field) == getattr(scratch, field)
+    contract = subset.manifest_contract(0.001)
+    assert contract["preprocessing"]["sample_counts"]["REUTERS"] == 210
+    assert "sample_counts" not in scratch.manifest_contract(0.001)["preprocessing"]
+
+
+def test_minibatch_and_no_l1_protocols_change_one_field(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    scratch = mvdec.MIN_REFINEMENT_SCRATCH_PROTOCOL
+    minibatch = mvdec.MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL
+    no_l1 = mvdec.MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL
+
+    assert minibatch.refinement_batch_size_policy == mvdec.FIXED_256_BATCH_POLICY
+    assert minibatch.reconstruction_weight == scratch.reconstruction_weight
+    assert no_l1.reconstruction_weight == 0.0
+    assert no_l1.refinement_batch_size_policy == scratch.refinement_batch_size_policy
+    for protocol in (minibatch, no_l1):
+        assert protocol.protocol_id in mvdec.PUBLIC_PROTOCOLS
+        for field in ("fusion_contract", "input_normalization", "min_training_steps"):
+            assert getattr(protocol, field) == getattr(scratch, field)
+    l1_tenth = mvdec.MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL
+    assert l1_tenth.reconstruction_weight == 0.1
+    assert l1_tenth.kmeans_weight == scratch.kmeans_weight
+
+
+def test_frozen_view1_l2_concat_sweeps_view2_seed_with_seed42_view1(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    frozen = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    sweep = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL
+
+    assert sweep.fusion_contract == mvdec.FUSION_ENCODER_L2_NORMALIZED_CONCATENATION
+    assert sweep.view1_refinement_policy == frozen.view1_refinement_policy
+    assert sweep.min_training_steps == frozen.min_training_steps
+    mvdec.validate_imported_view1_run_gate(sweep, "REUTERS", 57, 1)
+    with pytest.raises(ValueError):
+        mvdec.validate_imported_view1_run_gate(sweep, "RCV1", 42, 1)
+    with pytest.raises(ValueError):
+        mvdec.validate_imported_view1_run_gate(frozen, "REUTERS", 57, 1)

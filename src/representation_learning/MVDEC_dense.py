@@ -60,10 +60,17 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_TRAINING_STEPS,
+    MVDEC_TABLE1_SAMPLE_COUNTS,
+    SEED42_CHECKPOINT_SEED_SWEEP_PROTOCOL_IDS,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
@@ -196,6 +203,11 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -310,6 +322,7 @@ class MvdecProtocol:
     loss_scale_policy: str = LEGACY_SUM_DIMENSIONS_POLICY
     min_training_steps: int = 0
     view2_base_units: int = 0
+    table1_sample_counts: bool = False
 
     def __post_init__(self) -> None:
         validate_loss_weights(
@@ -474,6 +487,10 @@ class MvdecProtocol:
             contract["stopping"]["min_training_steps"] = self.min_training_steps
         if self.view2_base_units > 0:
             contract["architecture"]["view2_base_units"] = self.view2_base_units
+        if self.table1_sample_counts:
+            contract["preprocessing"]["sample_counts"] = dict(
+                MVDEC_TABLE1_SAMPLE_COUNTS
+            )
         if (
             self.alignment_weight > 0
             or self.loss_scale_policy != LEGACY_SUM_DIMENSIONS_POLICY
@@ -1191,6 +1208,98 @@ MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol on a seeded random "
+        "subset with the sample counts printed in MvDEC Table 1; not an "
+        "exact-paper reproduction"
+    ),
+    table1_sample_counts=True,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_PROTOCOL.decision_provenance,
+        (
+            "sample_counts",
+            "paper_explicit_conflicting_statement",
+            "Table 1 prints 210 REUTERS and 2,000 20NEWS samples while naming the "
+            "DEKM benchmarks; the subset rows are the first rows of the seeded "
+            "shuffle because the paper discloses no sampling rule.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol refined with "
+        "256-sample mini-batches as in DEKM instead of full batches; not an "
+        "exact-paper reproduction"
+    ),
+    refinement_batch_size_policy=FIXED_256_BATCH_POLICY,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_PROTOCOL.decision_provenance,
+        (
+            "refinement_batch",
+            "dekm_inherited",
+            "Only the View1 row is stated to equal DEKM_F; the joint model is "
+            "described as built on DEKM, which refines with 256-sample batches.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol without the L1 "
+        "reconstruction term during refinement; not an exact-paper reproduction"
+    ),
+    reconstruction_weight=0.0,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_PROTOCOL.decision_provenance,
+        (
+            "refinement_reconstruction",
+            "dekm_inherited",
+            "Eq. 11 keeps L1 during refinement, but DEKM drops the decoder "
+            "after pretraining; the paper gives no Eq. 11 weights.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol with the L1 "
+        "reconstruction weight lowered to 0.1 during refinement; not an "
+        "exact-paper reproduction"
+    ),
+    reconstruction_weight=0.1,
+)
+
+
+MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: frozen DEKM_F seed-42 View1 with the "
+        "true-bottleneck View2 refined on the L2-balanced Figure 2 "
+        "concatenation; the run seed varies View2 only; not an exact-paper "
+        "reproduction"
+    ),
+    fusion_contract=FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        *MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL.decision_provenance[-2:],
+    ),
+)
+
+
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -1530,6 +1639,19 @@ PUBLIC_PROTOCOLS = {
     MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID: (
         MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL
     ),
+    MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL
+    ),
+    MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL
+    ),
+    MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL,
+    MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID: (
+        MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL
+    ),
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
@@ -1858,10 +1980,10 @@ def validate_imported_view1_run_gate(
         != VIEW1_INITIALIZATION_IMPORTED_DEKM_F
     ):
         return
-    if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID:
+    if protocol.protocol_id in SEED42_CHECKPOINT_SEED_SWEEP_PROTOCOL_IDS:
         if dataset_name != "REUTERS" or seed is None or runs != 1:
             raise ValueError(
-                "The View2 seed sweep runs on REUTERS, one explicit seed per run."
+                "Seed-42 checkpoint sweeps run on REUTERS, one explicit seed per run."
             )
         return
     if (dataset_name, seed, runs) != ("REUTERS", 42, 1):
@@ -2204,6 +2326,31 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return (
             "MvDEC-2025-scratch-both-views-true-bottleneck-min500-paper-RMS-"
             "diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-minibatch256-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-no-L1-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-L1-0.1-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-figure2-L2-concat-"
+            "min500-release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-Table1-subset-"
+            "release-L2-diagnostic"
         )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
         return "MvDEC-2025-independent-DEKM-View2-release-L2-diagnostic"
@@ -4991,9 +5138,14 @@ if __name__ == "__main__":
             row_indices = tf.random.shuffle(
                 np.arange(len(public_dataset.X)), seed=run_seed
             ).numpy()
+            if protocol.table1_sample_counts:
+                row_indices = row_indices[: MVDEC_TABLE1_SAMPLE_COUNTS[ds_name]]
             x = public_dataset.X[row_indices]
             y = public_dataset.y[row_indices]
             orig_idx = row_indices
+            if protocol.table1_sample_counts:
+                # Artifacts restore rows by position, so use ranks within the subset.
+                orig_idx = np.argsort(np.argsort(row_indices))
             feature_columns = [
                 f"feature_{index + 1}" for index in range(public_dataset.X.shape[1])
             ]
@@ -5007,8 +5159,7 @@ if __name__ == "__main__":
                 expected_dataset=ds_name,
                 expected_seed=(
                     DEKM_F_VIEW1_CHECKPOINT_SEED
-                    if protocol.protocol_id
-                    == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID
+                    if protocol.protocol_id in SEED42_CHECKPOINT_SEED_SWEEP_PROTOCOL_IDS
                     else run_seed
                 ),
                 expected_source_sha256=source_sha256,

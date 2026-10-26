@@ -179,6 +179,27 @@ MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID = (
 MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID = (
     "mvdec_2025_scratch_both_views_true_bottleneck_min500_paper_rms_v1"
 )
+MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID = (
+    "mvdec_2025_scratch_both_views_true_bottleneck_min500_table1_subset_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID = (
+    "mvdec_2025_scratch_both_views_true_bottleneck_min500_minibatch256_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID = (
+    "mvdec_2025_scratch_both_views_true_bottleneck_min500_no_l1_release_l2_v1"
+)
+MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID = (
+    "mvdec_2025_scratch_both_views_true_bottleneck_min500_l1_0p1_release_l2_v1"
+)
+MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_figure2_l2_concat_"
+    "min500_release_l2_v1"
+)
+# Sample counts as printed in MvDEC Table 1 (REUTERS-10K and 20NEWS rows disagree
+# with the DEKM benchmark sizes).
+MVDEC_TABLE1_SAMPLE_COUNTS = {"REUTERS": 210, "20NEWS": 2000, "RCV1": 10000}
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_view1_true_bottleneck_wide_view2_min500_"
     "release_l2_seed42_v1"
@@ -215,7 +236,16 @@ FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
         MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
         MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
         MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
+    }
+)
+# Imported-View1 protocols that always load the seed-42 DEKM_F checkpoint while
+# the run seed varies the rest of the model.
+SEED42_CHECKPOINT_SEED_SWEEP_PROTOCOL_IDS = frozenset(
+    {
+        INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
     }
 )
 # Imported-View1 protocols whose View1 stays trainable; joint-transition
@@ -373,6 +403,31 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_SCRATCH_MINIBATCH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "fixed_256",
+    ),
+    MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",
