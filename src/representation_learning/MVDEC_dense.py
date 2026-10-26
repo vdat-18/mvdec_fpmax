@@ -51,11 +51,14 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_CONCATENATION,
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
@@ -191,6 +194,8 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -1143,6 +1148,49 @@ MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol refined on the "
+        "Figure 2 concatenation of the row-wise L2-normalized 10-D latents; not "
+        "an exact-paper reproduction"
+    ),
+    fusion_contract=FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL.decision_provenance,
+        (
+            "fusion_scale_balance",
+            "implementation_assumption",
+            "Raw concatenation lets the larger-variance View1 latent decide the "
+            "partition alone; row-wise L2 normalization gives both views equal "
+            "weight. The paper does not mention any scaling.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL = replace(
+    MIN_REFINEMENT_SCRATCH_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: the scratch two-view protocol with the DEKM "
+        "paper-text input normalization (1/d)||x||^2 = 1 instead of the release "
+        "L2 unit norm; not an exact-paper reproduction"
+    ),
+    input_normalization=PAPER_RMS_NORMALIZATION,
+    decision_provenance=(
+        *MIN_REFINEMENT_SCRATCH_PROTOCOL.decision_provenance,
+        (
+            "input_normalization",
+            "dekm_inherited",
+            "The DEKM paper text scales each sample so that (1/d)||x||^2 = 1; the "
+            "DEKM release code uses an L2 unit norm instead.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -1476,6 +1524,12 @@ PUBLIC_PROTOCOLS = {
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_PROTOCOL,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL
+    ),
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL
+    ),
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL,
@@ -2141,6 +2195,16 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
             "MvDEC-2025-scratch-both-views-true-bottleneck-figure2-concat-min500-"
             "release-L2-diagnostic"
         )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-figure2-L2-concat-min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-scratch-both-views-true-bottleneck-min500-paper-RMS-"
+            "diagnostic"
+        )
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID:
         return "MvDEC-2025-independent-DEKM-View2-release-L2-diagnostic"
     if protocol.protocol_id == INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID:
@@ -2309,7 +2373,13 @@ def fused_latent_embedding(
         return (h_view1 + h_view2) / 2
     if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
         return (l2_normalize_latent(h_view1) + l2_normalize_latent(h_view2)) / 2
-    if fusion_contract == FUSION_ENCODER_CONCATENATION:
+    if fusion_contract in {
+        FUSION_ENCODER_CONCATENATION,
+        FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
+    }:
+        if fusion_contract == FUSION_ENCODER_L2_NORMALIZED_CONCATENATION:
+            h_view1 = l2_normalize_latent(h_view1)
+            h_view2 = l2_normalize_latent(h_view2)
         if isinstance(h_view1, np.ndarray):
             return np.concatenate([h_view1, h_view2], axis=1)
         return tf.concat([h_view1, h_view2], axis=1)
@@ -2981,6 +3051,9 @@ def save_airpollution_mvdec_artifact(
             "h_fused = (view1_latent + fixed_view2_scale * view2_latent) / 2"
         ),
         FUSION_ENCODER_CONCATENATION: "h_fused = concat(view1_latent, view2_latent)",
+        FUSION_ENCODER_L2_NORMALIZED_CONCATENATION: (
+            "h_fused = concat(l2_normalize(view1_latent), l2_normalize(view2_latent))"
+        ),
     }
     fusion_expression = fusion_expressions[protocol.fusion_contract]
     calibration = None

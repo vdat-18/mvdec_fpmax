@@ -40,12 +40,15 @@ from pipeline.mvdec_contract import (
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE,
     FUSION_ENCODER_CONCATENATION,
     FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+    FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
     IMPORTED_DEKM_F_VIEW1_JOINT_EQ11_RELEASE_L2_PROTOCOL_ID,
     IMPORTED_JOINT_VIEW1_PROTOCOL_IDS,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -143,6 +146,13 @@ MIN_REFINEMENT_SCRATCH_CONCAT_METHOD = (
     "MvDEC-2025-scratch-both-views-true-bottleneck-figure2-concat-min500-"
     "release-L2-diagnostic"
 )
+MIN_REFINEMENT_SCRATCH_L2_CONCAT_METHOD = (
+    "MvDEC-2025-scratch-both-views-true-bottleneck-figure2-L2-concat-min500-"
+    "release-L2-diagnostic"
+)
+MIN_REFINEMENT_SCRATCH_PAPER_RMS_METHOD = (
+    "MvDEC-2025-scratch-both-views-true-bottleneck-min500-paper-RMS-diagnostic"
+)
 MIN_REFINEMENT_JOINT_VIEW1_METHOD = (
     "MvDEC-2025-imported-DEKM_F-View1-joint-Eq11-true-bottleneck-min500-release-L2-diagnostic"
 )
@@ -200,6 +210,8 @@ PUBLIC_PROTOCOL_ARCHITECTURES = {
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: VIEW2_EVEN_COLUMNS_ARCHITECTURE_ID,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: VIEW2_ARCHITECTURE_ID,
@@ -224,6 +236,12 @@ PUBLIC_PROTOCOL_METHODS = {
     MIN_REFINEMENT_JOINT_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_JOINT_VIEW1_METHOD,
     MIN_REFINEMENT_SCRATCH_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_METHOD,
     MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID: MIN_REFINEMENT_SCRATCH_CONCAT_METHOD,
+    MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_L2_CONCAT_METHOD
+    ),
+    MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL_ID: (
+        MIN_REFINEMENT_SCRATCH_PAPER_RMS_METHOD
+    ),
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_METHOD,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_METHOD,
     MIN_REFINEMENT_ALIGNED_VIEW1_PROTOCOL_ID: MIN_REFINEMENT_ALIGNED_VIEW1_METHOD,
@@ -266,6 +284,9 @@ PUBLIC_PROTOCOL_FUSIONS[PUBLIC_DIRECT_JOINT_HEAD_L2NORM_PROTOCOL_ID] = (
 )
 PUBLIC_PROTOCOL_FUSIONS[MIN_REFINEMENT_SCRATCH_CONCAT_PROTOCOL_ID] = (
     FUSION_ENCODER_CONCATENATION
+)
+PUBLIC_PROTOCOL_FUSIONS[MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL_ID] = (
+    FUSION_ENCODER_L2_NORMALIZED_CONCATENATION
 )
 PUBLIC_PROTOCOL_FUSIONS[CALIBRATED_INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID] = (
     FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE
@@ -1453,6 +1474,11 @@ def _validate_mvdec_run_manifest(best_result: dict, result_path: Path) -> None:
         msg = "MvDEC artifact does not match its complete run manifest."
         raise ValueError(msg)
 
+def _l2_normalize_rows(latent: np.ndarray) -> np.ndarray:
+    squared_norm = np.sum(np.square(latent), axis=1, keepdims=True)
+    return latent / np.sqrt(np.maximum(squared_norm, 1e-12))
+
+
 def _validate_mvdec2025_contract(
     best_result: dict,
     h_fused: np.ndarray,
@@ -1516,13 +1542,13 @@ def _validate_mvdec2025_contract(
             raise ValueError(msg)
         expected = (h_view1 + h_view2) / 2
     elif fusion_contract == FUSION_ENCODER_L2_NORMALIZED_AVERAGE:
-        view1_squared_norm = np.sum(np.square(h_view1), axis=1, keepdims=True)
-        view2_squared_norm = np.sum(np.square(h_view2), axis=1, keepdims=True)
-        view1_normalized = h_view1 / np.sqrt(np.maximum(view1_squared_norm, 1e-12))
-        view2_normalized = h_view2 / np.sqrt(np.maximum(view2_squared_norm, 1e-12))
-        expected = (view1_normalized + view2_normalized) / 2
+        expected = (_l2_normalize_rows(h_view1) + _l2_normalize_rows(h_view2)) / 2
     elif fusion_contract == FUSION_ENCODER_CONCATENATION:
         expected = np.concatenate([h_view1, h_view2], axis=1)
+    elif fusion_contract == FUSION_ENCODER_L2_NORMALIZED_CONCATENATION:
+        expected = np.concatenate(
+            [_l2_normalize_rows(h_view1), _l2_normalize_rows(h_view2)], axis=1
+        )
     elif fusion_contract == FUSION_ENCODER_CENTERED_RMS_CALIBRATED_AVERAGE:
         if calibration is None:
             raise ValueError("Calibrated MvDEC fusion requires calibration metadata.")
@@ -1580,6 +1606,7 @@ def _load_validated_mvdec_artifact(
         FUSION_ENCODER_AVERAGE,
         FUSION_ENCODER_CONCATENATION,
         FUSION_ENCODER_L2_NORMALIZED_AVERAGE,
+        FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
     }:
         _validate_mvdec2025_contract(best_result, h_fused, result_path)
     elif fusion_contract == "mvdec2025_figure_output_average":

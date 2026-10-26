@@ -621,3 +621,50 @@ def test_independent_view2_seed_sweep_keeps_seed42_view1(monkeypatch):
         mvdec.validate_imported_view1_run_gate(sweep, "RCV1", 57, 1)
     with pytest.raises(ValueError):
         mvdec.validate_imported_view1_run_gate(base, "REUTERS", 57, 1)
+
+
+def test_scratch_l2_concat_and_paper_rms_protocols_change_one_field(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    scratch = mvdec.MIN_REFINEMENT_SCRATCH_PROTOCOL
+    l2_concat = mvdec.MIN_REFINEMENT_SCRATCH_L2_CONCAT_PROTOCOL
+    paper_rms = mvdec.MIN_REFINEMENT_SCRATCH_PAPER_RMS_PROTOCOL
+
+    assert l2_concat.fusion_contract == mvdec.FUSION_ENCODER_L2_NORMALIZED_CONCATENATION
+    assert l2_concat.input_normalization == scratch.input_normalization
+    assert paper_rms.input_normalization == mvdec.PAPER_RMS_NORMALIZATION
+    assert paper_rms.fusion_contract == scratch.fusion_contract
+    for protocol in (l2_concat, paper_rms):
+        assert protocol.protocol_id in mvdec.PUBLIC_PROTOCOLS
+        assert protocol.protocol_id in mvdec.PROTOCOL_IDS
+        for field in (
+            "min_training_steps",
+            "view2_architecture_id",
+            "view1_initialization_policy",
+            "greedy_eigen_direction",
+            "greedy_target_mode",
+            "refinement_batch_size_policy",
+            "loss_scale_policy",
+        ):
+            assert getattr(protocol, field) == getattr(scratch, field)
+
+
+def test_l2_concat_fusion_balances_views_in_numpy_and_tensorflow(monkeypatch):
+    tensorflow, mvdec = _load_mvdec(monkeypatch)
+    rng = np.random.default_rng(0)
+    width = mvdec.hidden_units
+    view1 = 10 * rng.normal(size=(5, width + 3)).astype(np.float32)
+    view2 = rng.normal(size=(5, width + 3)).astype(np.float32)
+
+    fused_np = mvdec.fused_latent_embedding(
+        view1, view2, mvdec.FUSION_ENCODER_L2_NORMALIZED_CONCATENATION
+    )
+    fused_tf = mvdec.fused_latent_embedding(
+        tensorflow.constant(view1),
+        tensorflow.constant(view2),
+        mvdec.FUSION_ENCODER_L2_NORMALIZED_CONCATENATION,
+    ).numpy()
+
+    assert fused_np.shape == (5, 2 * width)
+    for block in (fused_np[:, :width], fused_np[:, width:]):
+        np.testing.assert_allclose(np.linalg.norm(block, axis=1), 1, rtol=1e-6)
+    np.testing.assert_allclose(fused_np, fused_tf, rtol=1e-6)
