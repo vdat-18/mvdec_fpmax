@@ -215,7 +215,16 @@ failure cause is unknown.
 
 In every seed the fused ACC/NMI equal View1's exactly, at every checkpoint (51 per seed,
 `n_changed = 0` at step 500). Joint training on the concatenated latent lets View1 decide
-the partition alone and leaves View2 weaker than in S2. Verdict: rejected. Concatenation
+the partition alone and leaves View2 weaker than in S2. Verdict: rejected.
+
+The identity is not a reporting artefact. Final metrics come from
+`evaluate_public_representations`, which fits a separate K-Means on `h_view1` and on
+`concat(h_view1, h_view2)`; the trajectory compares a third, independent path (the
+refinement assignment vs a fresh K-Means on `h_view1`). Both agree. The likely cause is
+scale: in the S2 CPU run (seed 42) the centred variance of `h_view1` is 0.126 against
+0.043 for `h_view2`, so Euclidean K-Means on the concatenation is View1-dominated, and in
+the concat arm View2 shrinks further (mean NMI 0.29). The concat runs kept no latents, so
+the variance ratio for that arm itself is not measured. Concatenation
 helps only as a post-hoc read-out (Test 1), not as the training-time fusion.
 
 ### H8: `mvdec_2025_frozen_dekm_f_s42_view1_independent_dekm_view2_seed_sweep_release_l2_v1`
