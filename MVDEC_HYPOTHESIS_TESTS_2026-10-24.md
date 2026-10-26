@@ -20,8 +20,8 @@ are left unchanged.
 
 | ID | Hypothesis | Basis | Test | Status |
 | --- | --- | --- | --- | --- |
-| H1 | "Best performance" = best of N seeds chosen with labels | `paper_explicit` (Sec. 4.2 "best performance metrics") | 10 seeds (done), 40 seeds 52-91 | open, see below |
-| H2 | "Best performance" = best intermediate checkpoint chosen with labels | `dekm_inherited`: release `DEKM.py` prints ACC/NMI at every K-Means refresh | per-checkpoint label trajectory, 40 seeds | instrumented, GPU run pending |
+| H1 | "Best performance" = best of N seeds chosen with labels | `paper_explicit` (Sec. 4.2 "best performance metrics") | 10 seeds (done), 40 seeds 52-91 | rejected (fused NMI max 0.5765 over 50 seeds) |
+| H2 | "Best performance" = best intermediate checkpoint chosen with labels | `dekm_inherited`: release `DEKM.py` prints ACC/NMI at every K-Means refresh | per-checkpoint label trajectory, 40 seeds | rejected (0 of 2046 checkpoints) |
 | H3 | Best ACC and best NMI are taken from different runs | `inference` from "best performance metrics" | max over seeds per metric | rejected on REUTERS (NMI max 0.5751) |
 | H4 | NMI uses another normalisation (geometric/min/max) | `assumption` (older sklearn default was geometric) | recompute on saved latents | rejected |
 | H5 | "ACC" is purity | `assumption` | recompute on saved latents | weak, inconsistent across datasets |
@@ -144,7 +144,66 @@ Decision rule fixed before the run: H1/H2 are "supported" only if one run (H1) o
 checkpoint of one run (H2) reaches fused ACC >= 0.7713 **and** NMI >= 0.6041 (within
 1 pp of Table 2) together. Reaching only ACC is the situation already seen at 10 seeds.
 
-Result: pending.
+### Result (Kaggle `datnguyends/mvdec-s2-trajectory-40-reuters`, downloaded 2026-10-26)
+
+All 40 manifests (seeds 52-91) are complete; `mvdec_summary.csv` reports 40 completed,
+0 failed, and the results zip matches its SHA-256. Kaggle marked the kernel ERROR
+after training, as in the earlier multi-seed runs; the log had not been retrieved
+when this was written, so the cause is not recorded. 2046 trajectory checkpoints
+(51 per seed, 57 for seed 59). Raw files stay on the local machine under
+`artifacts/kaggle/mvdec-s2traj40-reuters-run/output/` (git-ignored); the per-seed
+tables are committed as
+`docs/audit_evidence/mvdec_hypotheses_2026-10-24/s2traj40_reuters_final_metrics.csv`
+and `.../s2traj40_reuters_trajectory_summary.csv`.
+
+Final state, 40 seeds (mean ± std, max):
+
+| Row | Paper | ACC | NMI |
+| --- | --- | --- | --- |
+| View1 | 0.7642 / 0.5999 | 0.7233 ± 0.0369, max 0.8184 | 0.5176 ± 0.0339, max 0.5762 |
+| View2 | 0.6501 / 0.5129 | 0.5186 ± 0.0808, max 0.7301 | 0.2847 ± 0.0800, max 0.4597 |
+| Fused | 0.7813 / 0.6141 | 0.7223 ± 0.0366, max 0.8177 | 0.5155 ± 0.0368, max 0.5765 |
+
+Along the trajectories: highest fused NMI at any checkpoint of any seed 0.5767 (seed
+62); highest fused ACC 0.8181 (seed 79, NMI 0.5659); highest View2 NMI 0.4657.
+Seeds whose best fused ACC passes 0.7713: 79 (0.8181/0.5659), 88 (0.7940/0.5389),
+57 (0.7783/0.5331). The best checkpoint is on average within a few tenths of a point
+of the final state, matching the CPU seed-42 trajectory. Fused ACC exceeds View1 ACC
+in 20 of 40 seeds: Eq. 4 fusion adds nothing systematic in this regime.
+
+**Rule: 0 of 40 seeds and 0 of 2046 checkpoints pass.**
+
+Verdicts:
+
+- **H1 rejected** for the full row. Over 50 from-scratch seeds (42-91) the paper's fused
+  ACC is reachable by label-guided best-of-N (seeds 46, 57, 79, 88), the fused NMI never
+  is (max 0.5765 final, 0.5914 with a label-picked K-Means restart on seed 48).
+- **H2 rejected.** Label-guided checkpoint selection changes fused metrics by tenths of
+  a point; the partition is essentially fixed after the first refinement windows.
+- **REUTERS View2 row not reachable in the from-scratch regime:** View2 ACC 0.65 occurs
+  (seeds 53, 60, 89 near 0.72-0.73) but View2 NMI never exceeds 0.466 (paper 0.5129).
+- Combined with Test 1, no reporting or selection choice applied to the from-scratch
+  joint model (S2) reproduces REUTERS Table 2. The paper's fused NMI 0.6141 is above the
+  DEKM_F View1 NMI it reports (0.5999), so the published row needs a View1 at least as
+  strong as DEKM_F *and* a real fusion gain on NMI. S1 (frozen DEKM_F View1) supplies
+  the first but no tested fusion supplies the second (ceiling 0.5942 NMI).
+
+## Overall assessment (2026-10-26)
+
+| Item | Status |
+| --- | --- |
+| DEKM / DEKM_F baseline | reproduced (frozen, `DEKM_CANONICAL_BASELINE.md`) |
+| MvDEC architecture, Eq. 3-11 | implemented; several details are `inference`/`assumption` (see boundary doc) |
+| REUTERS View1 | within 1 pp via imported DEKM_F (S1) |
+| REUTERS View2 | not matched: S1 overshoots (0.740/0.556), S2 undershoots (≤0.586 mean regime, NMI ≤0.466) |
+| REUTERS Fused | not reproduced: no protocol, fusion, metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together |
+| RCV1 rows | inside the S2 seed distribution, so not discriminative |
+| 20NEWS rows | Eq. 4 fusion lowers ACC; Fig. 2 concat comes close on ACC (0.42) but not NMI (0.41 vs 0.454) |
+
+Remaining explanations that the available evidence cannot test: a View1/View2 feature
+split that the paper does not disclose, an unpublished alignment or fusion step, a
+different REUTERS preprocessing than the DEKM release files, or a reporting error in
+Table 2. These need the authors' code or data.
 
 ## Open items
 
