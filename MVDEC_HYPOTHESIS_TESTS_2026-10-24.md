@@ -269,6 +269,35 @@ copied from the manifests: `l2_concat_paper_rms_reuters_final_metrics.csv`.
   20 Newsgroups cache (`OSError: 20Newsgroups dataset not found`). The same cause explains
   the five failed 20NEWS runs in Test 3. Not rerun.
 
+## Test 5: remaining paper-derivable arms (2026-10-27)
+
+Code: commits `508d77d` (protocols) and `72b5048` (REUTERS rebuild script); notebooks commit
+`4e3f252`. Per-seed metrics, copied from the manifests (mini-batch from the run logs, as
+the kernel was cut before its final cell): `test5_final_metrics.csv`.
+
+| Arm (Kaggle kernel) | Runs | Fused mean | Fused best | Paper fused |
+| --- | --- | --- | --- | --- |
+| Frozen DEKM_F View1 + L2-balanced concat, REUTERS (`mvdec-frozen-l2concat-table1-20news`) | 10/10 | 0.7530/0.5885 | 0.7587/0.5973 | 0.7813/0.6141 |
+| Table 1 counts, REUTERS 210 samples (same kernel) | 20/20 | 0.5240/0.2535 | 0.7048/0.5004 | 0.7813/0.6141 |
+| Table 1 counts, 20NEWS 2,000 samples (same kernel) | 5/5 | 0.2554/0.2598 | 0.2945/0.2938 | 0.4163/0.4543 |
+| S2 + L2-balanced concat, 20NEWS full (same kernel) | 3/3 | 0.3179/0.3467 | 0.3440/0.3579 | 0.4163/0.4543 |
+| S2 with 256-sample mini-batch refinement, REUTERS (`mvdec-s2-learning-arms-reuters`) | 4/10 | 0.3979/0.0853 | 0.4445/0.1248 | 0.7813/0.6141 |
+
+- Frozen View1 + L2-balanced concat: rejected. Fused stays at View1 (0.7557/0.5932); the
+  best seed adds 0.004 NMI.
+- Table 1 sample counts: rejected. On 210 REUTERS rows every view is weaker and fusion
+  lowers the score on average; no seed reaches either Table 2 row. The printed counts
+  are most likely a typesetting error, as the earlier audit concluded.
+- 20NEWS (now running after fetching the scikit-learn cache): rejected for this arm; the
+  full-batch L2 concat refinement did not converge within 1,760-6,730 updates.
+- Mini-batch refinement: rejected. Each run took about 2.5 GPU hours, never met the 0.1%
+  stop within 1,400 checkpoints, and the fused partition collapsed (NMI <= 0.125). The
+  kernel hit Kaggle's 12-hour limit after four seeds, so the L1-weight arms in the same
+  notebook never started; they are rerun separately
+  (`notebooks/mvdec_2025_s2_l1_weight_arms_reuters_kaggle.ipynb`).
+- The REUTERS rebuild notebook ended in ERROR with an empty log; the rerun keeps the
+  script output in `logs/make_reuters_resample.log`.
+
 ## Overall assessment (2026-10-26)
 
 | Item | Status |
