@@ -282,6 +282,10 @@ the kernel was cut before its final cell): `test5_final_metrics.csv`.
 | Table 1 counts, 20NEWS 2,000 samples (same kernel) | 5/5 | 0.2554/0.2598 | 0.2945/0.2938 | 0.4163/0.4543 |
 | S2 + L2-balanced concat, 20NEWS full (same kernel) | 3/3 | 0.3179/0.3467 | 0.3440/0.3579 | 0.4163/0.4543 |
 | S2 with 256-sample mini-batch refinement, REUTERS (`mvdec-s2-learning-arms-reuters`) | 4/10 | 0.3979/0.0853 | 0.4445/0.1248 | 0.7813/0.6141 |
+| S2 without L1 during refinement, REUTERS (`vandatzz/mvdec-s2-l1-weight-arms-reuters`) | 10/10 | 0.7147/0.5202 | 0.7941/0.5853 | 0.7813/0.6141 |
+| S2 with L1 weight 0.1, REUTERS (same kernel) | 10/10 | 0.7134/0.5181 | 0.7908/0.5816 | 0.7813/0.6141 |
+| S2 on the rebuilt REUTERS-10K, seed 42 (`vandatzz/mvdec-s2-reuters-resample` v2) | 1/1 | 0.7134/0.5213 | - | 0.7813/0.6141 |
+| S2 on six uniform 10K resamples of the rebuilt corpus, seed 42 (same kernel) | 6/6 | 0.6432/0.4416 | 0.7162/0.5356 | 0.7813/0.6141 |
 
 - Frozen View1 + L2-balanced concat: rejected. Fused stays at View1 (0.7557/0.5932); the
   best seed adds 0.004 NMI.
@@ -295,10 +299,21 @@ the kernel was cut before its final cell): `test5_final_metrics.csv`.
   kernel hit Kaggle's 12-hour limit after four seeds, so the L1-weight arms in the same
   notebook never started; they are rerun separately
   (`notebooks/mvdec_2025_s2_l1_weight_arms_reuters_kaggle.ipynb`).
-- The REUTERS rebuild notebook ended in ERROR with an empty log; the rerun keeps the
-  script output in `logs/make_reuters_resample.log`.
+- L1 weight (run 2026-10-27 after the Kaggle quota of the first account ran out; same
+  code as `72b5048` for `src/` and `tests/`): rejected. Without L1, View2 improves
+  (mean 0.581/0.361, best 0.713/0.461) but the fused partition equals View1 in all 10
+  seeds; with weight 0.1, View2 drops (0.444/0.237). Neither moves the fused row.
+- REUTERS rebuild and resampling: rejected as an explanation, with a caveat. The JMLR
+  links return 404, so commit `07cc3d3` takes the files from Wayback captures found
+  through the CDX API. The DEC/IDEC recipe as implemented does not reproduce the DEKM
+  release file: same shape, but label agreement 0.30, different class counts
+  (4022/2703/2380/895 vs 4312/2403/2471/814) and features not on the same scale
+  (`reuters_rebuild_summary.json`). So the six resamples are draws from this rebuild,
+  not from the exact release pipeline. Still, the rebuilt sample scores like the
+  release file at seed 42 (0.7134/0.5213 vs 0.7025/0.5168) and no resample gets
+  above NMI 0.536.
 
-## Overall assessment (2026-10-26)
+## Overall assessment (2026-10-27)
 
 | Item | Status |
 | --- | --- |
@@ -306,7 +321,7 @@ the kernel was cut before its final cell): `test5_final_metrics.csv`.
 | MvDEC architecture, Eq. 3-11 | implemented; several details are `inference`/`assumption` (see boundary doc) |
 | REUTERS View1 | within 1 pp via imported DEKM_F (S1) |
 | REUTERS View2 | reachable only per seed: S1 overshoots (0.740/0.556); S2 + L2-balanced concat hits 0.72/0.52-0.54 in 3 of 10 seeds (mean 0.623/0.429), but then View2 copies View1's partition |
-| REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat raw or L2-balanced, in or after training), input normalisation, metric variant, seed or checkpoint selection reaches 0.7813/0.6141 together; NMI ceiling 0.5948 |
+| REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat raw or L2-balanced, in or after training), input normalisation, metric variant, seed, checkpoint selection, L1 weight, refinement batch, Table 1 sample counts or REUTERS resample reaches 0.7813/0.6141 together; NMI ceiling 0.5973 |
 | RCV1 rows | inside the S2 seed distribution, so not discriminative |
 | 20NEWS rows | Eq. 4 fusion lowers ACC; Fig. 2 concat comes close on ACC (0.42) but not NMI (0.41 vs 0.454) |
 

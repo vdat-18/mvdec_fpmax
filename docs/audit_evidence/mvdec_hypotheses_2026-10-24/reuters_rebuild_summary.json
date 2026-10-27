@@ -1,0 +1,19 @@
+{
+  "kaggle_kernel": "vandatzz/mvdec-s2-reuters-resample (version 2, commit 07cc3d3)",
+  "n_single_label_documents": 685071,
+  "canonical_vs_release": {
+    "same_shape": true,
+    "max_abs_feature_diff": 37.99555587768555,
+    "label_agreement": 0.3031,
+    "label_counts": [4022, 2703, 2380, 895],
+    "release_label_counts": [4312, 2403, 2471, 814]
+  },
+  "samples": {
+    "1": {"label_counts": [4368, 2384, 2418, 830]},
+    "2": {"label_counts": [4437, 2312, 2442, 809]},
+    "3": {"label_counts": [4332, 2336, 2483, 849]},
+    "4": {"label_counts": [4421, 2361, 2371, 847]},
+    "5": {"label_counts": [4363, 2354, 2472, 811]},
+    "6": {"label_counts": [4355, 2370, 2410, 865]}
+  }
+}
