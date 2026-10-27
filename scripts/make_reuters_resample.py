@@ -17,6 +17,7 @@ import argparse
 import gzip
 import json
 import shutil
+import time
 import urllib.request
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -24,9 +25,10 @@ from pathlib import Path
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 
+# The JMLR pages now return 404; the Wayback Machine keeps the original files.
 MIRRORS = (
+    "https://web.archive.org/web/2015id_/http://jmlr.csail.mit.edu/papers/volume5/lewis04a",
     "https://www.jmlr.org/papers/volume5/lewis04a",
-    "http://jmlr.csail.mit.edu/papers/volume5/lewis04a",
 )
 QRELS = "a08-topic-qrels/rcv1-v2.topics.qrels.gz"
 TOKEN_FILES = tuple(
@@ -37,6 +39,7 @@ CATEGORY_IDS = {"CCAT": 0, "GCAT": 1, "MCAT": 2, "ECAT": 3}
 N_FEATURES = 2000
 N_SAMPLES = 10000
 CANONICAL_PERMUTATION_SEED = 1234
+DOWNLOAD_ATTEMPTS = 4
 
 
 def download(raw_dir: Path) -> None:
@@ -45,16 +48,24 @@ def download(raw_dir: Path) -> None:
         target = raw_dir / Path(relative).name
         if target.exists():
             continue
+        if not _fetch_any(relative, target):
+            raise RuntimeError(f"Could not download {relative} from any mirror.")
+
+
+def _fetch_any(relative: str, target: Path) -> bool:
+    # Wayback rate-limits bursts (HTTP 429), so retry each mirror with backoff.
+    for attempt in range(DOWNLOAD_ATTEMPTS):
         for mirror in MIRRORS:
             try:
                 with urllib.request.urlopen(f"{mirror}/{relative}", timeout=300) as r:
                     with target.open("wb") as handle:
                         shutil.copyfileobj(r, handle)
-                break
-            except OSError:
+                return True
+            except OSError as error:
+                print(f"download failed: {mirror}/{relative}: {error}", flush=True)
                 target.unlink(missing_ok=True)
-        else:
-            raise RuntimeError(f"Could not download {relative} from any mirror.")
+        time.sleep(60 * (attempt + 1))
+    return False
 
 
 def single_label_documents(qrels_lines: Iterable[str]) -> dict[int, int]:
