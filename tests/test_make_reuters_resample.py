@@ -1,4 +1,6 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 
 import numpy as np
@@ -39,3 +41,25 @@ def test_dense_sample_scales_l2_rows_by_sqrt_feature_count():
         np.linalg.norm(x, axis=1), np.sqrt(reuters.N_FEATURES), rtol=1e-6
     )
     assert y.tolist() == [2, 0]
+
+
+def test_wayback_snapshot_uses_first_successful_capture(monkeypatch):
+    rows = [["urlkey", "timestamp", "original"], ["k", "20120101000000", "x"]]
+    requested = []
+
+    def fake_urlopen(url, timeout):
+        requested.append(url)
+        return io.BytesIO(json.dumps(rows).encode())
+
+    monkeypatch.setattr(reuters.urllib.request, "urlopen", fake_urlopen)
+    assert reuters._wayback_snapshot("jmlr.org/a.gz") == (
+        "https://web.archive.org/web/20120101000000id_/http://jmlr.org/a.gz"
+    )
+    assert "statuscode%3A200" in requested[0]
+
+
+def test_wayback_snapshot_returns_none_without_capture(monkeypatch):
+    monkeypatch.setattr(
+        reuters.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b"[]")
+    )
+    assert reuters._wayback_snapshot("jmlr.org/a.gz") is None

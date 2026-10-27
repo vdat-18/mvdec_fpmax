@@ -18,6 +18,7 @@ import gzip
 import json
 import shutil
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -25,11 +26,15 @@ from pathlib import Path
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 
-# The JMLR pages now return 404; the Wayback Machine keeps the original files.
-MIRRORS = (
-    "https://web.archive.org/web/2015id_/http://jmlr.csail.mit.edu/papers/volume5/lewis04a",
-    "https://www.jmlr.org/papers/volume5/lewis04a",
+# The JMLR pages now return 404, so the files are looked up in the Wayback Machine
+# under every host that served the LYRL2004 appendices.
+ORIGINAL_HOSTS = (
+    "jmlr.csail.mit.edu/papers/volume5/lewis04a",
+    "www.jmlr.org/papers/volume5/lewis04a",
+    "jmlr.org/papers/volume5/lewis04a",
+    "www.ai.mit.edu/projects/jmlr/papers/volume5/lewis04a",
 )
+WAYBACK_CDX = "https://web.archive.org/cdx/search/cdx"
 QRELS = "a08-topic-qrels/rcv1-v2.topics.qrels.gz"
 TOKEN_FILES = tuple(
     f"a12-token-files/lyrl2004_tokens_{part}.dat.gz"
@@ -53,19 +58,36 @@ def download(raw_dir: Path) -> None:
 
 
 def _fetch_any(relative: str, target: Path) -> bool:
-    # Wayback rate-limits bursts (HTTP 429), so retry each mirror with backoff.
+    # Wayback rate-limits bursts (HTTP 429), so retry the whole lookup with backoff.
     for attempt in range(DOWNLOAD_ATTEMPTS):
-        for mirror in MIRRORS:
+        for host in ORIGINAL_HOSTS:
             try:
-                with urllib.request.urlopen(f"{mirror}/{relative}", timeout=300) as r:
+                snapshot = _wayback_snapshot(f"{host}/{relative}")
+                if snapshot is None:
+                    continue
+                with urllib.request.urlopen(snapshot, timeout=300) as response:
                     with target.open("wb") as handle:
-                        shutil.copyfileobj(r, handle)
+                        shutil.copyfileobj(response, handle)
                 return True
             except OSError as error:
-                print(f"download failed: {mirror}/{relative}: {error}", flush=True)
+                print(f"download failed: {host}/{relative}: {error}", flush=True)
                 target.unlink(missing_ok=True)
         time.sleep(60 * (attempt + 1))
     return False
+
+
+def _wayback_snapshot(original: str) -> str | None:
+    """Return the raw-content URL of a successful capture, or None when none exists."""
+
+    query = urllib.parse.urlencode(
+        {"url": original, "output": "json", "filter": "statuscode:200", "limit": 1}
+    )
+    with urllib.request.urlopen(f"{WAYBACK_CDX}?{query}", timeout=120) as response:
+        rows = json.loads(response.read() or b"[]")
+    if len(rows) < 2:
+        return None
+    timestamp = rows[1][rows[0].index("timestamp")]
+    return f"https://web.archive.org/web/{timestamp}id_/http://{original}"
 
 
 def single_label_documents(qrels_lines: Iterable[str]) -> dict[int, int]:
