@@ -1,0 +1,48 @@
+{
+  "kaggle_kernel": "vandatzz/mvdec-fusion-weight-sweep (version 1, commit f1dd7e3)",
+  "input_dataset": "vandatzz/mvdec-saved-latents",
+  "claim_scope": "label_guided_ceiling_not_reproduction",
+  "grid": "fusion in {average, concat} x w_view1 in {0, 0.05, ..., 1}; both latents centred and unit-RMS; KMeans n_init=20",
+  "groups": {
+    "reuters_s2": {
+      "runs": 50,
+      "paper_fused": [0.7813, 0.6141],
+      "best_nmi": {"fusion": "concat", "w_view1": 0.6, "acc": 0.8015, "nmi": 0.5888, "run": "seed_48"},
+      "best_acc": {"fusion": "average", "w_view1": 0.95, "acc": 0.8184, "nmi": 0.5681, "run": "seed_79"},
+      "points_reaching_paper_fused": [0, 2100],
+      "mean_average_w0p5": [0.7045, 0.4874],
+      "mean_view1_w1": [0.7226, 0.5161],
+      "mean_best_nmi_w_per_run": [0.7600, 0.5415],
+      "runs_best_nmi_above_view1": 49,
+      "largest_gain_over_view1": {"run": "seed_43", "fusion": "concat", "w_view1": 0.7, "acc": 0.8161, "nmi": 0.5618, "nmi_gain": 0.1068}
+    },
+    "reuters_s1_frozen": {
+      "runs": 1,
+      "paper_fused": [0.7813, 0.6141],
+      "best_nmi": {"fusion": "average", "w_view1": 0.6, "acc": 0.7563, "nmi": 0.5942, "run": "seed_42"},
+      "points_reaching_paper_fused": [0, 42],
+      "mean_average_w0p5": [0.6336, 0.4060],
+      "mean_view1_w1": [0.7557, 0.5932]
+    },
+    "rcv1_s2": {
+      "runs": 10,
+      "paper_fused": [0.7193, 0.4885],
+      "best_nmi": {"fusion": "average", "w_view1": 1.0, "acc": 0.763, "nmi": 0.5293, "run": "seed_46"},
+      "best_acc": {"fusion": "average", "w_view1": 0.75, "acc": 0.7636, "nmi": 0.5292, "run": "seed_46"},
+      "points_reaching_paper_fused": [11, 420],
+      "mean_average_w0p5": [0.6628, 0.4210],
+      "mean_view1_w1": [0.6793, 0.4461],
+      "mean_best_nmi_w_per_run": [0.6864, 0.4606]
+    },
+    "20news_s2": {
+      "runs": 6,
+      "paper_fused": [0.4163, 0.4543],
+      "best_nmi": {"fusion": "concat", "w_view1": 0.8, "acc": 0.4634, "nmi": 0.4327, "run": "seed_43"},
+      "best_acc": {"fusion": "average", "w_view1": 0.85, "acc": 0.4648, "nmi": 0.4098, "run": "seed_44"},
+      "points_reaching_paper_fused": [0, 252],
+      "mean_average_w0p5": [0.2961, 0.2366],
+      "mean_view1_w1": [0.4397, 0.4162],
+      "mean_best_nmi_w_per_run": [0.4470, 0.4193]
+    }
+  }
+}
