@@ -313,7 +313,36 @@ the kernel was cut before its final cell): `test5_final_metrics.csv`.
   release file at seed 42 (0.7134/0.5213 vs 0.7025/0.5168) and no resample gets
   above NMI 0.536.
 
-## Overall assessment (2026-10-27)
+## Test 6: label-guided ceiling of weighted fusion (2026-10-28)
+
+Question: can any fixed-weight linear fusion of the trained View1 and View2 reach
+Table 2's fused row? `scripts/mvdec_fusion_weight_sweep.py` (commit `f1dd7e3`) centres
+both saved latents, scales them to unit RMS, and clusters `w*h1 + (1-w)*h2` and the
+weighted concatenation `[sqrt(w)*h1, sqrt(1-w)*h2]` for w = 0, 0.05, ..., 1. Labels
+choose the best w, so this is an upper bound, not a protocol. Kaggle kernel
+`vandatzz/mvdec-fusion-weight-sweep` on 67 saved S1/S2 runs; numbers in
+`fusion_weight_sweep_ceilings.json`.
+
+| Group | Runs | View1 (w=1) mean | Eq. 4 at unit RMS (w=0.5) mean | Best w per run, mean | Ceiling (best NMI) | Paper fused |
+| --- | --- | --- | --- | --- | --- | --- |
+| REUTERS S2 | 50 | 0.7226/0.5161 | 0.7045/0.4874 | 0.7600/0.5415 | 0.8015/0.5888 | 0.7813/0.6141 |
+| REUTERS S1 frozen | 1 | 0.7557/0.5932 | 0.6336/0.4060 | 0.7563/0.5942 | 0.7563/0.5942 | 0.7813/0.6141 |
+| RCV1 S2 | 10 | 0.6793/0.4461 | 0.6628/0.4210 | 0.6864/0.4606 | 0.7630/0.5293 (w=1) | 0.7193/0.4885 |
+| 20NEWS S2 | 6 | 0.4397/0.4162 | 0.2961/0.2366 | 0.4470/0.4193 | 0.4634/0.4327 | 0.4163/0.4543 |
+
+- REUTERS: rejected. None of 2,100 (S2) or 42 (S1) points reaches 0.7813/0.6141. A
+  real fusion gain exists (49 of 50 S2 runs gain NMI over their View1, +2.5 points on
+  average, up to +0.107 for a weak-View1 seed), but it lifts weak runs and the NMI
+  ceiling stays at 0.589 (S2) and 0.594 (S1).
+- An equal-weight average of the RMS-balanced views is worse than View1 in every group.
+- RCV1: 11 of 420 points pass the paper's fused row, but the best is pure View1 (w=1);
+  our RCV1 View1 already beats the paper's DEKM_F. The mean fusion gain is +1.5 NMI
+  points, not the paper's ~+10 ACC points over both views.
+- 20NEWS: rejected, NMI ceiling 0.433 against 0.454.
+- Not covered: L2-concat, L1-weight, frozen+L2-concat and independent-View2 runs, whose
+  notebooks kept no latents.
+
+## Overall assessment (2026-10-28)
 
 | Item | Status |
 | --- | --- |
@@ -324,6 +353,9 @@ the kernel was cut before its final cell): `test5_final_metrics.csv`.
 | REUTERS Fused | not reproduced: no protocol, fusion (Eq. 4, Fig. 2 concat raw or L2-balanced, in or after training), input normalisation, metric variant, seed, checkpoint selection, L1 weight, refinement batch, Table 1 sample counts or REUTERS resample reaches 0.7813/0.6141 together; NMI ceiling 0.5973 |
 | RCV1 rows | inside the S2 seed distribution, so not discriminative |
 | 20NEWS rows | Eq. 4 fusion lowers ACC; Fig. 2 concat comes close on ACC (0.42) but not NMI (0.41 vs 0.454) |
+
+Test 6 bounds fusion itself: even a label-chosen fusion weight does not reach the
+REUTERS or 20NEWS fused rows with these trained views.
 
 Remaining explanations that the available evidence cannot test: a View1/View2 feature
 split that the paper does not disclose, an unpublished alignment or fusion step, a
