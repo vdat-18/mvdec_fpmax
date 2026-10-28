@@ -342,6 +342,33 @@ choose the best w, so this is an upper bound, not a protocol. Kaggle kernel
 - Not covered: L2-concat, L1-weight, frozen+L2-concat and independent-View2 runs, whose
   notebooks kept no latents.
 
+## Test 7: standalone View2 pretraining screen (2026-10-28)
+
+Question: is the standalone View2 (0.51/0.33 against Table 2's 0.6501/0.5129) weak because
+its pretraining stops early? `scripts/mvdec_view2_screen.py` (commit `554bdcd`) pretrains
+only the S1 true-bottleneck View2 on REUTERS (seed 42, no View1, no refinement) and scores
+K-Means on its latent. Kaggle kernels `vandatzz/mvdec-view2-screen-a` and `-b`; per-setting
+numbers in `view2_pretrain_screen_reuters.csv`.
+
+| Epochs | Learning rate | Latent | View2 ACC / NMI | Final loss |
+| --- | --- | --- | --- | --- |
+| 200 | 1e-3 | 10 | 0.4715 / 0.2529 | 0.000431 |
+| 200 | 1e-3 | 20 | 0.5319 / 0.3587 | 0.000411 |
+| 1000 | 1e-3 | 10 | 0.4839 / 0.2691 | 0.000431 |
+| 1000 | 1e-3 | 20 | 0.5298 / 0.3726 | 0.000411 |
+| 200 | 1e-4 | 10 | 0.4854 / 0.2681 | 0.000432 |
+| 200 | 1e-4 | 20 | 0.5262 / 0.3205 | 0.000426 |
+| 1000 | 1e-4 | 10 | 0.4789 / 0.2576 | 0.000431 |
+| 1000 | 1e-4 | 20 | 0.5331 / 0.3404 | 0.000411 |
+
+- Rejected as an explanation: training five times longer or changing the learning rate
+  barely moves View2, and the reconstruction loss sits at 0.00041-0.00043 in every setting,
+  so View2 is not undertrained.
+- A 20-dimensional latent helps by about 5 points ACC and 7-10 points NMI, but the best
+  setting (0.53/0.37) stays below Table 2 and below the 0.60/0.45 bar set for a follow-up,
+  so the S1 stage with a stronger View2 was not run.
+- One seed, pretraining only; this screens settings and is not a reproduction protocol.
+
 ## Overall assessment (2026-10-28)
 
 | Item | Status |
