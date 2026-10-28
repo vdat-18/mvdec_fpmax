@@ -2,9 +2,10 @@
 
 Follows the DEC/IDEC ``make_reuters_data`` recipe that produced the REUTERS-10K arrays
 reused by DEKM: documents whose RCV1-v2 topics contain exactly one of CCAT, GCAT, MCAT
-and ECAT, a 2,000-word count vocabulary, sublinear L2 TF-IDF, the first 10,000
-documents in file order, scaled by sqrt(2000) and permuted with seed 1234. The rebuilt
-canonical sample is compared with the DEKM release arrays, then each ``--sample-seed``
+and ECAT, a 2,000-word count vocabulary, sublinear L2 TF-IDF scaled by sqrt(2000),
+and the first 10,000 documents of a seed-1234 permutation of the whole corpus. The
+rebuilt canonical sample is compared with the DEKM release arrays, then each
+``--sample-seed``
 draws 10,000 documents uniformly from the whole single-label corpus instead.
 
 Controlled diagnostic only: it tests whether Table 2 could come from a different
@@ -148,6 +149,14 @@ def dense_sample(tfidf, targets: np.ndarray, rows: np.ndarray):
     return x.astype(np.float32), targets[rows]
 
 
+def canonical_rows(n_documents: int) -> np.ndarray:
+    """Return the first N_SAMPLES rows of a seed-1234 permutation of all documents."""
+
+    return np.random.RandomState(CANONICAL_PERMUTATION_SEED).permutation(n_documents)[
+        :N_SAMPLES
+    ]
+
+
 def save_release_arrays(root: Path, x: np.ndarray, y: np.ndarray) -> None:
     target = root / "REUTERS"
     target.mkdir(parents=True, exist_ok=True)
@@ -184,10 +193,7 @@ def main() -> None:
     tfidf = tfidf_features(docs)
     summary: dict = {"n_single_label_documents": len(docs)}
 
-    permutation = np.random.RandomState(CANONICAL_PERMUTATION_SEED).permutation(
-        N_SAMPLES
-    )
-    x, y = dense_sample(tfidf, targets, np.arange(N_SAMPLES)[permutation])
+    x, y = dense_sample(tfidf, targets, canonical_rows(len(docs)))
     save_release_arrays(args.output_root / "canonical", x, y)
     summary["canonical_vs_release"] = compare_with_release(x, y, args.release_dir)
 

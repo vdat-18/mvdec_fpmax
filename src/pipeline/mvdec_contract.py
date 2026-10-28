@@ -197,6 +197,24 @@ MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID = (
     "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_figure2_l2_concat_"
     "min500_release_l2_v1"
 )
+MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_l4_only_min500_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_l2_l3_0p1_min500_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_kmeans_refresh50_min500_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID = (
+    "mvdec_2025_frozen_dekm_f_s42_view1_true_bottleneck_refine_lr_1e4_min500_"
+    "release_l2_v1"
+)
+MIN_REFINEMENT_ALT_KMEANS_REFRESH_INTERVAL = 50
+MIN_REFINEMENT_LOW_REFINEMENT_LEARNING_RATE = 1e-4
 # Sample counts as printed in MvDEC Table 1 (REUTERS-10K and 20NEWS rows disagree
 # with the DEKM benchmark sizes).
 MVDEC_TABLE1_SAMPLE_COUNTS = {"REUTERS": 210, "20NEWS": 2000, "RCV1": 10000}
@@ -237,6 +255,10 @@ FROZEN_VIEW1_PROTOCOL_IDS = frozenset(
         MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
         MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
         MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID,
         *INDEPENDENT_DEKM_VIEW2_PROTOCOL_IDS,
     }
 )
@@ -246,6 +268,10 @@ SEED42_CHECKPOINT_SEED_SWEEP_PROTOCOL_IDS = frozenset(
     {
         INDEPENDENT_DEKM_VIEW2_SEED_SWEEP_PROTOCOL_ID,
         MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID,
+        MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID,
     }
 )
 # Imported-View1 protocols whose View1 stays trainable; joint-transition
@@ -428,6 +454,26 @@ EQUATION11_PROTOCOL_SETTINGS = {
         "full_dataset",
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID: (
+        "smallest",
+        "selected_dimension_only",
+        "full_dataset",
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID: (
         "smallest",
         "selected_dimension_only",
         "full_dataset",

@@ -36,16 +36,17 @@ def parse_config(text: str) -> dict:
     return config
 
 
-def screen_config(mvdec, x, y, config: dict, seed: int, n_clusters: int) -> dict:
-    import tensorflow as tf
+def pretrain_view2_latent(
+    mvdec, x, config: dict, seed: int
+) -> tuple[np.ndarray, float]:
+    """Pretrain the S1 View2 alone and return its latent and final loss."""
 
-    from pipeline.external_metrics import compute_external_metrics
+    import tensorflow as tf
 
     protocol = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
     mvdec.hidden_units = config["latent"]
     mvdec.view2_base_units = config["width"]
     mvdec.configure_deterministic_runtime(seed)
-    started = time.time()
     model = mvdec.model_view2(
         load_weights=False, architecture_id=protocol.view2_architecture_id
     )
@@ -56,6 +57,29 @@ def screen_config(mvdec, x, y, config: dict, seed: int, n_clusters: int) -> dict
     dataset = mvdec.make_pretraining_dataset(x, seed, protocol=protocol)
     history = model.fit(dataset, epochs=config["epochs"], verbose=0, shuffle=False)
     latent = model.predict(x, batch_size=1024, verbose=0)[:, : config["latent"]]
+    return latent, float(history.history["loss"][-1])
+
+
+def load_shuffled_reuters(mvdec, dataset_root: Path, seed: int):
+    """Load REUTERS with the release L2 normalisation and a seeded row shuffle."""
+
+    import tensorflow as tf
+
+    from pipeline.public_data import load_dekm_public_dataset
+
+    dataset = load_dekm_public_dataset(
+        "REUTERS", dataset_root, normalization=mvdec.RELEASE_L2_NORMALIZATION
+    )
+    rows = tf.random.shuffle(np.arange(len(dataset.X)), seed=seed).numpy()
+    mvdec.input_shape = dataset.X.shape[1]
+    return dataset.X[rows], dataset.y[rows]
+
+
+def screen_config(mvdec, x, y, config: dict, seed: int, n_clusters: int) -> dict:
+    from pipeline.external_metrics import compute_external_metrics
+
+    started = time.time()
+    latent, final_loss = pretrain_view2_latent(mvdec, x, config, seed)
     labels = KMeans(n_clusters=n_clusters, n_init=100, random_state=seed).fit_predict(
         latent
     )
@@ -63,7 +87,7 @@ def screen_config(mvdec, x, y, config: dict, seed: int, n_clusters: int) -> dict
     return {
         **config,
         "seed": seed,
-        "final_loss": float(history.history["loss"][-1]),
+        "final_loss": final_loss,
         "view2_acc": float(metrics.acc),
         "view2_nmi": float(metrics.nmi),
         "seconds": round(time.time() - started, 1),
@@ -83,16 +107,8 @@ def main() -> None:
 
     sys.path[:0] = [str(ROOT / "src"), str(ROOT / "src" / "representation_learning")]
     import MVDEC_dense as mvdec
-    import tensorflow as tf
 
-    from pipeline.public_data import load_dekm_public_dataset
-
-    dataset = load_dekm_public_dataset(
-        "REUTERS", args.dataset_root, normalization=mvdec.RELEASE_L2_NORMALIZATION
-    )
-    rows = tf.random.shuffle(np.arange(len(dataset.X)), seed=args.seed).numpy()
-    x, y = dataset.X[rows], dataset.y[rows]
-    mvdec.input_shape = x.shape[1]
+    x, y = load_shuffled_reuters(mvdec, args.dataset_root, args.seed)
     results = []
     for config in configs:
         result = screen_config(mvdec, x, y, config, args.seed, n_clusters=4)

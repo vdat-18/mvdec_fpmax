@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pipeline import data
 
 
 def _load_mvdec(monkeypatch):
@@ -717,3 +718,47 @@ def test_frozen_view1_l2_concat_sweeps_view2_seed_with_seed42_view1(monkeypatch)
         mvdec.validate_imported_view1_run_gate(sweep, "RCV1", 42, 1)
     with pytest.raises(ValueError):
         mvdec.validate_imported_view1_run_gate(frozen, "REUTERS", 57, 1)
+
+
+def test_frozen_view1_loss_and_schedule_arms_change_one_setting(monkeypatch):
+    _, mvdec = _load_mvdec(monkeypatch)
+    frozen = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL
+    arms = {
+        "L4_ONLY": {
+            "reconstruction_weight": 0.0,
+            "kmeans_weight": 0.0,
+            "scatter_trace_weight": 0.0,
+        },
+        "LOSS_TENTH": {"kmeans_weight": 0.1, "scatter_trace_weight": 0.1},
+        "REFRESH_50": {
+            "kmeans_refresh_interval": 50,
+            "kmeans_refresh_policy": mvdec.ALT_KMEANS_REFRESH_POLICY,
+        },
+        "REFINE_LR_1E4": {"refinement_learning_rate": 1e-4},
+    }
+    for key, changed in arms.items():
+        arm = getattr(mvdec, f"MIN_REFINEMENT_FROZEN_VIEW1_{key}_PROTOCOL")
+        assert arm.claim_scope.startswith("Controlled diagnostic")
+        for field, value in changed.items():
+            assert getattr(arm, field) == value
+        for field in (
+            "view1_refinement_policy",
+            "min_training_steps",
+            "fusion_contract",
+            "input_normalization",
+        ):
+            assert getattr(arm, field) == getattr(frozen, field)
+        assert mvdec.PUBLIC_PROTOCOLS[arm.protocol_id] is arm
+        assert (
+            mvdec.protocol_method_name(arm)
+            == data.PUBLIC_PROTOCOL_METHODS[arm.protocol_id]
+        )
+        mvdec.validate_imported_view1_run_gate(arm, "REUTERS", 57, 1)
+    assert frozen.refinement_learning_rate == 0.0
+    assert "optimizer" not in frozen.manifest_contract(0.001)
+    lr = mvdec.MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL
+    assert lr.manifest_contract(0.001)["optimizer"] == {
+        "refinement_learning_rate": 1e-4
+    }
+    with pytest.raises(ValueError, match="refinement_learning_rate"):
+        mvdec.replace(frozen, refinement_learning_rate=-1.0)

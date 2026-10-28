@@ -65,6 +65,12 @@ from pipeline.mvdec_contract import (
     MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID,
+    MIN_REFINEMENT_ALT_KMEANS_REFRESH_INTERVAL,
+    MIN_REFINEMENT_LOW_REFINEMENT_LEARNING_RATE,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_BASE_UNITS,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -208,6 +214,10 @@ PROTOCOL_IDS = (
     MIN_REFINEMENT_SCRATCH_NO_L1_PROTOCOL_ID,
     MIN_REFINEMENT_SCRATCH_L1_TENTH_PROTOCOL_ID,
     MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID,
+    MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID,
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID,
     INDEPENDENT_DEKM_VIEW2_PROTOCOL_ID,
@@ -229,6 +239,7 @@ RELEASE_KMEANS_REFRESH_INTERVAL = 10
 RELEASE_MAX_TRAINING_STEPS = 14_000
 RELEASE_PRETRAIN_SHUFFLE_BUFFER = 8_000
 RELEASE_KMEANS_REFRESH_POLICY = "fixed_10_updates"
+ALT_KMEANS_REFRESH_POLICY = "fixed_50_updates"
 RELEASE_REFINEMENT_BATCHING_POLICY = "sequential_release_order"
 FIXED_256_BATCH_POLICY = "fixed_256"
 FULL_DATASET_BATCH_POLICY = "full_dataset"
@@ -323,6 +334,7 @@ class MvdecProtocol:
     min_training_steps: int = 0
     view2_base_units: int = 0
     table1_sample_counts: bool = False
+    refinement_learning_rate: float = 0.0
 
     def __post_init__(self) -> None:
         validate_loss_weights(
@@ -399,6 +411,15 @@ class MvdecProtocol:
             raise ValueError(
                 "view2_base_units must be a non-negative integer; 0 keeps the "
                 "dataset default."
+            )
+        if (
+            isinstance(self.refinement_learning_rate, bool)
+            or not isinstance(self.refinement_learning_rate, int | float)
+            or self.refinement_learning_rate < 0
+        ):
+            raise ValueError(
+                "refinement_learning_rate must be non-negative; 0 keeps the "
+                "Keras Adam default."
             )
         valid_alignment_modes = {
             ALIGNMENT_UNCENTERED_ROW_L2,
@@ -487,6 +508,10 @@ class MvdecProtocol:
             contract["stopping"]["min_training_steps"] = self.min_training_steps
         if self.view2_base_units > 0:
             contract["architecture"]["view2_base_units"] = self.view2_base_units
+        if self.refinement_learning_rate > 0:
+            contract["optimizer"] = {
+                "refinement_learning_rate": self.refinement_learning_rate
+            }
         if self.table1_sample_counts:
             contract["preprocessing"]["sample_counts"] = dict(
                 MVDEC_TABLE1_SAMPLE_COUNTS
@@ -1300,6 +1325,95 @@ MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL = replace(
 )
 
 
+MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: frozen DEKM_F seed-42 View1 with the "
+        "true-bottleneck View2 refined with only the L4 greedy term; the run "
+        "seed varies View2 only; not an exact-paper reproduction"
+    ),
+    reconstruction_weight=0.0,
+    kmeans_weight=0.0,
+    scatter_trace_weight=0.0,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "refinement_loss_weights",
+            "ablation",
+            "MvDEC gives no Eq. 11 weights; the release-style L1/L2/L3 terms may "
+            "dominate View2, so this keeps only the L4 greedy term.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: frozen DEKM_F seed-42 View1 with the "
+        "true-bottleneck View2 refined with L2 and L3 weighted 0.1; the run "
+        "seed varies View2 only; not an exact-paper reproduction"
+    ),
+    kmeans_weight=0.1,
+    scatter_trace_weight=0.1,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "refinement_loss_weights",
+            "ablation",
+            "MvDEC gives no Eq. 11 weights; down-weighting the two cluster-shaping "
+            "terms tests whether they over-constrain View2.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: frozen DEKM_F seed-42 View1 with the "
+        "true-bottleneck View2 refined with the K-Means refresh every 50 updates; the "
+        "run seed varies View2 "
+        "only; not an exact-paper reproduction"
+    ),
+    kmeans_refresh_policy=ALT_KMEANS_REFRESH_POLICY,
+    kmeans_refresh_interval=MIN_REFINEMENT_ALT_KMEANS_REFRESH_INTERVAL,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "kmeans_refresh_interval",
+            "ablation",
+            "The paper does not state the K-Means refresh cadence; 10 updates is a "
+            "DEKM release default, so 50 tests a slower target update.",
+        ),
+    ),
+)
+
+
+MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL = replace(
+    MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
+    protocol_id=MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID,
+    claim_scope=(
+        "Controlled diagnostic: frozen DEKM_F seed-42 View1 with the "
+        "true-bottleneck View2 refined with Adam learning rate 1e-4; the run "
+        "seed varies View2 only; not an exact-paper reproduction"
+    ),
+    refinement_learning_rate=MIN_REFINEMENT_LOW_REFINEMENT_LEARNING_RATE,
+    decision_provenance=(
+        *MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL.decision_provenance,
+        (
+            "refinement_learning_rate",
+            "ablation",
+            "The paper does not state the refinement learning rate; Keras' Adam "
+            "default (1e-3) is the release default, so 1e-4 tests a gentler update.",
+        ),
+    ),
+)
+
+
 MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL = replace(
     MIN_REFINEMENT_FROZEN_VIEW1_PROTOCOL,
     protocol_id=MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID,
@@ -1651,6 +1765,18 @@ PUBLIC_PROTOCOLS = {
     ),
     MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL_ID: (
         MIN_REFINEMENT_FROZEN_VIEW1_L2_CONCAT_PROTOCOL
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID: (
+        MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID: (
+        MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID: (
+        MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL
+    ),
+    MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID: (
+        MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL
     ),
     MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL_ID: MIN_REFINEMENT_WIDE_VIEW2_PROTOCOL,
     MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL_ID: MIN_REFINEMENT_EVEN_COLUMNS_PROTOCOL,
@@ -2346,6 +2472,28 @@ def protocol_method_name(protocol: MvdecProtocol) -> str:
         return (
             "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-figure2-L2-concat-"
             "min500-release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_L4_ONLY_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-L4-only-min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_LOSS_TENTH_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-L2-L3-0.1-min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_REFRESH_50_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-KMeans-refresh-50-"
+            "min500-"
+            "release-L2-diagnostic"
+        )
+    if protocol.protocol_id == MIN_REFINEMENT_FROZEN_VIEW1_REFINE_LR_1E4_PROTOCOL_ID:
+        return (
+            "MvDEC-2025-frozen-DEKM_F-View1-true-bottleneck-refine-lr-1e-4-"
+            "min500-"
+            "release-L2-diagnostic"
         )
     if protocol.protocol_id == MIN_REFINEMENT_SCRATCH_TABLE1_SUBSET_PROTOCOL_ID:
         return (
@@ -4126,7 +4274,11 @@ def train(
         )
         completion_metadata["calibration"] = fixed_calibration.to_metadata()
 
-    optimizer = tf.keras.optimizers.Adam()
+    optimizer = (
+        tf.keras.optimizers.Adam(learning_rate=protocol.refinement_learning_rate)
+        if protocol.refinement_learning_rate > 0
+        else tf.keras.optimizers.Adam()
+    )
     trainable_variables = refinement_trainable_variables(model1, model2, protocol)
     view1_variable_ids = {id(variable) for variable in model1.trainable_variables}
     loss_value = 0
