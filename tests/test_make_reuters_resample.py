@@ -63,3 +63,11 @@ def test_wayback_snapshot_returns_none_without_capture(monkeypatch):
         reuters.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b"[]")
     )
     assert reuters._wayback_snapshot("jmlr.org/a.gz") is None
+
+
+def test_canonical_rows_permute_the_whole_corpus_before_taking_the_sample():
+    rows = reuters.canonical_rows(reuters.N_SAMPLES + 500)
+    assert len(rows) == reuters.N_SAMPLES
+    assert len(set(rows.tolist())) == reuters.N_SAMPLES
+    assert rows.max() >= reuters.N_SAMPLES
+    np.testing.assert_array_equal(rows, reuters.canonical_rows(reuters.N_SAMPLES + 500))
