@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import sys
 from dataclasses import dataclass
@@ -185,6 +186,97 @@ PAPER_WITH_SELECT_METRICS: dict[str, dict[str, float]] = {
         "fmi": 0.580,
         "nmi": 0.240,
     },
+}
+
+
+# Table 11-18 row "Intuitive-K-prototypes" (random initial prototypes),
+# transcribed from the PDF. Table 17 prints accuracy std 0.000 on this row and
+# 0.086 on the "with select prototypes" row, the reverse of the other tables.
+PAPER_NO_SELECT_METRICS: dict[str, dict[str, float]] = {
+    "iris": {
+        "precision": 0.960,
+        "recall": 0.960,
+        "accuracy": 0.960,
+        "f1": 0.960,
+        "ari": 0.886,
+        "fmi": 0.923,
+        "nmi": 0.864,
+    },
+    "ionosphere": {
+        "precision": 0.712,
+        "recall": 0.677,
+        "accuracy": 0.710,
+        "f1": 0.692,
+        "ari": 0.169,
+        "fmi": 0.631,
+        "nmi": 0.129,
+    },
+    "bcw": {
+        "precision": 0.948,
+        "recall": 0.938,
+        "accuracy": 0.949,
+        "f1": 0.943,
+        "ari": 0.804,
+        "fmi": 0.912,
+        "nmi": 0.693,
+    },
+    "soybean_small": {
+        "precision": 1.000,
+        "recall": 1.000,
+        "accuracy": 1.000,
+        "f1": 1.000,
+        "ari": 1.000,
+        "fmi": 1.000,
+        "nmi": 1.000,
+    },
+    "australian_credit_approval": {
+        "precision": 0.850,
+        "recall": 0.845,
+        "accuracy": 0.848,
+        "f1": 0.852,
+        "ari": 0.488,
+        "fmi": 0.746,
+        "nmi": 0.410,
+    },
+    "heart_cleveland_2": {
+        "precision": 0.828,
+        "recall": 0.821,
+        "accuracy": 0.826,
+        "f1": 0.825,
+        "ari": 0.423,
+        "fmi": 0.716,
+        "nmi": 0.334,
+    },
+    "chess_ten_fifteen": {
+        "precision": 0.867,
+        "recall": 0.836,
+        "accuracy": 0.842,
+        "f1": 0.851,
+        "ari": 0.468,
+        "fmi": 0.746,
+        "nmi": 0.427,
+    },
+    "heart_cleveland_5": {
+        "precision": 0.374,
+        "recall": 0.360,
+        "accuracy": 0.546,
+        "f1": 0.367,
+        "ari": 0.351,
+        "fmi": 0.576,
+        "nmi": 0.241,
+    },
+}
+
+# Accuracy std over the 50 runs on the same row (Tables 11-18).
+PAPER_NO_SELECT_ACCURACY_STD: dict[str, float] = {
+    "iris": 0.000,
+    "ionosphere": 0.119,
+    "bcw": 0.001,
+    "soybean_small": 0.000,
+    "australian_credit_approval": 0.011,
+    "heart_cleveland_2": 0.012,
+    "chess_ten_fifteen": 0.000,
+    "heart_cleveland_5": 0.018,
 }
 
 
@@ -426,6 +518,18 @@ def parse_args() -> argparse.Namespace:
         help="Maximum seed attempts allowed to produce one recorded run.",
     )
     parser.add_argument(
+        "--mu-convention",
+        choices=["eq26", "swapped"],
+        default="eq26",
+        help=(
+            "'eq26' passes the paper's mu to Eq. (26) as printed. 'swapped' "
+            "passes 1 - mu instead: the printed formula collapses into one "
+            "cluster at the mu values the paper recommends (Fig. 5: 0-0.4), "
+            "so the authors' implementation likely weights d1/d2 the other "
+            "way round. See INTUITIVE_MU_CONVENTION.md."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=SANDBOX_DIR / "output",
@@ -469,6 +573,8 @@ def main() -> None:
             raise ValueError(msg)
 
         config = PAPER_CONFIGS[key]
+        if args.mu_convention == "swapped":
+            config = dataclasses.replace(config, mu_param=1.0 - config.mu_param)
         meta = manifest[key]
         frame = pd.read_csv(data_dir / meta["processed_csv"])
         X_num, X_cat, y_true = _split_features(frame, meta)
