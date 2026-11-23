@@ -49,7 +49,41 @@ pass). Eq. (26) in the code matches the printed formula.
   uniformly random rows give std 0.10-0.15 even with `swapped`. The paper's
   "random" initialisation is therefore probably not plain uniform sampling of
   rows; restarts with cost selection are an untested explanation.
-- **Soybean** collapses in 46 of 50 runs under every scenario tried (paper: 1.000).
+- **Soybean** (paper: 1.000). Table 14 lists only `gamma = 0.5`, no `mu`, so the
+  benchmark's default `mu = 0.5` was an assumption, and it sits in the collapse
+  region (49 of 50 runs). Passing `mu = 0.7-0.8` to the code removes the
+  collapse (0 of 50). The remaining shortfall comes from Algorithm 1 line 18,
+  which the shipped code resolves by taking the first admissible row: the
+  Soybean file is sorted by class, so the prototypes come from classes
+  `D2, D3, D1, D1` (none from D4). Picking randomly among admissible rows
+  (`--grid init`, `alg1rand`) lifts mean accuracy from 0.790 to 0.927; the
+  paper's 1.000 with std 0.000 is still not reached (farthest-first: 0.991).
+
+## Initialisation variants on all 8 datasets
+
+`swapped` mu, Soybean `mu = 0.8`, 50 runs, accuracy (paper "with select" row in
+the last column). For `k = 2` Algorithm 1 has no free choice at line 18, so
+`alg1` and `alg1rand` coincide there; they differ only on Soybean (k=4) and
+Heart-5 (k=5).
+
+| Dataset | alg1 | alg1rand | farthest | random | Paper |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| iris | 0.960 | 0.960 | 0.952 | 0.901 | 0.960 |
+| ionosphere | 0.680 | 0.680 | 0.690 | 0.690 | 0.800 |
+| bcw | 0.951 | 0.951 | 0.932 | 0.885 | 0.950 |
+| soybean_small | 0.790 | 0.927 | 0.991 | 0.906 | 1.000 |
+| australian_credit_approval | 0.756 | 0.756 | 0.797 | 0.769 | 0.856 |
+| heart_cleveland_2 | 0.790 | 0.790 | 0.804 | 0.774 | 0.825 |
+| chess_ten_fifteen | 0.815 | 0.815 | 0.776 | 0.730 | 0.756 |
+| heart_cleveland_5 | 0.450 | 0.402 | 0.422 | 0.385 | 0.547 |
+| mean gap (acc, ARI, NMI) | 0.103 | 0.084 | 0.060 | 0.103 | |
+
+No initialisation matches every dataset: `alg1rand` fixes Soybean but worsens
+Heart-5, and `farthest` has the lowest mean gap but produces 3 collapsed BCW
+runs. Heart-5 (paper 0.547, ours 0.385-0.450) and Ionosphere remain unexplained.
+Gaps between variants are small relative to run-to-run spread, and the variants
+were scored against the paper's own numbers, so none should be read as the
+authors' choice.
 - **Table 17 (Chess)** prints accuracy std 0.000 on the plain row and 0.086 on
   the "with select" row, the reverse of the other tables.
 

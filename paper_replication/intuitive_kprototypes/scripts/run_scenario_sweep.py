@@ -56,16 +56,18 @@ BASELINE = {
     "max_iter": 30,
     "policy": "repair",
     "soy": "all",
+    "soy_mu": None,  # None keeps the config mu; a value is passed to the code as-is
 }
 KNOB_VALUES = {
     "mu_conv": ["eq26", "swapped"],
-    "init": ["alg1", "random", "farthest"],
+    "init": ["alg1", "alg1rand", "random", "farthest"],
     "lam": [None, 0.5, 0.8, 1.0],
     "nm": ["paper", "table"],
     "gamma": [None, 0.0, 0.5, 1.0],
     "max_iter": [30, 100],
     "policy": ["repair", "retry"],
     "soy": ["all", "noconst"],
+    "soy_mu": [None, 0.8],
 }
 
 
@@ -92,6 +94,42 @@ def _farthest_init(X_num, X_cat, n_clusters, lambda_init=0.8, random_state=None,
     return np.asarray(chosen, dtype=int)
 
 
+def _alg1_random_candidate_init(X_num, X_cat, n_clusters, lambda_init=0.8,
+                                random_state=None, strict=True):
+    """Algorithm 1 where line 18 picks randomly among all admissible rows.
+
+    The paper does not say which admissible object is selected; the shipped
+    code takes the first one, which makes the result depend on row order.
+    """
+
+    dist = model_module.mixed_initial_distance_matrix
+    n = (X_num if X_num is not None else X_cat).shape[0]
+
+    def row(i):
+        return (None if X_num is None else X_num[[i]],
+                None if X_cat is None else X_cat[[i]])
+
+    def to(idx):
+        return (None if X_num is None else X_num[idx],
+                None if X_cat is None else X_cat[idx])
+
+    rng = np.random.default_rng(random_state)
+    x0 = int(rng.integers(0, n))
+    idx1 = int(np.argmax(dist(X_num, X_cat, *row(x0))[:, 0]))
+    to_x1 = dist(X_num, X_cat, *row(idx1))[:, 0]
+    idx2 = int(np.argmax(to_x1))
+    d_lambda = lambda_init * float(to_x1[idx2]) / n_clusters
+    selected = [idx1] + ([idx2] if idx2 != idx1 else [])
+    while len(selected) < n_clusters:
+        gaps = dist(X_num, X_cat, *to(selected)).min(axis=1)
+        gaps[selected] = -1.0
+        admissible = np.flatnonzero(gaps >= d_lambda)
+        selected.append(
+            int(rng.choice(admissible)) if len(admissible) else int(np.argmax(gaps))
+        )
+    return np.asarray(selected, dtype=int)
+
+
 _ORIGINAL_INIT = model_module.select_initial_prototypes
 
 
@@ -107,6 +145,7 @@ def run_cell(task: tuple[dict[str, Any], str, int]) -> dict[str, Any]:
     scenario, key, runs = task
     init_fns = {
         "alg1": _ORIGINAL_INIT,
+        "alg1rand": _alg1_random_candidate_init,
         "random": _random_init,
         "farthest": _farthest_init,
     }
@@ -121,6 +160,8 @@ def run_cell(task: tuple[dict[str, Any], str, int]) -> dict[str, Any]:
     mu = config.mu_param
     if scenario["mu_conv"] == "swapped":
         mu = 1.0 - mu
+    if key == "soybean_small" and scenario["soy_mu"] is not None:
+        mu = scenario["soy_mu"]
     gamma = config.gamma if scenario["gamma"] is None else scenario["gamma"]
     lam = config.lambda_init if scenario["lam"] is None else scenario["lam"]
 
@@ -199,6 +240,12 @@ def build_scenarios(grid: str) -> list[dict[str, Any]]:
             {**BASELINE, **dict(zip(names, combo, strict=True))}
             for combo in itertools.product(*(KNOB_VALUES[n] for n in names))
         ]
+    if grid == "init":
+        return [
+            {**BASELINE, "mu_conv": "swapped", "soy": "noconst", "soy_mu": 0.8,
+             "init": init}
+            for init in KNOB_VALUES["init"]
+        ]
     if grid == "rows":
         names = ["mu_conv", "init", "soy"]
         return [
@@ -227,7 +274,7 @@ def build_scenarios(grid: str) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--grid", choices=["ofat", "focus", "rows", "full"], default="ofat"
+        "--grid", choices=["ofat", "focus", "rows", "init", "full"], default="ofat"
     )
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--workers", type=int, default=12)
