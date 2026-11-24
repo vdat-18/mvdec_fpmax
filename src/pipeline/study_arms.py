@@ -96,6 +96,7 @@ def _fit_intuitive(
     seed: int,
     study: StudyConfig,
     started: float,
+    restarts: int,
 ) -> ArmFit:
     params = study.intuitive.for_dataset(data.name)
     categorical = _categorical_frame(data, itemsets)
@@ -106,7 +107,7 @@ def _fit_intuitive(
     best_cost = float("inf")
     last_error: str | None = None
     n_invalid = 0
-    for restart in range(study.intuitive.restarts):
+    for restart in range(restarts):
         model = IntuitiveKPrototypes(
             n_clusters=data.n_clusters,
             mu_param=params.mu,
@@ -153,8 +154,11 @@ def fit_arm(
     itemsets: pd.DataFrame | None,
     seed: int,
     study: StudyConfig,
+    restarts: int | None = None,
 ) -> ArmFit:
     """Fit ``algorithm`` on the data plus optional itemset columns.
+
+    ``restarts`` overrides the Intuitive restart count (other algorithms ignore it).
 
     Failures of the model fit itself (``RuntimeError``, ``ValueError``) become a
     status and message; anything else is a bug and propagates. True labels are never
@@ -168,5 +172,6 @@ def fit_arm(
     if algorithm == "kmeans" and data.numeric.shape[1] == 0:
         return _failure(STATUS_NOT_APPLICABLE, "no numeric attributes", started)
     if algorithm == "intuitive":
-        return _fit_intuitive(data, itemsets, seed, study, started)
+        n_restarts = study.intuitive.restarts if restarts is None else restarts
+        return _fit_intuitive(data, itemsets, seed, study, started, n_restarts)
     return _fit_kprototypes_family(data, algorithm, itemsets, seed, study, started)

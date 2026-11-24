@@ -25,7 +25,7 @@ def test_default_config_loads_and_matches_constraints():
     assert study.ffs_min_improvement == 0.005
     assert study.ffs_max_rows == 1500
     assert study.intuitive.mu_convention == "swapped"
-    assert study.intuitive.restarts == 5
+    assert study.intuitive.restarts == 3
     assert study.intuitive.for_dataset("heart_cleveland_5").mu == 0.44
     assert study.intuitive.for_dataset("unseen").beta == 2.0
     assert set(study.applications) == {"tiki", "airpollution"}
@@ -71,6 +71,8 @@ def test_min_supports_must_be_strictly_descending(tmp_path):
         (("seeds", "report"), [-1, 1], "seeds"),
         (("seeds", "report"), [], "seeds"),
         (("intuitive", "restarts"), 1001, "restarts"),
+        (("ffs", "max_candidates"), 0, "max_candidates"),
+        (("ffs", "max_steps"), 0, "max_steps"),
         (("ffs", "max_rows"), 1, "max_rows"),
         (("data", "uci_datasets"), ["iris", "iris"], "unique"),
     ],
@@ -91,4 +93,21 @@ def test_per_dataset_typo_is_rejected(tmp_path):
     payload["intuitive"]["per_dataset"]["irsi"] = {"beta": 2.0, "mu": 0.5, "gamma": 0.5}
 
     with pytest.raises(ValueError, match="unknown datasets"):
+        load_study_config(_write(tmp_path, payload))
+
+
+def test_cost_caps_are_loaded():
+    study = load_study_config(DEFAULT_STUDY_CONFIG_PATH)
+
+    assert study.ffs_max_candidates == 15
+    assert study.ffs_max_steps == 5
+    assert study.ffs_restarts == 1
+    assert study.intuitive.restarts == 3
+
+
+def test_ffs_restarts_cannot_exceed_intuitive_restarts(tmp_path):
+    payload = _payload()
+    payload["ffs"]["restarts"] = 9
+
+    with pytest.raises(ValueError, match="restarts"):
         load_study_config(_write(tmp_path, payload))

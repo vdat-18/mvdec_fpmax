@@ -107,7 +107,9 @@ def test_intuitive_uses_study_params_and_swapped_mu(recording):
     assert first["beta"] == 8.0
     assert first["mu_param"] == 0.2
     assert first["gamma"] == 0.4
-    assert [c["random_state"] for c in recording.calls] == [3000 + r for r in range(5)]
+    assert [c["random_state"] for c in recording.calls] == [
+        3000 + r for r in range(STUDY.intuitive.restarts)
+    ]
 
 
 def test_intuitive_keeps_lowest_cost_valid_restart(recording):
@@ -228,3 +230,9 @@ def test_mixed_error_and_invalid_restarts_report_invalid_partition(monkeypatch):
     fit = fit_arm(_data(), "intuitive", None, 0, STUDY)
 
     assert fit.status == "invalid_partition"
+
+
+def test_restarts_override_changes_intuitive_restart_count(recording):
+    fit_arm(_data(), "intuitive", None, 0, STUDY, restarts=1)
+
+    assert len(recording.calls) == 1

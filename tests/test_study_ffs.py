@@ -46,7 +46,7 @@ def _failed(status="error") -> ArmFit:
 def _script(monkeypatch, fits, scores, baseline):
     """fits/scores map the candidate's last column name to an ArmFit / score."""
 
-    def fake_fit(data, algorithm, candidate, seed, study):
+    def fake_fit(data, algorithm, candidate, seed, study, restarts=None):
         return fits[candidate.columns[-1]]
 
     def fake_score(data, itemsets, labels, max_rows):
@@ -163,3 +163,98 @@ def test_ffs_flags_an_invalid_baseline(monkeypatch):
     assert result.baseline_valid is False
     assert result.selected == []
     assert result.n_candidates_evaluated == 0
+
+
+def _recording_script(monkeypatch, scores, labels_by_restarts=None):
+    """Scripted fit_arm and score that record (columns, restarts) of every fit."""
+
+    calls: list[tuple[tuple[str, ...], int | None]] = []
+
+    def fake_fit(data, algorithm, candidate, seed, study, restarts=None):
+        calls.append((tuple(candidate.columns), restarts))
+        if labels_by_restarts is not None and restarts is None:
+            return _ok(labels_by_restarts)
+        return _ok(GOOD)
+
+    def fake_score(data, itemsets, labels, max_rows):
+        if itemsets.shape[1] == 0:
+            return 0.4
+        # every extra selected column adds 0.1 so greedy steps keep improving
+        return scores[itemsets.columns[-1]] + 0.1 * (itemsets.shape[1] - 1)
+
+    monkeypatch.setattr(study_ffs, "fit_arm", fake_fit)
+    monkeypatch.setattr(study_ffs, "candidate_silhouette", fake_score)
+    return calls
+
+
+def test_ffs_only_considers_the_first_candidates(monkeypatch):
+    import dataclasses
+
+    study = dataclasses.replace(STUDY, ffs_max_candidates=2)
+    calls = _recording_script(monkeypatch, {"a": 0.1, "b": 0.1, "c": 0.9})
+
+    result = forward_select_itemsets(
+        _data(), "kprototypes", _itemsets(), 0, study, baseline_labels=OTHER
+    )
+
+    assert result.selected == []
+    assert {name for columns, _ in calls for name in columns} == {"a", "b"}
+    assert result.n_candidates_evaluated == 2
+
+
+def test_ffs_stops_after_max_steps(monkeypatch):
+    import dataclasses
+
+    study = dataclasses.replace(STUDY, ffs_max_steps=2, ffs_min_improvement=0.0)
+    _recording_script(monkeypatch, {"a": 0.51, "b": 0.52, "c": 0.53})
+
+    result = forward_select_itemsets(
+        _data(), "kprototypes", _itemsets(), 0, study, baseline_labels=OTHER
+    )
+
+    assert len(result.selected) == 2
+
+
+def test_ffs_candidates_use_reduced_restarts_and_final_refit_uses_full(monkeypatch):
+    import dataclasses
+
+    study = dataclasses.replace(STUDY, ffs_restarts=1)
+    final = np.tile([1, 0], 20)
+    calls = _recording_script(
+        monkeypatch, {"a": 0.9, "b": 0.1, "c": 0.1}, labels_by_restarts=final
+    )
+
+    result = forward_select_itemsets(
+        _data(), "intuitive", _itemsets(), 0, study, baseline_labels=OTHER
+    )
+
+    assert result.selected == ["a"]
+    candidate_calls = [r for columns, r in calls[:-1]]
+    assert set(candidate_calls) == {1}
+    assert calls[-1] == (("a",), None)
+    assert np.array_equal(result.labels, final)
+
+
+def test_ffs_refit_failure_keeps_last_labels(monkeypatch):
+    import dataclasses
+
+    study = dataclasses.replace(STUDY, ffs_restarts=1)
+
+    def fake_fit(data, algorithm, candidate, seed, study, restarts=None):
+        if restarts is None:
+            return _failed("invalid_partition")
+        return _ok(GOOD)
+
+    monkeypatch.setattr(study_ffs, "fit_arm", fake_fit)
+    monkeypatch.setattr(
+        study_ffs,
+        "candidate_silhouette",
+        lambda data, itemsets, labels, max_rows: 0.4 if itemsets.shape[1] == 0 else 0.9,
+    )
+
+    result = forward_select_itemsets(
+        _data(), "intuitive", _itemsets(), 0, study, baseline_labels=OTHER
+    )
+
+    assert result.selected
+    assert np.array_equal(result.labels, GOOD)

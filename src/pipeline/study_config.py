@@ -66,6 +66,9 @@ class StudyConfig:
     max_itemsets: int
     ffs_min_improvement: float
     ffs_max_rows: int
+    ffs_max_candidates: int
+    ffs_max_steps: int
+    ffs_restarts: int
     kprototypes_init_methods: tuple[str, ...]
     intuitive: IntuitiveStudyParams
     uci_data_dir: str
@@ -175,7 +178,11 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         msg = "Study config fpmax.min_supports must be strictly descending in (0, 1]."
         raise ValueError(msg)
 
-    ffs = _exact_keys(raw["ffs"], {"min_improvement", "max_rows"}, "ffs")
+    ffs = _exact_keys(
+        raw["ffs"],
+        {"min_improvement", "max_rows", "max_candidates", "max_steps", "restarts"},
+        "ffs",
+    )
     min_improvement = _finite_number(ffs["min_improvement"], "ffs.min_improvement")
     if min_improvement < 0:
         msg = "Study config ffs.min_improvement must be non-negative."
@@ -211,6 +218,10 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
     restarts = _positive_int(intuitive["restarts"], "intuitive.restarts")
     if restarts > MAX_RESTARTS:
         msg = f"Study config intuitive.restarts must be at most {MAX_RESTARTS}."
+        raise ValueError(msg)
+    ffs_restarts = _positive_int(ffs["restarts"], "ffs.restarts")
+    if ffs_restarts > restarts:
+        msg = "Study config ffs.restarts must not exceed intuitive.restarts."
         raise ValueError(msg)
     per_dataset_raw = intuitive["per_dataset"]
     if not isinstance(per_dataset_raw, dict):
@@ -256,6 +267,9 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         max_itemsets=_positive_int(fpmax["max_itemsets"], "fpmax.max_itemsets"),
         ffs_min_improvement=min_improvement,
         ffs_max_rows=ffs_max_rows,
+        ffs_max_candidates=_positive_int(ffs["max_candidates"], "ffs.max_candidates"),
+        ffs_max_steps=_positive_int(ffs["max_steps"], "ffs.max_steps"),
+        ffs_restarts=ffs_restarts,
         kprototypes_init_methods=init_methods,
         intuitive=IntuitiveStudyParams(
             mu_convention=intuitive["mu_convention"],

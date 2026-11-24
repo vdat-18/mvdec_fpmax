@@ -124,7 +124,7 @@ def test_labelled_data_reports_external_metrics(tmp_path):
 
 
 def _scripted_fit(table):
-    def fake(data, algorithm, itemsets, seed, study):
+    def fake(data, algorithm, itemsets, seed, study, restarts=None):
         key = (None if itemsets is None else itemsets.shape[1], seed)
         labels = table.get(key, GOOD)
         if labels is None:
@@ -148,7 +148,7 @@ def test_failed_fit_is_a_row_with_status_and_error(tmp_path, monkeypatch):
 
 
 def test_systemic_failure_raises_but_keeps_the_rows_written(tmp_path, monkeypatch):
-    def always_fail(data, algorithm, itemsets, seed, study):
+    def always_fail(data, algorithm, itemsets, seed, study, restarts=None):
         return ArmFit(None, "error", float("nan"), "bad config", 0.0, None)
 
     monkeypatch.setattr(study_runner, "fit_arm", always_fail)
@@ -165,7 +165,7 @@ def test_ffs_with_invalid_baseline_is_flagged(tmp_path, monkeypatch):
     singleton = np.zeros(40, dtype=int)
     singleton[0] = 1
 
-    def fake(data, algorithm, itemsets, seed, study):
+    def fake(data, algorithm, itemsets, seed, study, restarts=None):
         labels = singleton if itemsets is None else GOOD
         return ArmFit(labels, "ok", 1.0, None, 0.0, "x")
 

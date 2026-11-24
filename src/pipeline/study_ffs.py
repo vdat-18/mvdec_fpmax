@@ -75,7 +75,11 @@ def forward_select_itemsets(
     """Greedily add the itemset that most improves the candidate-space silhouette.
 
     A candidate is accepted only when it beats the current score by more than
-    ``study.ffs_min_improvement``; failed or invalid fits never win. With nothing
+    ``study.ffs_min_improvement``; failed or invalid fits never win. Cost caps: only
+    the first ``ffs_max_candidates`` itemsets (highest support) are considered, at most
+    ``ffs_max_steps`` are accepted, and candidate fits use ``ffs_restarts`` Intuitive
+    restarts. A non-empty Intuitive selection is refit once with the full restart
+    count; if that refit is invalid the last accepted labels are kept. With nothing
     accepted the result carries ``baseline_labels`` unchanged.
     """
 
@@ -90,16 +94,22 @@ def forward_select_itemsets(
     baseline_valid = not np.isnan(current_score)
     current_labels = np.asarray(baseline_labels)
     selected: list[str] = []
-    remaining = list(itemsets.columns)
+    remaining = list(itemsets.columns[: study.ffs_max_candidates])
     n_evaluated = 0
 
-    while remaining and not np.isnan(current_score):
+    while (
+        remaining
+        and len(selected) < study.ffs_max_steps
+        and not np.isnan(current_score)
+    ):
         best_name: str | None = None
         best_score = -np.inf
         best_labels: np.ndarray | None = None
         for name in remaining:
             candidate = itemsets[selected + [name]]
-            fit = fit_arm(data, algorithm, candidate, seed, study)
+            fit = fit_arm(
+                data, algorithm, candidate, seed, study, restarts=study.ffs_restarts
+            )
             n_evaluated += 1
             if fit.status != STATUS_OK or fit.labels is None:
                 continue
@@ -117,6 +127,15 @@ def forward_select_itemsets(
         selected.append(best_name)
         remaining.remove(best_name)
         current_score, current_labels = best_score, best_labels
+
+    if (
+        selected
+        and algorithm == "intuitive"
+        and study.ffs_restarts < study.intuitive.restarts
+    ):
+        refit = fit_arm(data, algorithm, itemsets[selected], seed, study)
+        if refit.status == STATUS_OK and refit.labels is not None:
+            current_labels = refit.labels
 
     return FfsResult(
         selected=selected,
