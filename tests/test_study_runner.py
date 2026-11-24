@@ -201,3 +201,18 @@ def test_skip_rule_applies_in_grid_order(monkeypatch):
 def test_unknown_algorithm_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="algorithm"):
         run_group(_data(), "dbscan", STUDY, tmp_path)
+
+
+def test_categorical_only_data_uses_a_single_strategy_and_bin_count():
+    study = dataclasses.replace(
+        STUDY,
+        fpmax_strategies=("uniform", "quantile"),
+        fpmax_n_bins=(3, 5),
+        fpmax_min_supports=(0.6, 0.4),
+    )
+    data = dataclasses.replace(_data(), numeric=pd.DataFrame(index=range(40)))
+
+    blocks = build_grid_blocks(data, study)
+
+    assert len(blocks) == 2
+    assert {(s.strategy, s.n_bins) for s in blocks} == {("uniform", 3)}

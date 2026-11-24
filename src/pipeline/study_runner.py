@@ -69,12 +69,18 @@ def build_grid_blocks(
 
     Supports run high to low for each (strategy, bins) pair. Once a setting exceeds
     the itemset cap, lower supports are not mined (their count and mining time only
-    grow) and are recorded with status ``skipped_after_too_many_itemsets``.
+    grow) and are recorded with status ``skipped_after_too_many_itemsets``. Data with
+    no numeric attributes uses a single (strategy, bins) pair.
     """
 
     blocks: dict[FpmaxSetting, ItemsetBlock] = {}
-    for strategy in study.fpmax_strategies:
-        for n_bins in study.fpmax_n_bins:
+    # Binning only affects numeric attributes; without any, every strategy and bin
+    # count mines identical itemsets, so only the first pair is kept.
+    has_numeric = data.numeric.shape[1] > 0
+    strategies = study.fpmax_strategies if has_numeric else study.fpmax_strategies[:1]
+    bin_counts = study.fpmax_n_bins if has_numeric else study.fpmax_n_bins[:1]
+    for strategy in strategies:
+        for n_bins in bin_counts:
             skipping = False
             for support in study.fpmax_min_supports:
                 setting = FpmaxSetting(strategy, n_bins, support)

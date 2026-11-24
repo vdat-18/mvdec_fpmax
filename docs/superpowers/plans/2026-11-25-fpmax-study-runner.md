@@ -399,28 +399,52 @@ scikit-learn, kmodes, mlxtend, gower, pytest, ruff.
 
 ---
 
-### Task 9: Smoke acceptance
+### Task 9: Smoke acceptance — DONE (2026-11-25)
 
-**Files:**
-- Modify: `docs/superpowers/plans/2026-11-25-fpmax-study-runner.md` (record results
-  under this task)
+Ran `iris` × {`intuitive`, `kprototypes`, `kmeans`} and `bcw` × {`intuitive`,
+`kprototypes`} with `--report-seeds 2`, one background process per group (each group
+finished in under 100 s). All rows have status `ok` or an explicit non-`ok` status
+(`no_itemsets` for settings with nothing to mine); no row is missing.
 
-- [ ] **Step 1: Run Iris and BCW with 2 report seeds**, one command per group, e.g.
-  `uv run --python 3.12 --link-mode=copy python scripts/run_fpmax_study.py --config
-  configs/fpmax_study.json --dataset iris --algorithm intuitive --out-dir
-  output/fpmax_study_smoke --report-seeds 2`. Groups: `iris` and `bcw` × `intuitive`
-  and `kprototypes`, plus `iris` × `kmeans`.
-- [ ] **Step 2: Check the CSVs.** Expected:
-  - every group has `none`, `fpmax`, `fpmax_ffs` rows for seeds 0 and 1 (`kmeans`:
-    `none` only), plus `phase="select"` rows;
-  - BCW `kprototypes` rows come from `KModes` and are `ok`;
-  - Iris `intuitive` `none` mean ACC is within 0.05 of 0.960 (the reproduction used
-    Algorithm 1 initialisation, this study uses `farthest_first`; a larger gap is a
-    finding to investigate, not to paper over);
-  - no row has a missing status, and every non-`ok` row has an `error` or a status
-    that explains it.
-- [ ] **Step 3: Record** the observed ACC/ARI, and the number of `ok` and non-`ok`
-  rows per group, in this file. Commit "Record Step 2 smoke results".
+| group | arm | ACC | ARI | NMI | reference silhouette | itemsets / selected |
+|---|---|---|---|---|---|---|
+| iris intuitive | none | 0.960 | 0.886 | 0.864 | 0.516 | |
+| iris intuitive | fpmax | 0.880 | 0.702 | 0.719 | 0.517 | 1 itemset |
+| iris intuitive | fpmax_ffs | 0.960 | 0.886 | 0.864 | 0.516 | 0 selected (= none) |
+| iris kprototypes | none / fpmax / fpmax_ffs | 0.887 | 0.716 | 0.742 | 0.533 | 1 itemset, 0 selected |
+| iris kmeans | none | 0.887 | 0.716 | 0.742 | 0.533 | |
+| bcw intuitive | none | 0.950 | 0.807 | 0.697 | 0.408 | |
+| bcw intuitive | fpmax / fpmax_ffs | 0.933 | 0.745 | 0.632 | 0.405 | 1 itemset, 1 selected |
+| bcw kprototypes | none | 0.927 | 0.725 | 0.622 | 0.398 | KModes backend |
+| bcw kprototypes | fpmax / fpmax_ffs | 0.934 | 0.751 | 0.633 | 0.403 | 1 itemset, 1 selected |
+
+Acceptance checks: Iris and BCW Intuitive `none` equal the paper's select-row values
+(0.960 / 0.886 / 0.864 and 0.950 / 0.807 / 0.697), well inside the 0.05 tolerance;
+BCW `kprototypes` runs through `KModes`; every group has all arms on both seeds plus
+`phase="select"` rows.
+
+**Findings.**
+- **Selection favours the least intrusive setting.** The setting is chosen by mean
+  reference silhouette, and the reference space does not contain itemsets. A setting
+  with 1 itemset barely changes the clustering and keeps the score; settings with
+  more itemsets lower it (BCW: 0.405 with 1 itemset, 0.301 with 15; K-Prototypes down
+  to -0.010). So the chosen `fpmax` arm drifts toward `none` by construction. This is
+  not a bug but it limits what the study can show. Options for the Step 3 plan:
+  report every grid setting as its own arm (the select rows already hold them), or
+  pre-register one fixed default setting per dataset family, or select with a
+  different label-free criterion. Not changed here.
+- **FFS often selects nothing** (Iris: 0 of 1 itemset), so `fpmax_ffs` equals `none`
+  and says `n_selected = 0`, as intended.
+- Binning is irrelevant for categorical-only data, so the grid keeps one
+  (strategy, bins) pair there (BCW and Soybean).
+
+**Deviations from the draft above.**
+- `min_supports` is `[0.8 ... 0.2]`, validated strictly descending. Ionosphere (33
+  numeric attributes) already yields 1,828 itemsets at support 0.4, so the runner
+  mines supports high to low and skips the rest of a (strategy, bins) pair once one
+  exceeds `max_itemsets`, recording `skipped_after_too_many_itemsets`.
+- The labels archive keys are `<arm>__<seed>` (not `<arm>|<seed>`).
+- Selection rows for non-`ok` settings carry no seed (one row per setting).
 
 ---
 
