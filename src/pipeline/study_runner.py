@@ -195,6 +195,12 @@ def _write_outputs(
     return csv_path
 
 
+def shard_suffix(seeds: tuple[int, ...]) -> str:
+    """File-name suffix identifying a seed shard."""
+
+    return "__seeds-" + "-".join(str(seed) for seed in seeds)
+
+
 def _setting_key(setting: FpmaxSetting) -> str:
     return f"{setting.strategy}-{setting.n_bins}-{setting.min_support}"
 

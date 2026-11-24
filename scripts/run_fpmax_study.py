@@ -19,7 +19,7 @@ from pipeline.study_data import (
     load_application_study_data,
     load_uci_study_data,
 )
-from pipeline.study_runner import run_group
+from pipeline.study_runner import run_group, shard_suffix
 
 
 def load_named_dataset(name: str, study: StudyConfig) -> StudyData:
@@ -50,12 +50,6 @@ def parse_seed_subset(text: str, allowed: tuple[int, ...]) -> tuple[int, ...]:
         msg = f"--seeds must be unique configured report seeds {allowed}; got {text!r}."
         raise ValueError(msg)
     return seeds
-
-
-def shard_suffix(seeds: tuple[int, ...]) -> str:
-    """File-name suffix identifying a seed shard."""
-
-    return "__seeds-" + "-".join(str(seed) for seed in seeds)
 
 
 def main() -> None:

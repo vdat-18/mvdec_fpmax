@@ -2,7 +2,8 @@
 
 import pytest
 
-from scripts.run_fpmax_study import parse_seed_subset, shard_suffix
+from pipeline.study_runner import shard_suffix
+from scripts.run_fpmax_study import parse_seed_subset
 
 ALLOWED = (0, 1, 2, 3)
 
