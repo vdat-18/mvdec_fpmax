@@ -40,8 +40,9 @@ pass). Eq. (26) in the code matches the printed formula.
 
 ## Open problems
 
-- **Ionosphere "with select" (0.800 / 0.334 / 0.275, std 0.000) cannot be
-  produced.** Across all 33 prototype pairs that Algorithm 1 can pick, accuracy
+- **Ionosphere "with select" (0.800 / 0.334 / 0.275, std 0.000).** Superseded by
+  Round 4: the partition is reachable at beta near 1; the text below covers
+  beta >= 2 only. Across all 33 prototype pairs that Algorithm 1 can pick, accuracy
   peaks at 0.704; varying `gamma`, `beta`, distance form and normalisation does
   not help. Our result (0.683) is consistent with the paper's plain row
   (0.710, std 0.119) and with its K-prototypes row (0.711). Plain k-means,
@@ -187,6 +188,39 @@ fitted over three parameters, so it is recorded as a lead, not adopted.
 2. Per-dataset `beta` (`TUNED_BETA`): inferred against the paper, never published.
 3. Soybean `mu = 0.2` (Table 14 lists none) and 21 columns.
 4. Algorithm 1 line 18 resolved as "first admissible row".
+
+## Round 4: Ionosphere and Heart-5
+
+**Ionosphere, the partition is reachable (beta near 1).** Round 3 only tried
+beta >= 2, where no prototype pair gets above 0.704 (33 pairs Algorithm 1 can pick)
+or the 0.82 seen over all pairs. With beta in 1.001-1.08, gamma <= 0.5, mu 0.5 and
+initial prototypes (19, 17), the fit gives ACC 0.798 / ARI 0.334 / NMI 0.275 against the paper's
+0.800 / 0.334 / 0.275: ARI and NMI agree to three decimals, ACC is one object off
+(280 vs 281 of 351). It is a plateau, not a spike: the result is identical for every
+beta from 1.001 to 1.08, and drops to 0.792 / 0.321 / 0.254 at 1.1 and to 0.66 at
+1.5. gamma = 1.0 destroys it (0.570). An exhaustive search over all 61,425 prototype
+pairs at beta = 1.05 finds 1,391 pairs (2.3%) that reach 0.79-0.81, many with
+exactly this partition, so it is a basin of attraction.
+
+*Not reproduced:* Algorithm 1 as implemented (random x0, farthest-of-farthest under
+the Eq. (1) L1 distance) rarely reaches that basin. Over 50 seeds at beta = 1.05 it
+averages 0.656 / 0.093 / 0.051 (std 0.036), against the paper's std 0.000. The pair
+(19, 17) arises from exactly one starting row (x0 = 6); x0 = first row, last row,
+centroid-nearest or centroid-farthest all give (17, 162) or (162, 17). Chebyshev
+farthest pairs also reach 0.81 (best gap 0.020 at beta 1.5) but not exactly. So the
+paper's deterministic prototype choice is still unidentified, and beta = 1.05 was
+fitted to the paper's three numbers, not published. Verdict: *partition reproduced
+with an inferred beta, selection rule not reproduced.*
+
+**Heart-5, only mu = 0.5 gets close.** Sweep beta {1.05..8} x mu {0.1, 0.3, 0.5, 0.7}
+x gamma {0, 0.5, 1}, Algorithm 1 `first`, 30 seeds. At the listed mu = 0.3 and
+gamma = 0.5 no beta helps: ACC 0.42-0.47, ARI 0.10-0.23 at every beta. At mu = 0.5
+the best cell is beta 2, gamma 0.5: 0.575 / 0.372 / 0.237 against 0.547 / 0.356 /
+0.240 (gap 0.016, ACC std 0.048 versus the paper's 0.018). mu = 0.5 is the same under
+both orientations (`1 - 0.5 = 0.5`), so this does not depend on the swap. Larger beta
+lowers the std (0.013 at beta 5-8) but raises ACC to 0.60. Verdict: *not reproduced
+at the listed parameters; Table 18's mu = 0.3 may be misprinted or depend on an
+unlisted choice.* Not adopted.
 
 The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
 schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid
