@@ -381,6 +381,10 @@ Tried and rejected (one round each):
 - Line 18 read as "farthest admissible" or "last admissible": 0.42-0.57, std 0.04-0.09,
   means worse than "first admissible".
 
+- Row order of the file (10 random permutations, 60 seeds each): the original UCI order
+  is the best (0.540 +- 0.037); shuffled orders give 0.48-0.54 with std 0.06-0.07. Order
+  matters, but no order lowered the std.
+
 So the paper's std of 0.018 is not reproduced with any reading of Algorithm 1 that was
 tried; the means (0.542 / 0.351 / 0.240) are within the paper's std on both rows.
 
