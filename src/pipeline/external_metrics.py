@@ -5,15 +5,16 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
-from sklearn.metrics import normalized_mutual_info_score
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 
 @dataclass(frozen=True)
 class ExternalMetrics:
-    """ACC and NMI for one clustering assignment."""
+    """ACC, NMI and ARI for one clustering assignment."""
 
     acc: float
     nmi: float
+    ari: float
 
 
 def _validated_labels(values: object, name: str) -> np.ndarray:
@@ -34,8 +35,13 @@ def compute_external_metrics(
     predicted_labels: object,
     *,
     n_clusters: int | None = None,
+    allow_missing_clusters: bool = False,
 ) -> ExternalMetrics:
-    """Compute Hungarian-matched clustering ACC and NMI."""
+    """Compute Hungarian-matched clustering ACC, NMI and ARI.
+
+    With ``n_clusters`` both label sets must use exactly that many classes, unless
+    ``allow_missing_clusters`` is set (degenerate partitions are then still scored).
+    """
 
     truth = _validated_labels(true_labels, "true_labels")
     predicted = _validated_labels(predicted_labels, "predicted_labels")
@@ -52,7 +58,9 @@ def compute_external_metrics(
         if n_clusters < 2:
             msg = "n_clusters must be at least 2."
             raise ValueError(msg)
-        if len(true_values) != n_clusters or len(predicted_values) != n_clusters:
+        if not allow_missing_clusters and (
+            len(true_values) != n_clusters or len(predicted_values) != n_clusters
+        ):
             msg = (
                 "True and predicted labels must both use exactly n_clusters "
                 f"classes: true={len(true_values)}, predicted={len(predicted_values)}, "
@@ -68,4 +76,5 @@ def compute_external_metrics(
     rows, columns = linear_sum_assignment(-contingency)
     accuracy = float(contingency[rows, columns].sum() / len(truth))
     nmi = float(normalized_mutual_info_score(truth, predicted))
-    return ExternalMetrics(acc=accuracy, nmi=nmi)
+    ari = float(adjusted_rand_score(truth, predicted))
+    return ExternalMetrics(acc=accuracy, nmi=nmi, ari=ari)

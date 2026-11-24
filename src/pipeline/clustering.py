@@ -90,6 +90,17 @@ INTUITIVE_VIEW_WEIGHTED_DISTANCE_MODE = "view_weighted_attribute_weights_v1"
 INTUITIVE_STOPPING_MODE = "exact_assignment"
 
 
+def is_valid_partition(
+    labels: np.ndarray,
+    n_clusters: int,
+    min_size: int = 2,
+) -> bool:
+    """Return whether labels use exactly ``n_clusters`` clusters of ``min_size``+."""
+
+    _, counts = np.unique(np.asarray(labels), return_counts=True)
+    return len(counts) == n_clusters and bool((counts >= min_size).all())
+
+
 def labels_hash(labels: np.ndarray) -> str:
     """Return a stable short hash for a label assignment."""
 
