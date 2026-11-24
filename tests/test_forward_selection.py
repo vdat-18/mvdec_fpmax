@@ -115,3 +115,21 @@ def test_study_min_improvement_is_a_real_threshold() -> None:
     assert not forward_selection.improves_score(
         0.504, 0.5, forward_selection.STUDY_FFS_MIN_IMPROVEMENT
     )
+
+
+def test_ffs_skips_candidate_that_cannot_initialize(monkeypatch) -> None:
+    class Flaky:
+        cost_ = 1.0
+
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def fit_predict(self, matrix, categorical):
+            msg = "Clustering algorithm could not initialize."
+            raise ValueError(msg)
+
+    monkeypatch.setattr(clustering, "KPrototypes", Flaky)
+
+    result = _run(baseline_score=-1.0, min_improvement=0.0)
+
+    assert result.selected_feature_names == []

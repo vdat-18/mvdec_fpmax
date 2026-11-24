@@ -350,10 +350,19 @@ def run_kprototypes(
                 random_state=random_state,
                 verbose=0,
             )
-            labels = model.fit_predict(
-                combined_df.to_numpy(),
-                categorical=categorical_idx,
-            )
+            try:
+                labels = model.fit_predict(
+                    combined_df.to_numpy(),
+                    categorical=categorical_idx,
+                )
+            except ValueError as error:
+                if "could not initialize" not in str(error):
+                    raise
+                logger.warning(
+                    "K-Prototypes init={} could not initialize; trying the next.",
+                    init,
+                )
+                continue
             cost = float(model.cost_)
         else:
             model = KMeans(

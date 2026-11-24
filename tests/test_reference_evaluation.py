@@ -107,3 +107,18 @@ def test_pairwise_ari_stability_identical_and_relabelled() -> None:
 
     assert pairwise_ari_stability([a, a]) == 1.0
     assert pairwise_ari_stability([a, relabelled]) == 1.0
+
+
+def test_cluster_lost_by_subsampling_scores_nan() -> None:
+    rng = np.random.default_rng(3)
+    X = pd.DataFrame(rng.normal(size=(500, 2)), columns=["a", "b"])
+    space = build_reference_distance(X, max_rows=50, random_state=0)
+    outside = np.setdiff1d(np.arange(500), space.row_index)
+    labels = np.zeros(500, dtype=int)
+    labels[250:] = 1
+    labels[outside[:2]] = 2  # third cluster exists only outside the sample
+
+    scores = score_internal(space, labels)
+
+    assert 2 not in set(labels[space.row_index].tolist())
+    assert np.isnan(scores.silhouette)

@@ -92,7 +92,9 @@ def score_internal(space: ReferenceSpace, labels: np.ndarray) -> InternalScores:
         msg = f"labels must cover all {space.n_rows} rows, got {len(labels)}."
         raise ValueError(msg)
     sample_labels = labels[space.row_index]
-    n_clusters = len(np.unique(sample_labels))
+    # Cluster count comes from the full labelling: a cluster lost by subsampling
+    # must make the score nan, not silently score a smaller partition.
+    n_clusters = len(np.unique(labels))
     if n_clusters < 2 or not is_valid_partition(sample_labels, n_clusters):
         return InternalScores(np.nan, np.nan, np.nan)
     return InternalScores(

@@ -120,3 +120,36 @@ def test_all_invalid_restarts_raise(monkeypatch):
 
     with pytest.raises(RuntimeError, match="No valid clustering"):
         clustering.run_kprototypes(continuous, binary, 2, verbose=False)
+
+
+def test_init_that_cannot_initialize_is_skipped(monkeypatch):
+    continuous, binary = _two_blobs()
+    good = np.repeat([0, 1], 20)
+
+    class Flaky(_FakeKPrototypes):
+        def fit_predict(self, _matrix, categorical):
+            if self.init == "huang":
+                msg = "Clustering algorithm could not initialize."
+                raise ValueError(msg)
+            return super().fit_predict(_matrix, categorical)
+
+    Flaky.script = {"cao": (good, 3.0)}
+    monkeypatch.setattr(clustering, "KPrototypes", Flaky)
+
+    result = clustering.run_kprototypes(continuous, binary, 2, verbose=False)
+
+    assert result.init == "cao"
+
+
+def test_unrelated_value_error_is_not_swallowed(monkeypatch):
+    continuous, binary = _two_blobs()
+
+    class Broken(_FakeKPrototypes):
+        def fit_predict(self, _matrix, categorical):
+            msg = "bad input shape"
+            raise ValueError(msg)
+
+    monkeypatch.setattr(clustering, "KPrototypes", Broken)
+
+    with pytest.raises(ValueError, match="bad input shape"):
+        clustering.run_kprototypes(continuous, binary, 2, verbose=False)
