@@ -112,3 +112,28 @@ def test_reuters10k_uses_revision_pinned_checksum_verified_sources(
             fetcher.REUTERS10K_SHA256["test.npy"],
         ),
     ]
+
+
+def test_text_feature_selection_uses_document_frequency_and_no_labels() -> None:
+    import inspect
+
+    from scipy import sparse
+
+    X = sparse.csr_matrix(
+        np.array(
+            [
+                [1.0, 0.0, 1.0, 1.0],
+                [1.0, 0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0, 0.0],
+            ]
+        )
+    )
+
+    selected = fetcher.top_k_frequent_features(X, 2)
+
+    assert selected.shape == (3, 2)
+    assert selected.toarray().tolist() == X[:, [0, 2]].toarray().tolist()
+    assert list(inspect.signature(fetcher.top_k_frequent_features).parameters) == [
+        "X",
+        "k",
+    ]

@@ -21,7 +21,6 @@ import pandas as pd
 from loguru import logger
 from scipy import sparse
 from sklearn.datasets import fetch_20newsgroups_vectorized
-from sklearn.feature_selection import chi2
 from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
 
 from pipeline.restricted_pickle import load_restricted_pickle
@@ -662,16 +661,15 @@ def parse_waveform_raw_only(extract_dir: Path) -> ProcessedDataset:
     )
 
 
-def top_k_chi2_features(X: sparse.spmatrix, y: np.ndarray, k: int) -> sparse.spmatrix:
-    """Select up to k sparse text features by chi-square score."""
+def top_k_frequent_features(X: sparse.spmatrix, k: int) -> sparse.spmatrix:
+    """Keep the k most frequent columns (document frequency); uses no labels."""
 
     if X.shape[1] <= k:
         return X
-    scores, _ = chi2(X, y)
-    scores = np.nan_to_num(scores, nan=-np.inf, posinf=-np.inf, neginf=-np.inf)
-    selected = np.argsort(scores)[-k:]
-    selected.sort()
-    return X[:, selected]
+    document_frequency = np.asarray((X != 0).sum(axis=0)).ravel()
+    # stable sort: ties resolve to the lower column index
+    order = np.argsort(-document_frequency, kind="stable")[:k]
+    return X[:, np.sort(order)]
 
 
 def balanced_label_indices(y: np.ndarray, per_class: int) -> np.ndarray:
@@ -780,7 +778,7 @@ def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
     selected_rows = balanced_label_indices(y_all, per_class=100)
     X = data.data[selected_rows]
     y = y_all[selected_rows]
-    X = top_k_chi2_features(X, y, 2000)
+    X = top_k_frequent_features(X, 2000)
     X = MaxAbsScaler().fit_transform(X).astype(np.float32)
     return make_text_processed_dataset(
         X=X.toarray(),
@@ -789,7 +787,7 @@ def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
         notes=[
             "Fetched with sklearn fetch_20newsgroups_vectorized(subset='all').",
             "Balanced subset: first 100 documents per class, total 2,000 samples.",
-            "Selected top 2,000 features by chi-square against labels.",
+            "Selected the 2,000 most frequent features by document frequency (no labels).",
         ],
     )
 
@@ -863,7 +861,7 @@ def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
         dtype=np.float32,
     )
     y_arr = np.asarray(y, dtype=int)
-    X = top_k_chi2_features(X, y_arr, 2000)
+    X = top_k_frequent_features(X, 2000)
     X = MaxAbsScaler().fit_transform(X).astype(np.float32)
     return make_text_processed_dataset(
         X=X.toarray(),
@@ -873,7 +871,7 @@ def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
             "Fetched RCV1 test part 0 and rcv1v2.topics.qrels from Figshare.",
             "Kept documents with exactly one of CCAT/ECAT/GCAT/MCAT labels.",
             f"Balanced target: 2,500 documents per class; observed counts: {counts}.",
-            "Selected top 2,000 features by chi-square against labels.",
+            "Selected the 2,000 most frequent features by document frequency (no labels).",
         ],
     )
 
