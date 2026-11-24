@@ -212,6 +212,27 @@ paper's deterministic prototype choice is still unidentified, and beta = 1.05 wa
 fitted to the paper's three numbers, not published. Verdict: *partition reproduced
 with an inferred beta, selection rule not reproduced.*
 
+**Ionosphere prototype rule (follow-up).** 161 deterministic rules were tried at
+beta = 1.05 (diameter pair, 1-4 farthest hops from row 0 / centroid-farthest /
+centroid-nearest / medoid / most-remote, two-farthest-from-centroid; seven distance
+functions) and scored on ARI/NMI within 0.002 of the paper. Only the **Chebyshev**
+(L-infinity) rules hit, all with pair (0, 7). With Chebyshev farthest-point selection
+and L1 assignment, 30 seeds give 0.798 / 0.334 / 0.275 with std 0.000, matching the
+paper including its zero std. Two things argue against adopting it:
+
+- *Tie-breaking artefact.* The data are scaled to [0, 1], so 16,157 of 61,425 pairs
+  (26%) tie at the maximum Chebyshev distance 1.0 and `argmax` returns the first
+  row index. Shuffling the rows moves the "diameter pair" to rows (158, 190).
+- *Does not generalise.* The same rule on Iris drops 0.960 / 0.886 / 0.864 (std 0.000)
+  to 0.872 / 0.791 / 0.807 (std 0.179). With L1 selection Ionosphere gives 0.655 /
+  0.099 / 0.059 (std 0.057) at beta = 1.05. BCW is mixed and was not tested.
+- Min-cost restarts over random x0 do not help either: the target partition is the
+  third-lowest cost of 33 reachable pairs and hits in 0.2-9.8% of 1-50 restart sets.
+
+Verdict: the paper's Ionosphere row is reproducible only with a dataset-specific
+selection rule plus a fitted beta, and the matching rule works by tie-breaking. Not
+adopted; Eq. (1) stays L1 as in the paper. Round budget for this hypothesis is used.
+
 **Heart-5, only mu = 0.5 gets close.** Sweep beta {1.05..8} x mu {0.1, 0.3, 0.5, 0.7}
 x gamma {0, 0.5, 1}, Algorithm 1 `first`, 30 seeds. At the listed mu = 0.3 and
 gamma = 0.5 no beta helps: ACC 0.42-0.47, ARI 0.10-0.23 at every beta. At mu = 0.5
