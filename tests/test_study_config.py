@@ -71,3 +71,32 @@ def test_min_supports_must_be_strictly_descending(tmp_path):
 
     with pytest.raises(ValueError, match="descending"):
         load_study_config(_write(tmp_path, payload))
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "match"),
+    [
+        (("intuitive", "init_strategy"), "farthest-first", "init_strategy"),
+        (("seeds", "report"), [-1, 1], "seeds"),
+        (("intuitive", "restarts"), 1001, "restarts"),
+        (("ffs", "max_rows"), 1, "max_rows"),
+        (("data", "uci_datasets"), ["iris", "iris"], "unique"),
+    ],
+)
+def test_invalid_values_are_rejected(tmp_path, path, value, match):
+    payload = _payload()
+    target = payload
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(ValueError, match=match):
+        load_study_config(_write(tmp_path, payload))
+
+
+def test_per_dataset_typo_is_rejected(tmp_path):
+    payload = _payload()
+    payload["intuitive"]["per_dataset"]["irsi"] = {"beta": 2.0, "mu": 0.5, "gamma": 0.5}
+
+    with pytest.raises(ValueError, match="unknown datasets"):
+        load_study_config(_write(tmp_path, payload))

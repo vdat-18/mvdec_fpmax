@@ -5,7 +5,9 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from intuitive_kprototypes import INIT_STRATEGIES
 from pipeline.fpmax import BIN_LABELS_BY_SIZE
+from pipeline.public_data import PUBLIC_DATASET_SPECS
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_STUDY_CONFIG_PATH = PROJECT_DIR / "configs" / "fpmax_study.json"
@@ -14,6 +16,9 @@ STUDY_CONFIG_SCHEMA_VERSION = 1
 STUDY_STRATEGIES = ("uniform", "quantile")
 INTUITIVE_MU_CONVENTIONS = ("eq26", "swapped")
 KPROTOTYPES_INITS = ("huang", "cao")
+MAX_RESTARTS = 1000  # restart seeds are seed * 1000 + restart
+MAX_SEED = 1_000_000
+MIN_FFS_ROWS = 10
 
 
 @dataclass(frozen=True)
@@ -146,6 +151,9 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
     seeds = _exact_keys(raw["seeds"], {"selection", "report"}, "seeds")
     selection = _int_list(seeds["selection"], "seeds.selection")
     report = _int_list(seeds["report"], "seeds.report")
+    if any(not 0 <= seed <= MAX_SEED for seed in (*selection, *report)):
+        msg = f"Study config seeds must lie in [0, {MAX_SEED}]."
+        raise ValueError(msg)
     if set(selection) & set(report):
         msg = "Study config selection and report seeds must be disjoint."
         raise ValueError(msg)
@@ -177,6 +185,10 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
     if min_improvement < 0:
         msg = "Study config ffs.min_improvement must be non-negative."
         raise ValueError(msg)
+    ffs_max_rows = _positive_int(ffs["max_rows"], "ffs.max_rows")
+    if ffs_max_rows < MIN_FFS_ROWS:
+        msg = f"Study config ffs.max_rows must be at least {MIN_FFS_ROWS}."
+        raise ValueError(msg)
 
     kproto = _exact_keys(raw["kprototypes"], {"init_methods"}, "kprototypes")
     init_methods = _subset(
@@ -197,6 +209,13 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
     )
     if intuitive["mu_convention"] not in INTUITIVE_MU_CONVENTIONS:
         msg = "Study config intuitive.mu_convention must be 'eq26' or 'swapped'."
+        raise ValueError(msg)
+    if intuitive["init_strategy"] not in INIT_STRATEGIES:
+        msg = f"Study config intuitive.init_strategy must be one of {INIT_STRATEGIES}."
+        raise ValueError(msg)
+    restarts = _positive_int(intuitive["restarts"], "intuitive.restarts")
+    if restarts > MAX_RESTARTS:
+        msg = f"Study config intuitive.restarts must be at most {MAX_RESTARTS}."
         raise ValueError(msg)
     per_dataset_raw = intuitive["per_dataset"]
     if not isinstance(per_dataset_raw, dict):
@@ -220,8 +239,18 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
             n_clusters=_positive_int(spec["n_clusters"], f"{name}.n_clusters"),
         )
     uci_datasets = data["uci_datasets"]
-    if not isinstance(uci_datasets, list) or not uci_datasets:
-        msg = "Study config data.uci_datasets must be a non-empty list."
+    if (
+        not isinstance(uci_datasets, list)
+        or not uci_datasets
+        or any(not isinstance(name, str) for name in uci_datasets)
+        or len(set(uci_datasets)) != len(uci_datasets)
+    ):
+        msg = "Study config data.uci_datasets must be a non-empty list of unique names."
+        raise ValueError(msg)
+    known = {*uci_datasets, *applications, *PUBLIC_DATASET_SPECS}
+    unknown = sorted(set(per_dataset_raw) - known)
+    if unknown:
+        msg = f"Study config intuitive.per_dataset names unknown datasets: {unknown}."
         raise ValueError(msg)
 
     return StudyConfig(
@@ -232,12 +261,12 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         fpmax_min_supports=min_supports,
         max_itemsets=_positive_int(fpmax["max_itemsets"], "fpmax.max_itemsets"),
         ffs_min_improvement=min_improvement,
-        ffs_max_rows=_positive_int(ffs["max_rows"], "ffs.max_rows"),
+        ffs_max_rows=ffs_max_rows,
         kprototypes_init_methods=init_methods,
         intuitive=IntuitiveStudyParams(
             mu_convention=intuitive["mu_convention"],
-            init_strategy=str(intuitive["init_strategy"]),
-            restarts=_positive_int(intuitive["restarts"], "intuitive.restarts"),
+            init_strategy=intuitive["init_strategy"],
+            restarts=restarts,
             max_iter=_positive_int(intuitive["max_iter"], "intuitive.max_iter"),
             defaults=_dataset_params(intuitive["defaults"], "intuitive.defaults"),
             per_dataset={

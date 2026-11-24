@@ -51,6 +51,7 @@ STUDY_COLUMNS = (
 STATUS_SKIPPED_AFTER_TOO_MANY = "skipped_after_too_many_itemsets"
 STATUS_NO_SETTING = "no_valid_fpmax_setting"
 STATUS_BASELINE_UNAVAILABLE = "baseline_unavailable"
+STATUS_FFS_BASELINE_INVALID = "ffs_baseline_invalid"
 
 
 @dataclass(frozen=True)
@@ -239,6 +240,19 @@ def select_fpmax_setting(
     return SettingChoice(setting=None if best is None else best[1], rows=rows)
 
 
+def _write_outputs(
+    rows: list[dict],
+    saved_labels: dict[str, np.ndarray],
+    out_dir: Path,
+    stem: str,
+) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / f"{stem}.csv"
+    pd.DataFrame(rows, columns=list(STUDY_COLUMNS)).to_csv(csv_path, index=False)
+    np.savez_compressed(out_dir / f"{stem}.labels.npz", **saved_labels)
+    return csv_path
+
+
 def run_group(
     data: StudyData,
     algorithm: str,
@@ -254,6 +268,8 @@ def run_group(
         data.reference_df,
         metric=data.reference_metric,
     )
+    out_dir = Path(out_dir)
+    stem = f"{data.name}__{algorithm}"
     rows: list[dict] = []
     saved_labels: dict[str, np.ndarray] = {}
 
@@ -265,10 +281,14 @@ def run_group(
         if fit.labels is not None:
             saved_labels[f"none__{seed}"] = fit.labels
 
+    # Keep the finished none arm on disk even if a later step fails.
+    _write_outputs(rows, saved_labels, out_dir, stem)
+
     if algorithm != "kmeans":
         blocks = build_grid_blocks(data, study)
         choice = select_fpmax_setting(data, algorithm, study, reference, blocks)
         rows.extend(choice.rows)
+        _write_outputs(rows, saved_labels, out_dir, stem)
         for seed in study.report_seeds:
             if choice.setting is None:
                 for arm in ("fpmax", "fpmax_ffs"):
@@ -314,7 +334,7 @@ def run_group(
             )
             ffs_fit = ArmFit(
                 labels=ffs.labels,
-                status=STATUS_OK,
+                status=STATUS_OK if ffs.baseline_valid else STATUS_FFS_BASELINE_INVALID,
                 cost=float("nan"),
                 error=None,
                 fit_seconds=float("nan"),
@@ -337,10 +357,10 @@ def run_group(
             )
             saved_labels[f"fpmax_ffs__{seed}"] = ffs.labels
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{data.name}__{algorithm}"
-    csv_path = out_dir / f"{stem}.csv"
-    pd.DataFrame(rows, columns=list(STUDY_COLUMNS)).to_csv(csv_path, index=False)
-    np.savez_compressed(out_dir / f"{stem}.labels.npz", **saved_labels)
+    csv_path = _write_outputs(rows, saved_labels, out_dir, stem)
+    none_rows = [r for r in rows if r["arm"] == "none"]
+    if none_rows and all(r["status"] == "error" for r in none_rows):
+        # Every baseline fit failed: a systemic problem (config or code), not data.
+        msg = f"All {algorithm} fits on {data.name} failed: {none_rows[0]['error']}"
+        raise RuntimeError(msg)
     return csv_path

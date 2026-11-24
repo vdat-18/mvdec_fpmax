@@ -105,6 +105,7 @@ def _fit_intuitive(
     best_labels: np.ndarray | None = None
     best_cost = float("inf")
     last_error: str | None = None
+    n_invalid = 0
     for restart in range(study.intuitive.restarts):
         model = IntuitiveKPrototypes(
             n_clusters=data.n_clusters,
@@ -126,13 +127,15 @@ def _fit_intuitive(
             continue
         labels = np.asarray(result.labels)
         if not is_valid_partition(labels, data.n_clusters):
+            n_invalid += 1
             continue
         cost = float(result.distances[np.arange(len(labels)), labels].sum())
         if cost < best_cost:
             best_labels, best_cost = labels, cost
 
     if best_labels is None:
-        status = STATUS_ERROR if last_error else STATUS_INVALID
+        # "error" only when no restart produced a partition at all
+        status = STATUS_ERROR if last_error and not n_invalid else STATUS_INVALID
         return _failure(status, last_error, started)
     return ArmFit(
         labels=best_labels,

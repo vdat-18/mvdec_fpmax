@@ -29,6 +29,7 @@ class FfsResult:
     labels: np.ndarray
     n_candidates_evaluated: int
     final_score: float
+    baseline_valid: bool = True
 
 
 def candidate_silhouette(
@@ -86,6 +87,7 @@ def forward_select_itemsets(
     current_score = candidate_silhouette(
         data, empty, baseline_labels, study.ffs_max_rows
     )
+    baseline_valid = not np.isnan(current_score)
     current_labels = np.asarray(baseline_labels)
     selected: list[str] = []
     remaining = list(itemsets.columns)
@@ -121,4 +123,5 @@ def forward_select_itemsets(
         labels=current_labels,
         n_candidates_evaluated=n_evaluated,
         final_score=float(current_score),
+        baseline_valid=baseline_valid,
     )

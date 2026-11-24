@@ -150,3 +150,16 @@ def test_candidate_silhouette_subsample_is_deterministic():
     second = candidate_silhouette(_data(), _itemsets(), GOOD, 25)
 
     assert first == second
+
+
+def test_ffs_flags_an_invalid_baseline(monkeypatch):
+    singleton = np.zeros(40, dtype=int)
+    singleton[0] = 1
+
+    result = forward_select_itemsets(
+        _data(), "intuitive", _itemsets(), 0, STUDY, baseline_labels=singleton
+    )
+
+    assert result.baseline_valid is False
+    assert result.selected == []
+    assert result.n_candidates_evaluated == 0

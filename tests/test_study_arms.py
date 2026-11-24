@@ -201,3 +201,30 @@ def test_real_intuitive_fit_separates_clear_groups():
         np.mean(fit.labels != np.repeat([0, 1], 20)),
     )
     assert accuracy > 0.9
+
+
+def test_mixed_error_and_invalid_restarts_report_invalid_partition(monkeypatch):
+    singleton = np.zeros(40, dtype=int)
+    singleton[0] = 1
+    calls = {"n": 0}
+
+    class Mixed:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fit(self, **_kwargs):
+            calls["n"] += 1
+            if calls["n"] % 2:
+                msg = "empty cluster"
+                raise ValueError(msg)
+            distances = np.ones((40, 2))
+            self.result_ = type(
+                "R", (), {"labels": singleton, "distances": distances}
+            )()
+            return self
+
+    monkeypatch.setattr(study_arms, "IntuitiveKPrototypes", Mixed)
+
+    fit = fit_arm(_data(), "intuitive", None, 0, STUDY)
+
+    assert fit.status == "invalid_partition"

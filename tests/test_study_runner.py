@@ -216,3 +216,50 @@ def test_categorical_only_data_uses_a_single_strategy_and_bin_count():
 
     assert len(blocks) == 2
     assert {(s.strategy, s.n_bins) for s in blocks} == {("uniform", 3)}
+
+
+def test_selection_does_not_depend_on_true_labels():
+    reference_data = _data()
+    shuffled = dataclasses.replace(
+        reference_data, labels=np.random.default_rng(1).permutation(GOOD)
+    )
+    reference = build_reference_distance(reference_data.reference_df)
+    blocks = build_grid_blocks(reference_data, STUDY)
+
+    original = select_fpmax_setting(
+        reference_data, "kprototypes", STUDY, reference, blocks
+    )
+    permuted = select_fpmax_setting(shuffled, "kprototypes", STUDY, reference, blocks)
+
+    assert original.setting == permuted.setting
+
+
+def test_systemic_failure_raises_but_keeps_the_rows_written(tmp_path, monkeypatch):
+    def always_fail(data, algorithm, itemsets, seed, study):
+        return ArmFit(None, "error", float("nan"), "bad config", 0.0, None)
+
+    monkeypatch.setattr(study_runner, "fit_arm", always_fail)
+
+    with pytest.raises(RuntimeError, match="bad config"):
+        run_group(_data(), "kprototypes", STUDY, tmp_path)
+
+    frame = pd.read_csv(tmp_path / "toy__kprototypes.csv")
+    assert (frame["status"] != "ok").all()
+    assert len(frame) > 0
+
+
+def test_ffs_with_invalid_baseline_is_flagged(tmp_path, monkeypatch):
+    singleton = np.zeros(40, dtype=int)
+    singleton[0] = 1
+
+    def fake(data, algorithm, itemsets, seed, study):
+        labels = singleton if itemsets is None else GOOD
+        return ArmFit(labels, "ok", 1.0, None, 0.0, "x")
+
+    monkeypatch.setattr(study_runner, "fit_arm", fake)
+    monkeypatch.setattr("pipeline.study_ffs.fit_arm", fake)
+
+    frame = pd.read_csv(run_group(_data(), "kprototypes", STUDY, tmp_path))
+    ffs = frame[frame["arm"] == "fpmax_ffs"]
+
+    assert set(ffs["status"]) == {"ffs_baseline_invalid"}
