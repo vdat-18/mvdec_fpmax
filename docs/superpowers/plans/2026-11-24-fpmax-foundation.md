@@ -267,35 +267,15 @@ option to the model and records it in `IntuitiveClusteringResult.mu_convention`;
 
 ---
 
-### Task 7: DEKM_F checkpoint accepts current manifests; record the MvDEC protocol choice
+### Task 7: Record the MvDEC protocol choice and DEKM_F import limits — DONE (changed)
 
-**Files:**
-- Modify: `src/pipeline/dekm_checkpoint.py` (`_EXPECTED_MANIFEST_KEYS`, lines 34–58)
-- Create: `docs/superpowers/specs/2026-11-24-mvdec-protocol-choice.md`
-- Test: `tests/test_dekm_checkpoint.py`
-
-**Interfaces:**
-- Produces: the validator accepts either the legacy key set (the current constant) or the current writer's key set from `DEKM_dense.py:629-661`, including `source_id` and the `official_repository_paper_era_*` and `official_repository_latest_audited_*` keys. Any other key set is rejected, as before. Hash pinning for the legacy REUTERS seed-42 checkpoint stays unchanged.
-
-- [ ] **Step 1: Write failing tests**
-  - `test_current_writer_manifest_keys_are_accepted`: build a manifest dict with exactly the writer's keys. The key-set check passes.
-  - `test_unknown_manifest_key_is_rejected`: one extra key raises `ValueError`.
-
-- [ ] **Step 2: Run to verify they fail.**
-
-- [ ] **Step 3: Implement** with two named frozensets, `_LEGACY_MANIFEST_KEYS` and `_CURRENT_MANIFEST_KEYS`. Membership in either is enough.
-
-- [ ] **Step 4: Write the MvDEC protocol note.** One page:
-  - **Chosen protocol for the FP-Max appendix:** `mvdec_dekm_consistent_v1`. It is what the private pipeline and its configs already consume.
-  - **Why the alternatives are not used:**
-    - S1 and S2 are REUTERS research arms;
-    - `paper_informed_full_batch_v2` is not reproduced either.
-  - **Statement for the paper:** "not a reproduction of Kassem et al. Eq. 11".
-  - **Deferred:** the global-state refactor of `MVDEC_dense.py`, to the Step 3 plan.
-
-- [ ] **Step 5: Run** `... -m pytest tests -q`. Expected: all pass.
-
-- [ ] **Step 6: Commit** with the message "Accept current DEKM_F manifests and record the MvDEC protocol choice".
+**Deviation from the first draft:** the draft proposed accepting the current writer's
+manifest keys in `dekm_checkpoint.py`. That would not make new checkpoints importable
+(manifest, weights and config hashes are all pinned to one authorized REUTERS
+seed-42 checkpoint), and loosening a security pin is out of scope. The validator is
+unchanged. `docs/superpowers/specs/2026-11-24-mvdec-protocol-choice.md` records the
+chosen MvDEC protocol (`mvdec_dekm_consistent_v1`), why multi-seed View1 import is
+deferred, and that the main study does not need it.
 
 ---
 
