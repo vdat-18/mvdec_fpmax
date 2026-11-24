@@ -63,3 +63,11 @@ def test_invalid_dataset_params_are_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="beta"):
         load_study_config(_write(tmp_path, payload))
+
+
+def test_min_supports_must_be_strictly_descending(tmp_path):
+    payload = _payload()
+    payload["fpmax"]["min_supports"] = [0.2, 0.4]
+
+    with pytest.raises(ValueError, match="descending"):
+        load_study_config(_write(tmp_path, payload))

@@ -165,10 +165,11 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         msg = "Study config fpmax.min_supports must be a non-empty list."
         raise ValueError(msg)
     min_supports = tuple(_finite_number(v, "fpmax.min_supports") for v in supports)
-    if any(not 0 < v <= 1 for v in min_supports) or len(set(min_supports)) != len(
-        min_supports
+    if any(not 0 < v <= 1 for v in min_supports) or list(min_supports) != sorted(
+        set(min_supports), reverse=True
     ):
-        msg = "Study config fpmax.min_supports must be unique values in (0, 1]."
+        # The runner skips lower supports once one exceeds the itemset cap.
+        msg = "Study config fpmax.min_supports must be strictly descending in (0, 1]."
         raise ValueError(msg)
 
     ffs = _exact_keys(raw["ffs"], {"min_improvement", "max_rows"}, "ffs")

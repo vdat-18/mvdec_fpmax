@@ -7,7 +7,7 @@
   "fpmax": {
     "strategies": ["uniform", "quantile"],
     "n_bins": [3, 5],
-    "min_supports": [0.4, 0.3, 0.2],
+    "min_supports": [0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2],
     "max_itemsets": 60
   },
   "ffs": {
