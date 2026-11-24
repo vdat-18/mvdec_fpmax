@@ -1,8 +1,8 @@
 """Tests for the clustering helpers shared by the FP-Max study."""
 
 import numpy as np
-import pytest
 import pandas as pd
+import pytest
 
 from pipeline import clustering
 

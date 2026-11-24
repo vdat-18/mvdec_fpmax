@@ -787,7 +787,7 @@ def parse_20news(raw_dir: Path, force: bool) -> ProcessedDataset:
         notes=[
             "Fetched with sklearn fetch_20newsgroups_vectorized(subset='all').",
             "Balanced subset: first 100 documents per class, total 2,000 samples.",
-            "Selected the 2,000 most frequent features by document frequency (no labels).",
+            "Kept the 2,000 most frequent features (document frequency, no labels).",
         ],
     )
 
@@ -871,7 +871,7 @@ def parse_rcv1_10k(raw_dir: Path, force: bool) -> ProcessedDataset:
             "Fetched RCV1 test part 0 and rcv1v2.topics.qrels from Figshare.",
             "Kept documents with exactly one of CCAT/ECAT/GCAT/MCAT labels.",
             f"Balanced target: 2,500 documents per class; observed counts: {counts}.",
-            "Selected the 2,000 most frequent features by document frequency (no labels).",
+            "Kept the 2,000 most frequent features (document frequency, no labels).",
         ],
     )
 
