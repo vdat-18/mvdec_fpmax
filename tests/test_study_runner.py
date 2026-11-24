@@ -227,3 +227,20 @@ def test_itemset_signature_identifies_identical_blocks():
 def test_unknown_algorithm_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="algorithm"):
         run_group(_data(), "dbscan", STUDY, tmp_path)
+
+
+def test_stem_suffix_changes_file_names_and_shards_do_not_collide(tmp_path):
+    first = run_group(_data(), "kmeans", STUDY, tmp_path, stem_suffix="__seeds-0")
+    second = run_group(_data(), "kmeans", STUDY, tmp_path, stem_suffix="__seeds-1")
+
+    assert first.name == "toy__kmeans__seeds-0.csv"
+    assert second.name == "toy__kmeans__seeds-1.csv"
+    assert first.exists() and second.exists()
+    assert first.with_suffix(".labels.npz").exists()
+
+
+def test_rerunning_a_shard_overwrites_its_files(tmp_path):
+    run_group(_data(), "kmeans", STUDY, tmp_path, stem_suffix="__seeds-0")
+    path = run_group(_data(), "kmeans", STUDY, tmp_path, stem_suffix="__seeds-0")
+
+    assert len(pd.read_csv(path)) == len(STUDY.report_seeds)

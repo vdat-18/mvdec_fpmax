@@ -37,6 +37,27 @@ def load_named_dataset(name: str, study: StudyConfig) -> StudyData:
     raise ValueError(msg)
 
 
+def parse_seed_subset(text: str, allowed: tuple[int, ...]) -> tuple[int, ...]:
+    """Parse ``"0,3"`` into seeds that must all be configured report seeds."""
+
+    try:
+        seeds = tuple(int(part) for part in text.split(",") if part.strip())
+    except ValueError as error:
+        msg = f"--seeds must be comma-separated integers, got {text!r}."
+        raise ValueError(msg) from error
+    unknown = sorted(set(seeds) - set(allowed))
+    if not seeds or unknown or len(set(seeds)) != len(seeds):
+        msg = f"--seeds must be unique configured report seeds {allowed}; got {text!r}."
+        raise ValueError(msg)
+    return seeds
+
+
+def shard_suffix(seeds: tuple[int, ...]) -> str:
+    """File-name suffix identifying a seed shard."""
+
+    return "__seeds-" + "-".join(str(seed) for seed in seeds)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_CONFIG_PATH)
@@ -49,9 +70,19 @@ def main() -> None:
         default=None,
         help="Use only the first N report seeds (smoke runs).",
     )
+    parser.add_argument(
+        "--seeds",
+        default=None,
+        help="Comma-separated subset of the report seeds (one shard of the group).",
+    )
     args = parser.parse_args()
 
     study = load_study_config(args.config)
+    suffix = ""
+    if args.seeds is not None:
+        seeds = parse_seed_subset(args.seeds, study.report_seeds)
+        study = dataclasses.replace(study, report_seeds=seeds)
+        suffix = shard_suffix(seeds)
     if args.report_seeds is not None:
         if args.report_seeds < 1:
             parser.error("--report-seeds must be at least 1.")
@@ -59,7 +90,7 @@ def main() -> None:
             study, report_seeds=study.report_seeds[: args.report_seeds]
         )
     data = load_named_dataset(args.dataset, study)
-    print(run_group(data, args.algorithm, study, args.out_dir))
+    print(run_group(data, args.algorithm, study, args.out_dir, stem_suffix=suffix))
 
 
 if __name__ == "__main__":

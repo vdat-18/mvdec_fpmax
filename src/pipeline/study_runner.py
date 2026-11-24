@@ -269,8 +269,13 @@ def run_group(
     algorithm: str,
     study: StudyConfig,
     out_dir: Path,
+    stem_suffix: str = "",
 ) -> Path:
     """Run every arm on every report seed and write the CSV plus a labels archive.
+
+    ``stem_suffix`` distinguishes the files of seed shards of one (dataset, algorithm).
+    The seedless status rows of settings without itemsets repeat in every shard; the
+    results loader drops those duplicates.
 
     Arms: ``none`` (no itemsets) and, per grid setting, ``fpmax`` (all itemsets) and
     ``fpmax_ffs`` (forward-selected itemsets). ``kmeans`` only has ``none``. A setting
@@ -286,7 +291,7 @@ def run_group(
         metric=data.reference_metric,
     )
     out_dir = Path(out_dir)
-    stem = f"{data.name}__{algorithm}"
+    stem = f"{data.name}__{algorithm}{stem_suffix}"
     rows: list[dict] = []
     saved_labels: dict[str, np.ndarray] = {}
 
