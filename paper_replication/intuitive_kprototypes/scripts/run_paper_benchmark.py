@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import dataclasses
 import json
 import sys
 from dataclasses import dataclass
@@ -35,6 +34,7 @@ SANDBOX_SRC = SANDBOX_DIR / "src"
 sys.path.insert(0, str(SANDBOX_SRC))
 
 from intuitive_kprototypes import IntuitiveKPrototypes  # noqa: E402
+from intuitive_kprototypes.model import INIT_STRATEGIES  # noqa: E402
 from run_uci_smoke import (  # noqa: E402
     DEFAULT_DATA_DIR,
     _load_manifest,
@@ -318,6 +318,8 @@ def _run_single_seed(
     empty_cluster_policy: str,
     require_converged: bool,
     min_cluster_size: int,
+    init_strategy: str = "first",
+    mu_convention: str = "eq26",
 ) -> dict[str, Any]:
     best_result = None
     best_seed = None
@@ -338,6 +340,8 @@ def _run_single_seed(
             strict_init=False,
             empty_cluster_policy=empty_cluster_policy,
             min_cluster_size=min_cluster_size,
+            init_strategy=init_strategy,
+            mu_convention=mu_convention,
         )
         result = model.fit(X_num=X_num, X_cat=X_cat).result_
         total_fit_time += float(result.fit_time_seconds)
@@ -530,6 +534,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--init-strategy",
+        choices=INIT_STRATEGIES,
+        default="first",
+        help=(
+            "Initial prototype selection. 'first' is Algorithm 1 with line 18 "
+            "resolved as the first admissible row; see model.py."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=SANDBOX_DIR / "output",
@@ -573,8 +586,6 @@ def main() -> None:
             raise ValueError(msg)
 
         config = PAPER_CONFIGS[key]
-        if args.mu_convention == "swapped":
-            config = dataclasses.replace(config, mu_param=1.0 - config.mu_param)
         meta = manifest[key]
         frame = pd.read_csv(data_dir / meta["processed_csv"])
         X_num, X_cat, y_true = _split_features(frame, meta)
@@ -606,6 +617,8 @@ def main() -> None:
                         min_cluster_size=(
                             args.min_cluster_size if args.valid_runs_only else 1
                         ),
+                        init_strategy=args.init_strategy,
+                        mu_convention=args.mu_convention,
                     )
                 except ValueError as exc:
                     failures.append(f"run={run_idx + 1}, seed={seed}: {exc}")
@@ -621,6 +634,8 @@ def main() -> None:
             detail_rows.append(row)
 
         summary = _summarize(config=config, meta=meta, rows=rows, failures=failures)
+        summary["init_strategy"] = args.init_strategy
+        summary["mu_convention"] = args.mu_convention
         summaries.append(summary)
         print(_format_summary(summary))
         if failures:

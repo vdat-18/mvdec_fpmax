@@ -20,6 +20,10 @@ import numpy as np
 
 EmptyClusterPolicy = Literal["raise", "farthest"]
 NonMembershipStrategy = Literal["paper", "table"]
+InitStrategy = Literal["first", "random_candidate", "farthest", "random"]
+MuConvention = Literal["eq26", "swapped"]
+INIT_STRATEGIES = ("first", "random_candidate", "farthest", "random")
+MU_CONVENTIONS = ("eq26", "swapped")
 
 
 @dataclass(frozen=True)
@@ -256,9 +260,19 @@ def select_initial_prototypes(
     lambda_init: float = 0.8,
     random_state: int | None = None,
     strict: bool = True,
+    strategy: InitStrategy = "first",
 ) -> np.ndarray:
-    """Select initial prototype indexes using Algorithm 1."""
+    """Select initial prototype indexes.
 
+    ``strategy="first"`` is Algorithm 1 with line 18 resolved as "first
+    admissible row", so the result depends on row order when ``n_clusters > 2``.
+    ``"random_candidate"`` picks randomly among the admissible rows. The
+    ``"farthest"`` and ``"random"`` strategies are non-paper comparison points.
+    """
+
+    if strategy not in INIT_STRATEGIES:
+        msg = f"strategy must be one of {INIT_STRATEGIES}."
+        raise ValueError(msg)
     if n_clusters < 1:
         msg = "n_clusters must be at least 1."
         raise ValueError(msg)
@@ -277,6 +291,10 @@ def select_initial_prototypes(
         return np.array([0], dtype=int)
 
     rng = np.random.default_rng(random_state)
+    if strategy == "random":
+        return rng.choice(n_samples, size=n_clusters, replace=False).astype(int)
+    if strategy == "farthest":
+        return _select_by_farthest_first(X_num_arr, X_cat_arr, n_clusters, rng)
     idx0 = int(rng.integers(0, n_samples))
     dist_to_x0 = mixed_initial_distance_matrix(
         X_num_arr,
@@ -301,38 +319,56 @@ def select_initial_prototypes(
         selected.append(idx2)
 
     while len(selected) < n_clusters:
-        chosen: int | None = None
-        for idx in range(n_samples):
-            if idx in selected:
-                continue
-            distances = mixed_initial_distance_matrix(
-                X_num_arr[[idx]],
-                X_cat_arr[[idx]],
-                X_num_arr[selected],
-                X_cat_arr[selected],
-            )[0]
-            if np.all(distances >= d_lambda):
-                chosen = idx
-                break
-
-        if chosen is None:
-            if strict:
-                msg = (
-                    "Algorithm 1 could not find enough prototypes with "
-                    f"lambda_init={lambda_init} and d_lambda={d_lambda:.6g}."
-                )
-                raise ValueError(msg)
-            remaining = [idx for idx in range(n_samples) if idx not in selected]
-            dist_to_selected = mixed_initial_distance_matrix(
-                X_num_arr[remaining],
-                X_cat_arr[remaining],
-                X_num_arr[selected],
-                X_cat_arr[selected],
+        gaps = _gap_to_selected(X_num_arr, X_cat_arr, selected)
+        admissible = np.flatnonzero(gaps >= d_lambda)
+        if len(admissible):
+            # Algorithm 1 line 18 does not say which admissible object to take.
+            chosen = int(
+                rng.choice(admissible)
+                if strategy == "random_candidate"
+                else admissible[0]
             )
-            chosen = remaining[int(np.argmax(dist_to_selected.min(axis=1)))]
-
+        elif strict:
+            msg = (
+                "Algorithm 1 could not find enough prototypes with "
+                f"lambda_init={lambda_init} and d_lambda={d_lambda:.6g}."
+            )
+            raise ValueError(msg)
+        else:
+            chosen = int(np.argmax(gaps))
         selected.append(chosen)
 
+    return np.asarray(selected, dtype=int)
+
+
+def _gap_to_selected(
+    X_num: np.ndarray,
+    X_cat: np.ndarray,
+    selected: list[int],
+) -> np.ndarray:
+    """Distance of every row to its nearest selected row (selected rows -> -1)."""
+
+    gaps = mixed_initial_distance_matrix(
+        X_num,
+        X_cat,
+        X_num[selected],
+        X_cat[selected],
+    ).min(axis=1)
+    gaps[selected] = -1.0
+    return gaps
+
+
+def _select_by_farthest_first(
+    X_num: np.ndarray,
+    X_cat: np.ndarray,
+    n_clusters: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Farthest-first traversal from a random starting row."""
+
+    selected = [int(rng.integers(0, X_num.shape[0]))]
+    while len(selected) < n_clusters:
+        selected.append(int(np.argmax(_gap_to_selected(X_num, X_cat, selected))))
     return np.asarray(selected, dtype=int)
 
 
@@ -832,6 +868,8 @@ class IntuitiveKPrototypes:
     non_membership: NonMembershipStrategy = "paper"
     empty_cluster_policy: EmptyClusterPolicy = "raise"
     min_cluster_size: int = 1
+    init_strategy: InitStrategy = "first"
+    mu_convention: MuConvention = "eq26"
     result_: IntuitiveKPrototypesResult | None = field(default=None, init=False)
 
     def fit(
@@ -858,6 +896,12 @@ class IntuitiveKPrototypes:
         if not 0 <= self.gamma <= 1:
             msg = "gamma must satisfy 0 <= gamma <= 1."
             raise ValueError(msg)
+        if self.init_strategy not in INIT_STRATEGIES:
+            msg = f"init_strategy must be one of {INIT_STRATEGIES}."
+            raise ValueError(msg)
+        if self.mu_convention not in MU_CONVENTIONS:
+            msg = f"mu_convention must be one of {MU_CONVENTIONS}."
+            raise ValueError(msg)
 
         X_num_arr = _as_2d_float(X_num, "X_num")
         X_cat_arr = _as_2d_object(X_cat, "X_cat")
@@ -879,6 +923,7 @@ class IntuitiveKPrototypes:
             lambda_init=self.lambda_init,
             random_state=self.random_state,
             strict=self.strict_init,
+            strategy=self.init_strategy,
         )
         initial_distances = mixed_initial_distance_matrix(
             X_num_arr,
@@ -990,7 +1035,9 @@ class IntuitiveKPrototypes:
             X_cat,
             cat_centroids,
             weights.categorical_scaled,
-            self.mu_param,
+            # "swapped" passes 1 - mu: the printed Eq. (26) collapses clusters
+            # at the mu values the paper recommends (INTUITIVE_MU_CONVENTION.md).
+            1.0 - self.mu_param if self.mu_convention == "swapped" else self.mu_param,
             self.n_clusters,
         )
         distances = d_num + d_cat

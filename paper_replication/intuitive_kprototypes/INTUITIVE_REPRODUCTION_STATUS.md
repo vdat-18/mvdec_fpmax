@@ -87,6 +87,43 @@ authors' choice.
 - **Table 17 (Chess)** prints accuracy std 0.000 on the plain row and 0.086 on
   the "with select" row, the reverse of the other tables.
 
+## Round 2: restarts (H1) and exhaustive prototype pairs (H2)
+
+The model now exposes `init_strategy` and `mu_convention` (defaults reproduce the
+earlier numbers exactly; 32 tests pass). Restarts keep the lowest assigned-distance
+fit per run (`--grid restarts`, `swapped` mu, Soybean mu 0.8, 50 runs).
+
+**H1, random initialisation with min-cost restarts, accuracy mean (std) against
+the paper's plain row:**
+
+| Dataset | 1 restart | 5 restarts | 10 restarts | Paper |
+| --- | ---: | ---: | ---: | ---: |
+| iris | 0.884 (0.164) | 0.960 (0.000) | 0.960 (0.000) | 0.960 (0.000) |
+| bcw | 0.838 (0.145) | 0.950 (0.000) | 0.950 (0.000) | 0.949 (0.001) |
+| soybean_small | 0.905 (0.132) | 0.994 (0.032) | 1.000 (0.000) | 1.000 (0.000) |
+| ionosphere | 0.683 (0.017) | 0.697 (0.003) | 0.697 (0.002) | 0.710 (0.119) |
+| australian_credit_approval | 0.771 (0.089) | 0.786 (0.082) | 0.827 (0.048) | 0.848 (0.011) |
+| chess_ten_fifteen | 0.703 (0.136) | 0.689 (0.160) | 0.733 (0.149) | 0.842 (0.000) |
+| heart_cleveland_2 | 0.773 (0.062) | 0.695 (0.091) | 0.654 (0.088) | 0.826 (0.012) |
+| heart_cleveland_5 | 0.396 (0.041) | 0.376 (0.027) | 0.369 (0.018) | 0.546 (0.018) |
+
+Min-cost restarts explain the paper's tiny std on Iris, BCW and Soybean: with 10
+restarts all three match the plain row (std 0.000). Ionosphere falls inside the
+paper's wide band. Australian is close but outside one paper std. Chess, Heart-2
+and Heart-5 do not match, and for Heart-2 more restarts make accuracy worse, so
+assigned-distance cost is not what picks the paper's runs on those sets.
+
+**H2, exhaustive 2-row prototype pairs on Ionosphere** (61,425 pairs, `gamma=0`):
+accuracy ranges 0.65-0.82, but only 297 pairs (0.5%) reach 0.75 and Algorithm 1
+selects the extreme pair that gives 0.67. The best pairs reach 0.821 / 0.398 /
+0.304, above the paper's 0.800 / 0.334 / 0.275; the closest pair gives 0.809 /
+0.369 / 0.272. No pair matches the paper within 0.01 accuracy and 0.02 ARI. So 0.80
+is reachable in principle, but not through the prototype selection we implement and
+not exactly.
+
+Not yet run: H3 (Fig. 5 calibration), H4 (Eq. (4) reading), H5 (lambda, beta),
+H6 (metric definitions).
+
 ## Caveats
 
 Scenarios were chosen against the paper's numbers, so a matching scenario shows

@@ -29,7 +29,6 @@ SANDBOX_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SANDBOX_DIR / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import intuitive_kprototypes.model as model_module
 from intuitive_kprototypes import IntuitiveKPrototypes
 from run_paper_benchmark import (
     DEFAULT_DATASETS,
@@ -57,6 +56,7 @@ BASELINE = {
     "policy": "repair",
     "soy": "all",
     "soy_mu": None,  # None keeps the config mu; a value is passed to the code as-is
+    "restarts": 1,  # fits per run; the lowest assigned-distance cost is kept
 }
 KNOB_VALUES = {
     "mu_conv": ["eq26", "swapped"],
@@ -68,69 +68,17 @@ KNOB_VALUES = {
     "policy": ["repair", "retry"],
     "soy": ["all", "noconst"],
     "soy_mu": [None, 0.8],
+    "restarts": [1, 5, 10, 20],
 }
 
 
-def _random_init(X_num, X_cat, n_clusters, lambda_init=0.8, random_state=None,
-                 strict=True):
-    n = (X_num if X_num is not None else X_cat).shape[0]
-    rng = np.random.default_rng(random_state)
-    return rng.choice(n, size=n_clusters, replace=False)
-
-
-def _farthest_init(X_num, X_cat, n_clusters, lambda_init=0.8, random_state=None,
-                   strict=True):
-    n = (X_num if X_num is not None else X_cat).shape[0]
-    rng = np.random.default_rng(random_state)
-    chosen = [int(rng.integers(0, n))]
-    while len(chosen) < n_clusters:
-        d = model_module.mixed_initial_distance_matrix(
-            X_num, X_cat,
-            None if X_num is None else X_num[chosen],
-            None if X_cat is None else X_cat[chosen],
-        ).min(axis=1)
-        d[chosen] = -1.0
-        chosen.append(int(np.argmax(d)))
-    return np.asarray(chosen, dtype=int)
-
-
-def _alg1_random_candidate_init(X_num, X_cat, n_clusters, lambda_init=0.8,
-                                random_state=None, strict=True):
-    """Algorithm 1 where line 18 picks randomly among all admissible rows.
-
-    The paper does not say which admissible object is selected; the shipped
-    code takes the first one, which makes the result depend on row order.
-    """
-
-    dist = model_module.mixed_initial_distance_matrix
-    n = (X_num if X_num is not None else X_cat).shape[0]
-
-    def row(i):
-        return (None if X_num is None else X_num[[i]],
-                None if X_cat is None else X_cat[[i]])
-
-    def to(idx):
-        return (None if X_num is None else X_num[idx],
-                None if X_cat is None else X_cat[idx])
-
-    rng = np.random.default_rng(random_state)
-    x0 = int(rng.integers(0, n))
-    idx1 = int(np.argmax(dist(X_num, X_cat, *row(x0))[:, 0]))
-    to_x1 = dist(X_num, X_cat, *row(idx1))[:, 0]
-    idx2 = int(np.argmax(to_x1))
-    d_lambda = lambda_init * float(to_x1[idx2]) / n_clusters
-    selected = [idx1] + ([idx2] if idx2 != idx1 else [])
-    while len(selected) < n_clusters:
-        gaps = dist(X_num, X_cat, *to(selected)).min(axis=1)
-        gaps[selected] = -1.0
-        admissible = np.flatnonzero(gaps >= d_lambda)
-        selected.append(
-            int(rng.choice(admissible)) if len(admissible) else int(np.argmax(gaps))
-        )
-    return np.asarray(selected, dtype=int)
-
-
-_ORIGINAL_INIT = model_module.select_initial_prototypes
+# Scenario knob -> model ``init_strategy``.
+INIT_STRATEGY_BY_KNOB = {
+    "alg1": "first",
+    "alg1rand": "random_candidate",
+    "random": "random",
+    "farthest": "farthest",
+}
 
 
 def _dataset_key(key: str, scenario: dict[str, Any]) -> str:
@@ -143,58 +91,69 @@ def run_cell(task: tuple[dict[str, Any], str, int]) -> dict[str, Any]:
     """Run one (scenario, dataset) cell and return mean metrics."""
 
     scenario, key, runs = task
-    init_fns = {
-        "alg1": _ORIGINAL_INIT,
-        "alg1rand": _alg1_random_candidate_init,
-        "random": _random_init,
-        "farthest": _farthest_init,
-    }
-    model_module.select_initial_prototypes = init_fns[scenario["init"]]
-
     manifest = _load_manifest(DEFAULT_DATA_DIR)
     data_key = _dataset_key(key, scenario)
     meta = manifest[data_key]
     frame = pd.read_csv(DEFAULT_DATA_DIR / meta["processed_csv"])
     X_num, X_cat, y = _split_features(frame, meta)
     config = PAPER_CONFIGS[key]
-    mu = config.mu_param
-    if scenario["mu_conv"] == "swapped":
-        mu = 1.0 - mu
+    mu, mu_convention = config.mu_param, scenario["mu_conv"]
     if key == "soybean_small" and scenario["soy_mu"] is not None:
-        mu = scenario["soy_mu"]
+        # Table 14 lists no mu: pass the chosen value to the code unchanged.
+        mu, mu_convention = scenario["soy_mu"], "eq26"
     gamma = config.gamma if scenario["gamma"] is None else scenario["gamma"]
     lam = config.lambda_init if scenario["lam"] is None else scenario["lam"]
 
-    rows = []
-    for run in range(runs):
+    n_clusters = int(meta["n_clusters"])
+
+    def fit_once(seed_base: int):
+        """One fit; the retry policy reseeds until converged and non-degenerate."""
+
+        result = None
         for attempt in range(20 if scenario["policy"] == "retry" else 1):
             est = IntuitiveKPrototypes(
-                n_clusters=int(meta["n_clusters"]),
+                n_clusters=n_clusters,
                 lambda_init=lam,
                 mu_param=mu,
                 gamma=gamma,
                 beta=config.beta,
                 max_iter=scenario["max_iter"],
-                random_state=42 + run * 20 + attempt,
+                random_state=seed_base + attempt,
                 strict_init=False,
                 non_membership=scenario["nm"],
                 empty_cluster_policy="farthest",
                 min_cluster_size=1,
+                init_strategy=INIT_STRATEGY_BY_KNOB[scenario["init"]],
+                mu_convention=mu_convention,
             )
             try:
                 result = est.fit(X_num=X_num, X_cat=X_cat).result_
             except (ValueError, RuntimeError):
                 result = None
                 continue
-            sizes = np.bincount(result.labels, minlength=int(meta["n_clusters"]))
-            if scenario["policy"] == "retry" and not (
+            sizes = np.bincount(result.labels, minlength=n_clusters)
+            if scenario["policy"] != "retry" or (
                 result.converged and sizes.min() >= 2
             ):
-                continue
-            break
-        if result is None:
+                break
+        return result
+
+    def assigned_cost(result) -> float:
+        rows_idx = np.arange(len(result.labels))
+        return float(result.distances[rows_idx, result.labels].sum())
+
+    rows = []
+    for run in range(runs):
+        # Restarts keep the lowest-cost fit, as in the benchmark script.
+        fits = [
+            fit_once(42 + run * 1000 + offset * 50)
+            for offset in range(scenario["restarts"])
+        ]
+        fits = [fit for fit in fits if fit is not None]
+        if not fits:
             continue
-        sizes = np.bincount(result.labels, minlength=int(meta["n_clusters"]))
+        result = min(fits, key=assigned_cost)
+        sizes = np.bincount(result.labels, minlength=n_clusters)
         rows.append(
             {
                 "accuracy": clustering_accuracy(y, result.labels),
@@ -246,6 +205,13 @@ def build_scenarios(grid: str) -> list[dict[str, Any]]:
              "init": init}
             for init in KNOB_VALUES["init"]
         ]
+    if grid == "restarts":
+        base = {**BASELINE, "mu_conv": "swapped", "soy": "noconst", "soy_mu": 0.8}
+        return [
+            {**base, "init": init, "restarts": restarts}
+            for init in ("random", "farthest")
+            for restarts in (1, 5, 10)
+        ]
     if grid == "rows":
         names = ["mu_conv", "init", "soy"]
         return [
@@ -274,7 +240,9 @@ def build_scenarios(grid: str) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--grid", choices=["ofat", "focus", "rows", "init", "full"], default="ofat"
+        "--grid",
+        choices=["ofat", "focus", "rows", "init", "restarts", "full"],
+        default="ofat",
     )
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--workers", type=int, default=12)
