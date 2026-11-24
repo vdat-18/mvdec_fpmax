@@ -363,6 +363,27 @@ from 0.45 to 0.44 after a 66-cell, 100-seed search, which matches the plain row'
 means (0.545 / 0.356 / 0.241) as closely as that family allows. Its std is 0.03-0.04
 against 0.018 in both rows and is the one remaining mismatch.
 
+## Round 8: where Heart-5's std comes from (not resolved)
+
+At the tuned values (mu 0.44, beta 2, gamma 0.5) the accuracy std is 0.036 over the 64
+distinct Algorithm 1 prototype sets (200 seeds: 0.039). Prototypes 3-5 are always rows
+0, 1 and 2 (the "first admissible" rows in file order), so only x_1 and x_2 vary. The
+middle half of the sets gives 0.544-0.558 (std about 0.01); a few sets give 0.38-0.39
+and cause most of the spread. Those bad sets have a lower assigned-distance cost than
+the good ones (500 against 530), so min-cost restarts pick them more often (3 restarts:
+0.533 +- 0.050).
+
+Tried and rejected (one round each):
+
+- `lambda` 0.05-1.0: no effect (same 43 prototype sets, same means).
+- `--valid-runs-only` with minimum cluster size 2-13: unchanged (0.543 +- 0.036); the
+  bad sets have no tiny cluster.
+- Line 18 read as "farthest admissible" or "last admissible": 0.42-0.57, std 0.04-0.09,
+  means worse than "first admissible".
+
+So the paper's std of 0.018 is not reproduced with any reading of Algorithm 1 that was
+tried; the means (0.542 / 0.351 / 0.240) are within the paper's std on both rows.
+
 The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
 schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid
 (2-5) and mu grid are the pipeline's own search space, not this replication.
