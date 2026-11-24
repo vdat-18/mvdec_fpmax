@@ -294,6 +294,42 @@ Ionosphere init) were found by fitting to the paper, so this is a reproduction o
 the paper's numbers, not evidence that these are the authors' settings. The
 randomly-initialised plain rows (Chess, Heart-2, Heart-5) are still not matched.
 
+## Round 6: the plain (random-initialisation) rows
+
+The paper's plain "Intuitive-K-prototypes" row has tiny stds (0.000 on Iris, Soybean
+and Chess), so its "random" start is not one uniform draw per run. Keeping the lowest
+assigned-distance cost over several random starts reproduces them. Protocol, with
+the tuned parameters from the final table (50 runs, accuracy mean +- std):
+
+| Dataset | Protocol | Ours | Paper plain row | Verdict |
+| --- | --- | --- | --- | --- |
+| iris | random, 10 restarts | 0.960 +- 0.000 | 0.960 +- 0.000 | exact (ARI, NMI too) |
+| bcw | random, 10 restarts | 0.949 +- 0.001 | 0.949 +- 0.001 | exact |
+| soybean (21 cols) | random, 10 restarts | 1.000 +- 0.000 | 1.000 +- 0.000 | exact |
+| australian | random, 10 restarts | 0.858 +- 0.000 | 0.848 +- 0.011 | match |
+| heart_cleveland_2 | random, 10 restarts | 0.821 +- 0.004 | 0.826 +- 0.012 | match |
+| ionosphere | random, 10 restarts | 0.665 +- 0.089 | 0.710 +- 0.119 | match (within paper std) |
+| chess_ten_fifteen | random, 20 restarts | 0.827 +- 0.046 | 0.842 +- 0.000 | within 0.02, std not matched |
+| heart_cleveland_5 | farthest, 1 fit | 0.534 +- 0.068 | 0.546 +- 0.018 | mean within std, std not matched |
+
+Commands: `run_paper_benchmark.py --mu-convention swapped --beta-mode tuned
+--init-strategy random --restarts-per-run 10` for the first six rows; Chess uses
+`--restarts-per-run 20`; Heart-5 uses `--init-strategy farthest --restarts-per-run 1`
+(random with restarts gives 0.375-0.514 there, because min-cost selection picks
+worse partitions on that set). The cost criterion is the benchmark's assigned
+distance sum.
+
+Chess needed two changes: `beta = 2` (3 gave 0.597 on the plain row) and
+`mu = 0.1` (`TUNED_MU`; Table 17 lists 0.2). At mu 0.02-0.15 and beta 1.25-2 the
+plain row sits on one attractor, 0.834 / 0.445 / 0.369, with std 0.000. The paper's
+0.842 / 0.468 / 0.427 is a close but different partition. The "with select" Chess row
+is now 0.825 / 0.424 / 0.348 against 0.756 / 0.347 / 0.316 (paper std 0.086 / 0.122 /
+0.111), still inside one std.
+
+Remaining gaps: the std of Chess and Heart-5 on the plain row, and the Chess
+ARI/NMI (0.436 / 0.361 against 0.468 / 0.427). The same fitted-parameter caveat as
+above applies to every row.
+
 The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
 schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid
 (2-5) and mu grid are the pipeline's own search space, not this replication.
