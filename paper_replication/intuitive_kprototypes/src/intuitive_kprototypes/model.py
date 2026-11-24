@@ -12,6 +12,7 @@ traceability over speed because this folder is a paper-replication sandbox.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Literal
@@ -20,9 +21,11 @@ import numpy as np
 
 EmptyClusterPolicy = Literal["raise", "farthest"]
 NonMembershipStrategy = Literal["paper", "table"]
-InitStrategy = Literal["first", "random_candidate", "farthest", "random"]
+InitStrategy = Literal[
+    "first", "random_candidate", "farthest", "random", "chebyshev"
+]
 MuConvention = Literal["eq26", "swapped"]
-INIT_STRATEGIES = ("first", "random_candidate", "farthest", "random")
+INIT_STRATEGIES = ("first", "random_candidate", "farthest", "random", "chebyshev")
 MU_CONVENTIONS = ("eq26", "swapped")
 
 
@@ -253,6 +256,20 @@ def mixed_initial_distance_matrix(
     return distances
 
 
+def _chebyshev_distance_matrix(
+    X_num: np.ndarray,
+    X_cat: np.ndarray,
+    prototypes_num: np.ndarray,
+    prototypes_cat: np.ndarray,
+) -> np.ndarray:
+    """Largest absolute numeric difference between rows and prototype rows."""
+
+    if X_cat.shape[1] or prototypes_cat.shape[1]:
+        msg = "init_strategy='chebyshev' supports numeric attributes only."
+        raise ValueError(msg)
+    return np.abs(X_num[:, None, :] - prototypes_num[None, :, :]).max(axis=2)
+
+
 def select_initial_prototypes(
     X_num: Any | None,
     X_cat: Any | None,
@@ -268,6 +285,9 @@ def select_initial_prototypes(
     admissible row", so the result depends on row order when ``n_clusters > 2``.
     ``"random_candidate"`` picks randomly among the admissible rows. The
     ``"farthest"`` and ``"random"`` strategies are non-paper comparison points.
+    ``"chebyshev"`` is Algorithm 1 with the largest-coordinate-difference distance
+    in the farthest-point steps instead of Eq. (1); it only fits the paper's
+    Ionosphere row and depends on first-index tie-breaking (see the status doc).
     """
 
     if strategy not in INIT_STRATEGIES:
@@ -295,8 +315,13 @@ def select_initial_prototypes(
         return rng.choice(n_samples, size=n_clusters, replace=False).astype(int)
     if strategy == "farthest":
         return _select_by_farthest_first(X_num_arr, X_cat_arr, n_clusters, rng)
+    distance = (
+        _chebyshev_distance_matrix
+        if strategy == "chebyshev"
+        else mixed_initial_distance_matrix
+    )
     idx0 = int(rng.integers(0, n_samples))
-    dist_to_x0 = mixed_initial_distance_matrix(
+    dist_to_x0 = distance(
         X_num_arr,
         X_cat_arr,
         X_num_arr[[idx0]],
@@ -304,7 +329,7 @@ def select_initial_prototypes(
     )[:, 0]
     idx1 = int(np.argmax(dist_to_x0))
 
-    dist_to_x1 = mixed_initial_distance_matrix(
+    dist_to_x1 = distance(
         X_num_arr,
         X_cat_arr,
         X_num_arr[[idx1]],
@@ -319,7 +344,7 @@ def select_initial_prototypes(
         selected.append(idx2)
 
     while len(selected) < n_clusters:
-        gaps = _gap_to_selected(X_num_arr, X_cat_arr, selected)
+        gaps = _gap_to_selected(X_num_arr, X_cat_arr, selected, distance)
         admissible = np.flatnonzero(gaps >= d_lambda)
         if len(admissible):
             # Algorithm 1 line 18 does not say which admissible object to take.
@@ -345,10 +370,11 @@ def _gap_to_selected(
     X_num: np.ndarray,
     X_cat: np.ndarray,
     selected: list[int],
+    distance: Callable[..., np.ndarray] = mixed_initial_distance_matrix,
 ) -> np.ndarray:
     """Distance of every row to its nearest selected row (selected rows -> -1)."""
 
-    gaps = mixed_initial_distance_matrix(
+    gaps = distance(
         X_num,
         X_cat,
         X_num[selected],

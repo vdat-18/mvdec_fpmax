@@ -71,6 +71,8 @@ def test_first_strategy_matches_previous_algorithm_1(k, seed):
 @pytest.mark.parametrize("strategy", INIT_STRATEGIES)
 def test_every_strategy_returns_distinct_rows_and_is_deterministic(strategy):
     X_num, X_cat = _blobs()
+    if strategy == "chebyshev":
+        X_cat = None  # numeric attributes only
     first = select_initial_prototypes(
         X_num, X_cat, 4, lambda_init=0.3, random_state=7, strategy=strategy
     )
@@ -79,6 +81,26 @@ def test_every_strategy_returns_distinct_rows_and_is_deterministic(strategy):
     )
     assert first.tolist() == again.tolist()
     assert len(set(first.tolist())) == 4
+
+
+def test_chebyshev_strategy_uses_largest_coordinate_difference():
+    X_num, _ = _blobs(k=2)
+    for seed in range(5):
+        x0 = int(np.random.default_rng(seed).integers(0, len(X_num)))
+        idx1 = int(np.abs(X_num - X_num[x0]).max(axis=1).argmax())
+        idx2 = int(np.abs(X_num - X_num[idx1]).max(axis=1).argmax())
+        actual = select_initial_prototypes(
+            X_num, None, 2, lambda_init=0.3, random_state=seed, strategy="chebyshev"
+        )
+        assert actual.tolist() == [idx1, idx2]
+
+
+def test_chebyshev_strategy_rejects_categorical_attributes():
+    X_num, X_cat = _blobs()
+    with pytest.raises(ValueError, match="numeric attributes only"):
+        select_initial_prototypes(
+            X_num, X_cat, 2, lambda_init=0.3, random_state=0, strategy="chebyshev"
+        )
 
 
 def test_random_candidate_equals_first_when_there_is_no_free_choice():
