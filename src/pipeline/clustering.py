@@ -71,6 +71,7 @@ class IntuitiveClusteringResult:
     silhouette_negative_fraction: float
     view_weight_alpha: float | None = None
     view_weighted_score: float | None = None
+    mu_convention: str = "eq26"
 
 
 MixedClusteringResult = KPrototypesResult | IntuitiveClusteringResult
@@ -266,6 +267,21 @@ def compute_silhouette_diagnostics(
     )
 
 
+def minmax_scale_block(df: pd.DataFrame) -> pd.DataFrame:
+    """Map each column to [0, 1]; constant columns become 0.0."""
+
+    values = df.to_numpy(dtype=float)
+    low = values.min(axis=0)
+    span = values.max(axis=0) - low
+    scaled = np.divide(
+        values - low,
+        span,
+        out=np.zeros_like(values),
+        where=span > 0,
+    )
+    return pd.DataFrame(scaled, columns=df.columns, index=df.index)
+
+
 def make_mixed_features(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
@@ -357,6 +373,7 @@ def run_intuitive_kprototypes(
     random_state: int = RANDOM_STATE,
     lambda_init: float | None = None,
     mu_param: float = 0.5,
+    mu_convention: str = "eq26",
     gamma: float = 0.5,
     beta: float = 2.0,
     max_iter: int = DEFAULT_INTUITIVE_MAX_ITER,
@@ -386,6 +403,7 @@ def run_intuitive_kprototypes(
         n_clusters=n_clusters,
         lambda_init=model_lambda_init,
         mu_param=mu_param,
+        mu_convention=mu_convention,
         gamma=gamma,
         beta=beta,
         max_iter=max_iter,
@@ -484,4 +502,5 @@ def run_intuitive_kprototypes(
         silhouette_negative_fraction=negative_fraction,
         view_weight_alpha=view_weight_alpha,
         view_weighted_score=view_weighted_score,
+        mu_convention=mu_convention,
     )

@@ -119,48 +119,18 @@ Expected: "with select" ACC 0.960 (Iris) and 0.950 (BCW).
 
 ---
 
-### Task 2: Frozen pipeline protocol for Intuitive (fixes M1, M2)
+### Task 2: Study-ready Intuitive inputs (fixes M1, M2) — DONE
 
-**Files:**
-- Modify:
-  - `src/pipeline/intuitive_protocol.py` (`IntuitiveProtocol` at line 38)
-  - `configs/intuitive_protocols.json`
-  - `src/pipeline/clustering.py` (`run_intuitive_kprototypes`, line 353)
-- Test: `tests/test_intuitive_protocol.py` (extend the existing file, or create it if absent)
+**Deviation from the first draft:** the private protocol registry
+(`configs/intuitive_protocols.json`) is validated against what the private runner
+executes, so it was left unchanged. Adding a `swapped`/`minmax` protocol there would
+claim behavior that runner does not run. The study's own config (Step 2,
+`configs/fpmax_study.json`) will carry `mu_convention="swapped"`.
 
-**Interfaces:**
-- Produces:
-  - `IntuitiveProtocol.mu_convention: str`, which must be `"swapped"` for the new protocol id `intuitive_fpmax_study_v1`.
-  - `minmax_scale_block(df: pd.DataFrame) -> pd.DataFrame` in `clustering.py`. It maps each column to [0, 1] and turns constant columns into `0.0`.
-  - `run_intuitive_kprototypes(..., mu_convention: str = "swapped")`, passed through to the model.
-
-- [ ] **Step 1: Write failing tests**
-  - `test_study_protocol_uses_swapped_mu`: load `intuitive_fpmax_study_v1`, then assert that `mu_convention == "swapped"` and `ffs_min_improvement == 0.005`.
-  - `test_minmax_scale_block_bounds_and_constant_column`: input columns `[-3, 0, 3]` and `[5, 5, 5]` produce `[0, 0.5, 1]` and `[0, 0, 0]`.
-  - `test_run_intuitive_passes_mu_convention`: monkeypatch `IntuitiveKPrototypes` to capture kwargs, then assert that `kwargs["mu_convention"] == "swapped"`.
-
-- [ ] **Step 2: Run to verify they fail**
-
-Run: `... -m pytest tests/test_intuitive_protocol.py -q`
-
-Expected: KeyError or AttributeError.
-
-- [ ] **Step 3: Implement.**
-  - Add the field and the validation (allowed values: `MU_CONVENTIONS`).
-  - Add the protocol `intuitive_fpmax_study_v1` to the JSON. Copy the current default protocol and change three fields:
-    - `"mu_convention": "swapped"`
-    - `"ffs_min_improvement": 0.005`
-    - `"numeric_preprocessing": "minmax"`
-  - Wire `mu_convention` into `run_intuitive_kprototypes`.
-  - Existing protocols get `"mu_convention": "eq26"` so that old results remain reproducible.
-
-- [ ] **Step 4: Run all tests**
-
-Run: `... -m pytest tests -q`
-
-Expected: all pass.
-
-- [ ] **Step 5: Commit** with the message "Add the FP-Max study Intuitive protocol with swapped mu and min-max input".
+**Delivered:** `run_intuitive_kprototypes(..., mu_convention="eq26")` passes the
+option to the model and records it in `IntuitiveClusteringResult.mu_convention`;
+`minmax_scale_block(df)` in `src/pipeline/clustering.py`; tests in
+`tests/test_clustering.py`.
 
 ---
 
