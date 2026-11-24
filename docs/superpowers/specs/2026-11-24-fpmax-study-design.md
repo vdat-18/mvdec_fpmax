@@ -76,9 +76,12 @@ Tôi đã đọc toàn bộ 3 paper và audit toàn bộ codebase (3 luồng đ�
 - Khối số được min-max scale về [0, 1] trước khi vào K-Prototypes và Intuitive.
 
 **Cách chọn siêu tham số FP-Max (bins, strategy, min_support):**
-- Chọn bằng silhouette, không dùng nhãn.
-- Tách chọn và đánh giá: chọn trên seed backbone A, báo cáo trên các seed B..J.
-- Báo cáo cả phân phối của toàn grid, không chỉ giá trị max.
+- **Cập nhật 2026-11-25 (thay thế các dòng chọn cấu hình ban đầu):** không chọn cấu hình nào.
+  Smoke run cho thấy chọn theo silhouette tham chiếu thiên về cấu hình ít itemset nhất
+  (gần như không đổi so với `none`). Mỗi cấu hình trong lưới là một nhánh riêng, chạy
+  trên mọi seed báo cáo, và báo cáo toàn bộ phân phối. Lưới: strategy {uniform, quantile}
+  × bins {3, 5} × min_support {0.8 ... 0.2}, tối đa 60 itemset mỗi cấu hình.
+- Cấu hình có cùng tập itemset (cùng `itemset_signature`) chỉ được tính một lần khi thống kê.
 
 ### Dữ liệu
 

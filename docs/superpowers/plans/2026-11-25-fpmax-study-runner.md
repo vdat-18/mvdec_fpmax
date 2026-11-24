@@ -448,6 +448,25 @@ BCW `kprototypes` runs through `KModes`; every group has all arms on both seeds 
 
 ---
 
+## Change after the smoke run: every FP-Max setting is reported (2026-11-25)
+
+The smoke run showed that choosing one setting by reference silhouette favours the
+setting with the fewest itemsets, which drifts toward `none` by construction. Decision
+(user): report every configuration. Consequences already implemented:
+
+- No selection step and no selection seeds: `seeds` in the config only has `report`;
+  `select_fpmax_setting` and the `phase` column are gone.
+- Every grid setting that mined itemsets is its own arm (`fpmax`, `fpmax_ffs`) on every
+  report seed; the setting is in the `strategy`, `n_bins`, `min_support` columns.
+  Settings that mined nothing, too much, or were skipped get one seedless `fpmax` row
+  with that status.
+- `itemset_signature` (hash of the itemset column names) lets Step 4 collapse settings
+  that mined identical itemsets, so they are not counted as independent samples.
+- Label archive keys are `fpmax__<strategy>-<bins>-<support>__<seed>` and
+  `fpmax_ffs__<strategy>-<bins>-<support>__<seed>`.
+- Step 4 must aggregate across settings (distribution over settings, per-setting paired
+  tests with Holm correction over all of them), never by picking the best setting.
+
 ## Out of scope (next plans)
 
 - **Step 3 plan:** run all eight UCI datasets and both applications; train DEKM

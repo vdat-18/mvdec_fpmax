@@ -59,7 +59,6 @@ class ApplicationSpec:
 class StudyConfig:
     """Validated FP-Max study protocol."""
 
-    selection_seeds: tuple[int, ...]
     report_seeds: tuple[int, ...]
     fpmax_strategies: tuple[str, ...]
     fpmax_n_bins: tuple[int, ...]
@@ -148,14 +147,10 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         msg = f"Unsupported study config schema: {raw['schema_version']!r}."
         raise ValueError(msg)
 
-    seeds = _exact_keys(raw["seeds"], {"selection", "report"}, "seeds")
-    selection = _int_list(seeds["selection"], "seeds.selection")
+    seeds = _exact_keys(raw["seeds"], {"report"}, "seeds")
     report = _int_list(seeds["report"], "seeds.report")
-    if any(not 0 <= seed <= MAX_SEED for seed in (*selection, *report)):
+    if any(not 0 <= seed <= MAX_SEED for seed in report):
         msg = f"Study config seeds must lie in [0, {MAX_SEED}]."
-        raise ValueError(msg)
-    if set(selection) & set(report):
-        msg = "Study config selection and report seeds must be disjoint."
         raise ValueError(msg)
 
     fpmax = _exact_keys(
@@ -254,7 +249,6 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         raise ValueError(msg)
 
     return StudyConfig(
-        selection_seeds=selection,
         report_seeds=report,
         fpmax_strategies=strategies,
         fpmax_n_bins=n_bins,

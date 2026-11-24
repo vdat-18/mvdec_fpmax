@@ -1,6 +1,10 @@
-"""Run one (dataset, algorithm) group of the FP-Max study and write long-format CSV."""
+"""Run one (dataset, algorithm) group of the FP-Max study and write long-format CSV.
 
-from dataclasses import dataclass
+Every FP-Max grid setting is its own arm on every report seed; nothing is selected
+from the grid, so the whole distribution of outcomes is reported.
+"""
+
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -29,12 +33,12 @@ STUDY_COLUMNS = (
     "backbone",
     "algorithm",
     "arm",
-    "phase",
     "seed",
     "strategy",
     "n_bins",
     "min_support",
     "n_itemsets",
+    "itemset_signature",
     "n_selected",
     "status",
     "error",
@@ -49,17 +53,8 @@ STUDY_COLUMNS = (
     "labels_hash",
 )
 STATUS_SKIPPED_AFTER_TOO_MANY = "skipped_after_too_many_itemsets"
-STATUS_NO_SETTING = "no_valid_fpmax_setting"
 STATUS_BASELINE_UNAVAILABLE = "baseline_unavailable"
 STATUS_FFS_BASELINE_INVALID = "ffs_baseline_invalid"
-
-
-@dataclass(frozen=True)
-class SettingChoice:
-    """The FP-Max setting picked on selection seeds, with every selection row."""
-
-    setting: FpmaxSetting | None
-    rows: list[dict]
 
 
 def build_grid_blocks(
@@ -98,6 +93,13 @@ def build_grid_blocks(
     return blocks
 
 
+def itemset_signature(block: ItemsetBlock) -> str:
+    """Short hash of the itemset columns, so identical blocks can be deduplicated."""
+
+    names = "\n".join(sorted(block.columns.columns))
+    return hashlib.sha256(names.encode("utf-8")).hexdigest()[:12]
+
+
 def _evaluate(
     data: StudyData,
     reference: ReferenceSpace,
@@ -129,7 +131,6 @@ def _row(
     data: StudyData,
     algorithm: str,
     arm: str,
-    phase: str,
     seed: int | None,
     status: str,
     *,
@@ -142,7 +143,6 @@ def _row(
         backbone=data.backbone,
         algorithm=algorithm,
         arm=arm,
-        phase=phase,
         seed=seed,
         status=status,
         error="",
@@ -162,7 +162,6 @@ def _fit_row(
     reference: ReferenceSpace,
     algorithm: str,
     arm: str,
-    phase: str,
     seed: int,
     fit: ArmFit,
     *,
@@ -173,7 +172,6 @@ def _fit_row(
         data,
         algorithm,
         arm,
-        phase,
         seed,
         fit.status,
         setting=setting,
@@ -182,62 +180,6 @@ def _fit_row(
         **_evaluate(data, reference, fit.labels),
         **values,
     )
-
-
-def select_fpmax_setting(
-    data: StudyData,
-    algorithm: str,
-    study: StudyConfig,
-    reference: ReferenceSpace,
-    blocks: dict[FpmaxSetting, ItemsetBlock],
-) -> SettingChoice:
-    """Pick the setting with the best mean reference silhouette on selection seeds.
-
-    Only settings whose fits are valid on every selection seed compete; ties go to
-    the earlier grid position. Report seeds are never touched here. True labels are
-    only read to fill the (transparency-only) external-metric columns.
-    """
-
-    rows: list[dict] = []
-    best: tuple[float, FpmaxSetting] | None = None
-    for setting, block in blocks.items():
-        if block.status != "ok":
-            rows.append(
-                _row(
-                    data,
-                    algorithm,
-                    "fpmax",
-                    "select",
-                    None,
-                    block.status,
-                    setting=setting,
-                    n_itemsets=block.n_itemsets,
-                )
-            )
-            continue
-        scores: list[float] = []
-        for seed in study.selection_seeds:
-            fit = fit_arm(data, algorithm, block.columns, seed, study)
-            row = _fit_row(
-                data,
-                reference,
-                algorithm,
-                "fpmax",
-                "select",
-                seed,
-                fit,
-                setting=setting,
-                n_itemsets=block.n_itemsets,
-            )
-            rows.append(row)
-            scores.append(
-                row["ref_silhouette"] if fit.status == STATUS_OK else float("nan")
-            )
-        if scores and not any(np.isnan(scores)):
-            mean_score = float(np.mean(scores))
-            if best is None or mean_score > best[0]:
-                best = (mean_score, setting)
-    return SettingChoice(setting=None if best is None else best[1], rows=rows)
 
 
 def _write_outputs(
@@ -253,13 +195,88 @@ def _write_outputs(
     return csv_path
 
 
+def _setting_key(setting: FpmaxSetting) -> str:
+    return f"{setting.strategy}-{setting.n_bins}-{setting.min_support}"
+
+
+def _run_setting(
+    data: StudyData,
+    algorithm: str,
+    study: StudyConfig,
+    reference: ReferenceSpace,
+    setting: FpmaxSetting,
+    block: ItemsetBlock,
+    none_fits: dict[int, ArmFit],
+    rows: list[dict],
+    saved_labels: dict[str, np.ndarray],
+) -> None:
+    """Add the fpmax and fpmax_ffs rows of one grid setting for every report seed."""
+
+    key = _setting_key(setting)
+    shared = {
+        "setting": setting,
+        "n_itemsets": block.n_itemsets,
+        "itemset_signature": itemset_signature(block),
+    }
+    for seed in study.report_seeds:
+        fit = fit_arm(data, algorithm, block.columns, seed, study)
+        rows.append(_fit_row(data, reference, algorithm, "fpmax", seed, fit, **shared))
+        if fit.labels is not None:
+            saved_labels[f"fpmax__{key}__{seed}"] = fit.labels
+
+        baseline = none_fits[seed]
+        if baseline.labels is None:
+            rows.append(
+                _row(
+                    data,
+                    algorithm,
+                    "fpmax_ffs",
+                    seed,
+                    STATUS_BASELINE_UNAVAILABLE,
+                    **shared,
+                )
+            )
+            continue
+        ffs = forward_select_itemsets(
+            data, algorithm, block.columns, seed, study, baseline.labels
+        )
+        ffs_fit = ArmFit(
+            labels=ffs.labels,
+            status=STATUS_OK if ffs.baseline_valid else STATUS_FFS_BASELINE_INVALID,
+            cost=float("nan"),
+            error=None,
+            fit_seconds=float("nan"),
+            init=None,
+        )
+        rows.append(
+            _fit_row(
+                data,
+                reference,
+                algorithm,
+                "fpmax_ffs",
+                seed,
+                ffs_fit,
+                n_selected=len(ffs.selected),
+                ffs_candidates=ffs.n_candidates_evaluated,
+                **shared,
+            )
+        )
+        saved_labels[f"fpmax_ffs__{key}__{seed}"] = ffs.labels
+
+
 def run_group(
     data: StudyData,
     algorithm: str,
     study: StudyConfig,
     out_dir: Path,
 ) -> Path:
-    """Run every arm on every report seed and write the CSV plus a labels archive."""
+    """Run every arm on every report seed and write the CSV plus a labels archive.
+
+    Arms: ``none`` (no itemsets) and, per grid setting, ``fpmax`` (all itemsets) and
+    ``fpmax_ffs`` (forward-selected itemsets). ``kmeans`` only has ``none``. A setting
+    that mined nothing, too much, or was skipped gets one seedless row with its
+    status. Files are rewritten after each stage so a later failure keeps earlier rows.
+    """
 
     if algorithm not in ALGORITHMS:
         msg = f"algorithm must be one of {ALGORITHMS}, got {algorithm!r}."
@@ -277,85 +294,39 @@ def run_group(
     for seed in study.report_seeds:
         fit = fit_arm(data, algorithm, None, seed, study)
         none_fits[seed] = fit
-        rows.append(_fit_row(data, reference, algorithm, "none", "report", seed, fit))
+        rows.append(_fit_row(data, reference, algorithm, "none", seed, fit))
         if fit.labels is not None:
             saved_labels[f"none__{seed}"] = fit.labels
-
-    # Keep the finished none arm on disk even if a later step fails.
     _write_outputs(rows, saved_labels, out_dir, stem)
 
     if algorithm != "kmeans":
         blocks = build_grid_blocks(data, study)
-        choice = select_fpmax_setting(data, algorithm, study, reference, blocks)
-        rows.extend(choice.rows)
-        _write_outputs(rows, saved_labels, out_dir, stem)
-        for seed in study.report_seeds:
-            if choice.setting is None:
-                for arm in ("fpmax", "fpmax_ffs"):
-                    rows.append(
-                        _row(data, algorithm, arm, "report", seed, STATUS_NO_SETTING)
-                    )
-                continue
-            block = blocks[choice.setting]
-            fit = fit_arm(data, algorithm, block.columns, seed, study)
-            rows.append(
-                _fit_row(
-                    data,
-                    reference,
-                    algorithm,
-                    "fpmax",
-                    "report",
-                    seed,
-                    fit,
-                    setting=choice.setting,
-                    n_itemsets=block.n_itemsets,
-                )
-            )
-            if fit.labels is not None:
-                saved_labels[f"fpmax__{seed}"] = fit.labels
-
-            baseline = none_fits[seed]
-            if baseline.labels is None:
+        for setting, block in blocks.items():
+            if block.status != "ok":
                 rows.append(
                     _row(
                         data,
                         algorithm,
-                        "fpmax_ffs",
-                        "report",
-                        seed,
-                        STATUS_BASELINE_UNAVAILABLE,
-                        setting=choice.setting,
+                        "fpmax",
+                        None,
+                        block.status,
+                        setting=setting,
                         n_itemsets=block.n_itemsets,
                     )
                 )
                 continue
-            ffs = forward_select_itemsets(
-                data, algorithm, block.columns, seed, study, baseline.labels
+            _run_setting(
+                data,
+                algorithm,
+                study,
+                reference,
+                setting,
+                block,
+                none_fits,
+                rows,
+                saved_labels,
             )
-            ffs_fit = ArmFit(
-                labels=ffs.labels,
-                status=STATUS_OK if ffs.baseline_valid else STATUS_FFS_BASELINE_INVALID,
-                cost=float("nan"),
-                error=None,
-                fit_seconds=float("nan"),
-                init=None,
-            )
-            rows.append(
-                _fit_row(
-                    data,
-                    reference,
-                    algorithm,
-                    "fpmax_ffs",
-                    "report",
-                    seed,
-                    ffs_fit,
-                    setting=choice.setting,
-                    n_itemsets=block.n_itemsets,
-                    n_selected=len(ffs.selected),
-                    ffs_candidates=ffs.n_candidates_evaluated,
-                )
-            )
-            saved_labels[f"fpmax_ffs__{seed}"] = ffs.labels
+            _write_outputs(rows, saved_labels, out_dir, stem)
 
     csv_path = _write_outputs(rows, saved_labels, out_dir, stem)
     none_rows = [r for r in rows if r["arm"] == "none"]

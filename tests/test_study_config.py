@@ -20,7 +20,6 @@ def _write(tmp_path, payload):
 def test_default_config_loads_and_matches_constraints():
     study = load_study_config(DEFAULT_STUDY_CONFIG_PATH)
 
-    assert study.selection_seeds == (100, 101, 102)
     assert study.report_seeds == tuple(range(10))
     assert study.max_itemsets == 60
     assert study.ffs_min_improvement == 0.005
@@ -31,14 +30,6 @@ def test_default_config_loads_and_matches_constraints():
     assert study.intuitive.for_dataset("unseen").beta == 2.0
     assert set(study.applications) == {"tiki", "airpollution"}
     assert len(study.uci_datasets) == 8
-
-
-def test_seed_sets_must_be_disjoint(tmp_path):
-    payload = _payload()
-    payload["seeds"]["selection"] = [0, 100]
-
-    with pytest.raises(ValueError, match="disjoint"):
-        load_study_config(_write(tmp_path, payload))
 
 
 def test_unknown_or_missing_fields_rejected(tmp_path):
@@ -78,6 +69,7 @@ def test_min_supports_must_be_strictly_descending(tmp_path):
     [
         (("intuitive", "init_strategy"), "farthest-first", "init_strategy"),
         (("seeds", "report"), [-1, 1], "seeds"),
+        (("seeds", "report"), [], "seeds"),
         (("intuitive", "restarts"), 1001, "restarts"),
         (("ffs", "max_rows"), 1, "max_rows"),
         (("data", "uci_datasets"), ["iris", "iris"], "unique"),

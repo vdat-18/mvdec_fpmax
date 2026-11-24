@@ -7,7 +7,6 @@ import pandas as pd
 import pytest
 
 from pipeline import study_runner
-from pipeline.reference_evaluation import build_reference_distance
 from pipeline.study_arms import ArmFit
 from pipeline.study_config import DEFAULT_STUDY_CONFIG_PATH, load_study_config
 from pipeline.study_data import StudyData
@@ -15,14 +14,13 @@ from pipeline.study_itemsets import FpmaxSetting, ItemsetBlock
 from pipeline.study_runner import (
     STUDY_COLUMNS,
     build_grid_blocks,
+    itemset_signature,
     run_group,
-    select_fpmax_setting,
 )
 
 BASE = load_study_config(DEFAULT_STUDY_CONFIG_PATH)
 STUDY = dataclasses.replace(
     BASE,
-    selection_seeds=(100, 101),
     report_seeds=(0, 1),
     fpmax_strategies=("uniform",),
     fpmax_n_bins=(3,),
@@ -60,28 +58,42 @@ def _read(path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def test_group_writes_all_arms_for_every_report_seed(tmp_path):
-    path = run_group(_data(), "kprototypes", STUDY, tmp_path)
+def test_every_ok_setting_is_its_own_arm_on_every_report_seed(tmp_path):
+    data = _data()
+    blocks = build_grid_blocks(data, STUDY)
+    ok_settings = [s for s, b in blocks.items() if b.status == "ok"]
+    assert len(ok_settings) >= 1
 
-    frame = _read(path)
-    report = frame[frame["phase"] == "report"]
+    frame = _read(run_group(data, "kprototypes", STUDY, tmp_path))
 
     assert list(frame.columns) == list(STUDY_COLUMNS)
-    assert set(report["arm"]) == {"none", "fpmax", "fpmax_ffs"}
-    for arm in ("none", "fpmax", "fpmax_ffs"):
-        assert sorted(report[report["arm"] == arm]["seed"]) == [0, 1]
-    assert not set(report["seed"]) & set(STUDY.selection_seeds)
-    assert set(frame[frame["phase"] == "select"]["seed"].dropna()) <= set(
-        STUDY.selection_seeds
-    )
-    assert report["status"].notna().all()
+    assert sorted(frame[frame["arm"] == "none"]["seed"]) == [0, 1]
+    for setting in ok_settings:
+        mask = (frame["strategy"] == setting.strategy) & (
+            frame["min_support"] == setting.min_support
+        )
+        for arm in ("fpmax", "fpmax_ffs"):
+            rows = frame[mask & (frame["arm"] == arm)]
+            assert sorted(rows["seed"]) == [0, 1]
+            assert rows["itemset_signature"].notna().all()
+    assert frame["status"].notna().all()
+
+
+def test_settings_without_itemsets_get_one_seedless_row(tmp_path):
+    study = dataclasses.replace(STUDY, fpmax_min_supports=(1.0, 0.6))
+
+    frame = _read(run_group(_data(), "kprototypes", study, tmp_path))
+    empty = frame[(frame["arm"] == "fpmax") & (frame["status"] == "no_itemsets")]
+
+    assert len(empty) >= 1
+    assert empty["seed"].isna().all()
+    assert 1.0 in set(empty["min_support"])
 
 
 def test_kmeans_group_has_only_the_none_arm(tmp_path):
     frame = _read(run_group(_data(), "kmeans", STUDY, tmp_path))
 
     assert set(frame["arm"]) == {"none"}
-    assert set(frame["phase"]) == {"report"}
 
 
 def test_labels_archive_contains_valid_partitions_only(tmp_path):
@@ -90,6 +102,7 @@ def test_labels_archive_contains_valid_partitions_only(tmp_path):
     archive = np.load(path.with_suffix(".labels.npz"))
 
     assert "none__0" in archive.files
+    assert any(name.startswith("fpmax__uniform-3-") for name in archive.files)
     assert all(len(np.unique(archive[name])) == 2 for name in archive.files)
 
 
@@ -121,25 +134,8 @@ def _scripted_fit(table):
     return fake
 
 
-def test_setting_choice_ignores_report_seed_results(monkeypatch):
-    data = _data()
-    reference = build_reference_distance(data.reference_df)
-    blocks = build_grid_blocks(data, STUDY)
-    good_settings = [s for s, b in blocks.items() if b.status == "ok"]
-    assert good_settings
-
-    baseline = select_fpmax_setting(data, "kprototypes", STUDY, reference, blocks)
-    # sabotage every report-seed fit; selection must not change
-    sabotaged = {(n, seed): None for n in range(0, 80) for seed in STUDY.report_seeds}
-    monkeypatch.setattr(study_runner, "fit_arm", _scripted_fit(sabotaged))
-    again = select_fpmax_setting(data, "kprototypes", STUDY, reference, blocks)
-
-    assert again.setting == baseline.setting
-
-
 def test_failed_fit_is_a_row_with_status_and_error(tmp_path, monkeypatch):
-    table = {(None, 0): None}
-    monkeypatch.setattr(study_runner, "fit_arm", _scripted_fit(table))
+    monkeypatch.setattr(study_runner, "fit_arm", _scripted_fit({(None, 0): None}))
 
     frame = _read(run_group(_data(), "kprototypes", STUDY, tmp_path))
     failed = frame[(frame["arm"] == "none") & (frame["seed"] == 0)]
@@ -148,90 +144,7 @@ def test_failed_fit_is_a_row_with_status_and_error(tmp_path, monkeypatch):
     assert failed.iloc[0]["status"] == "error"
     assert failed.iloc[0]["error"] == "boom"
     ffs = frame[(frame["arm"] == "fpmax_ffs") & (frame["seed"] == 0)]
-    assert ffs.iloc[0]["status"] == "baseline_unavailable"
-
-
-def test_no_valid_setting_marks_fpmax_arms(tmp_path, monkeypatch):
-    def fake(data, algorithm, itemsets, seed, study):
-        if itemsets is not None and seed in study.selection_seeds:
-            return ArmFit(None, "invalid_partition", float("nan"), None, 0.0, None)
-        return ArmFit(GOOD, "ok", 1.0, None, 0.0, "x")
-
-    monkeypatch.setattr(study_runner, "fit_arm", fake)
-
-    frame = _read(run_group(_data(), "kprototypes", STUDY, tmp_path))
-    report = frame[(frame["phase"] == "report") & (frame["arm"] != "none")]
-
-    assert set(report["status"]) == {"no_valid_fpmax_setting"}
-    assert len(report) == 4
-
-
-def test_setting_selection_runs_without_labels():
-    data = _data(labels=False)
-    reference = build_reference_distance(data.reference_df)
-    blocks = build_grid_blocks(data, STUDY)
-
-    choice = select_fpmax_setting(data, "kprototypes", STUDY, reference, blocks)
-
-    assert choice.setting is not None
-
-
-def test_skip_rule_applies_in_grid_order(monkeypatch):
-    calls: list[float] = []
-
-    def fake_build(data, setting, max_itemsets):
-        calls.append(setting.min_support)
-        status = "too_many_itemsets" if setting.min_support <= 0.6 else "ok"
-        return ItemsetBlock(pd.DataFrame(index=range(40)), status, 99)
-
-    monkeypatch.setattr(study_runner, "build_itemset_block", fake_build)
-    study = dataclasses.replace(STUDY, fpmax_min_supports=(0.8, 0.6, 0.4, 0.2))
-
-    blocks = build_grid_blocks(_data(), study)
-
-    assert calls == [0.8, 0.6]
-    assert blocks[FpmaxSetting("uniform", 3, 0.4)].status == (
-        "skipped_after_too_many_itemsets"
-    )
-    assert blocks[FpmaxSetting("uniform", 3, 0.2)].status == (
-        "skipped_after_too_many_itemsets"
-    )
-
-
-def test_unknown_algorithm_is_rejected(tmp_path):
-    with pytest.raises(ValueError, match="algorithm"):
-        run_group(_data(), "dbscan", STUDY, tmp_path)
-
-
-def test_categorical_only_data_uses_a_single_strategy_and_bin_count():
-    study = dataclasses.replace(
-        STUDY,
-        fpmax_strategies=("uniform", "quantile"),
-        fpmax_n_bins=(3, 5),
-        fpmax_min_supports=(0.6, 0.4),
-    )
-    data = dataclasses.replace(_data(), numeric=pd.DataFrame(index=range(40)))
-
-    blocks = build_grid_blocks(data, study)
-
-    assert len(blocks) == 2
-    assert {(s.strategy, s.n_bins) for s in blocks} == {("uniform", 3)}
-
-
-def test_selection_does_not_depend_on_true_labels():
-    reference_data = _data()
-    shuffled = dataclasses.replace(
-        reference_data, labels=np.random.default_rng(1).permutation(GOOD)
-    )
-    reference = build_reference_distance(reference_data.reference_df)
-    blocks = build_grid_blocks(reference_data, STUDY)
-
-    original = select_fpmax_setting(
-        reference_data, "kprototypes", STUDY, reference, blocks
-    )
-    permuted = select_fpmax_setting(shuffled, "kprototypes", STUDY, reference, blocks)
-
-    assert original.setting == permuted.setting
+    assert set(ffs["status"]) == {"baseline_unavailable"}
 
 
 def test_systemic_failure_raises_but_keeps_the_rows_written(tmp_path, monkeypatch):
@@ -263,3 +176,54 @@ def test_ffs_with_invalid_baseline_is_flagged(tmp_path, monkeypatch):
     ffs = frame[frame["arm"] == "fpmax_ffs"]
 
     assert set(ffs["status"]) == {"ffs_baseline_invalid"}
+
+
+def test_skip_rule_applies_in_grid_order(monkeypatch):
+    calls: list[float] = []
+
+    def fake_build(data, setting, max_itemsets):
+        calls.append(setting.min_support)
+        status = "too_many_itemsets" if setting.min_support <= 0.6 else "ok"
+        return ItemsetBlock(pd.DataFrame(index=range(40)), status, 99)
+
+    monkeypatch.setattr(study_runner, "build_itemset_block", fake_build)
+    study = dataclasses.replace(STUDY, fpmax_min_supports=(0.8, 0.6, 0.4, 0.2))
+
+    blocks = build_grid_blocks(_data(), study)
+
+    assert calls == [0.8, 0.6]
+    assert blocks[FpmaxSetting("uniform", 3, 0.4)].status == (
+        "skipped_after_too_many_itemsets"
+    )
+    assert blocks[FpmaxSetting("uniform", 3, 0.2)].status == (
+        "skipped_after_too_many_itemsets"
+    )
+
+
+def test_categorical_only_data_uses_a_single_strategy_and_bin_count():
+    study = dataclasses.replace(
+        STUDY,
+        fpmax_strategies=("uniform", "quantile"),
+        fpmax_n_bins=(3, 5),
+        fpmax_min_supports=(0.6, 0.4),
+    )
+    data = dataclasses.replace(_data(), numeric=pd.DataFrame(index=range(40)))
+
+    blocks = build_grid_blocks(data, study)
+
+    assert len(blocks) == 2
+    assert {(s.strategy, s.n_bins) for s in blocks} == {("uniform", 3)}
+
+
+def test_itemset_signature_identifies_identical_blocks():
+    a = ItemsetBlock(pd.DataFrame({"fp|x": [0, 1], "fp|y": [1, 0]}), "ok", 2)
+    same = ItemsetBlock(pd.DataFrame({"fp|y": [1, 0], "fp|x": [0, 1]}), "ok", 2)
+    other = ItemsetBlock(pd.DataFrame({"fp|x": [0, 1]}), "ok", 1)
+
+    assert itemset_signature(a) == itemset_signature(same)
+    assert itemset_signature(a) != itemset_signature(other)
+
+
+def test_unknown_algorithm_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="algorithm"):
+        run_group(_data(), "dbscan", STUDY, tmp_path)
