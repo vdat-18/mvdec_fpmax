@@ -7,6 +7,9 @@ All numbers below are means over 50 runs, `empty_cluster_policy="farthest"`,
 Soybean without constant columns, produced by
 `scripts/run_scenario_sweep.py --grid rows --runs 50`.
 
+> **Latest result: see "Round 3" near the end.** Earlier tables use `beta = 2` for
+> every dataset and are kept as history.
+
 ## Formula level (done)
 
 Paper tables 2-9 and the Iris numeric example reproduce in `tests/` (13 tests
@@ -123,6 +126,71 @@ not exactly.
 
 Not yet run: H3 (Fig. 5 calibration), H4 (Eq. (4) reading), H5 (lambda, beta),
 H6 (metric definitions).
+
+## Round 3 (H3-H6): the weight index beta was the missing parameter
+
+**H3, Fig. 5 calibration** (`mu` sweep 0..1 on BCW, Australian, Heart-2). The paper's
+Heart curve has a plateau for mu <= 0.5 and a cliff from about 0.55. The code with
+`1 - mu` reproduces that shape (plateau for paper-mu 0.1-0.5, collapse from 0.6),
+while Eq. (26) as printed puts the plateau at mu 0.5-0.9. This supports the
+`swapped` orientation. Two differences remain: the paper's BCW curve is flat for
+every mu (ours collapses for paper-mu >= 0.7 and at 0), and its Australian curve
+is flat at 0.855 up to mu 0.65 (ours collapses over most of the range at beta = 2).
+
+**H4, Eq. (4) readings** (`paper`, linear, square-of-sum, clipped `table`): the
+first three are nearly identical on these sets and the clipped table rule makes
+Heart worse. None moves Australian to its plateau. Not adopted.
+
+**H5, beta and lambda** (unlisted in every table). `lambda` has no effect.
+`beta` does: larger values give a near-exact match on several datasets, and the
+best value differs per dataset (Iris is exact at 2-3 and degrades from 8;
+BCW and Soybean need >= 5; Heart-2 about 20; Australian is erratic for 8-20 and
+stable and matching from 30). The paper's own conclusion says parameter selection
+"requires a lot of debugging experiments", so per-dataset beta is plausible, but
+the values below are inferred by sweeping against the paper, not published.
+
+**H6, metric definitions.** At the tuned beta all seven metrics (PR, RE, AC, F1,
+ARI, FMI, NMI) match: Iris and BCW to three decimals, Heart-2 within 0.003,
+Australian within 0.005. No metric-definition gap.
+
+**Soybean preprocessing.** With the 21 non-constant columns accuracy is 0.994 for
+every beta >= 5; with all 35 columns it drops to 0.77-0.84. The paper's sentence
+"attributes with only one value are removed" is right and Table 10's 35 is the
+inconsistent figure.
+
+### Final table (Algorithm 1 `first`, 1 restart, 50 runs)
+
+`run_paper_benchmark.py --mu-convention swapped --beta-mode tuned` on
+`iris, ionosphere, bcw, soybean_small_no_constants, australian_credit_approval,
+heart_cleveland_2, chess_ten_fifteen, heart_cleveland_5`, against the paper's
+"with select prototypes" row.
+
+| Dataset | beta | ACC (ours / paper) | ARI | NMI | Verdict |
+| --- | ---: | --- | --- | --- | --- |
+| iris | 2 | 0.960 / 0.960 | 0.886 / 0.886 | 0.864 / 0.864 | exact |
+| bcw | 8 | 0.950 / 0.950 | 0.807 / 0.807 | 0.697 / 0.697 | exact, all 7 metrics |
+| heart_cleveland_2 | 20 | 0.825 / 0.825 | 0.420 / 0.420 | 0.330 / 0.333 | match |
+| australian_credit_approval | 50 | 0.858 / 0.856 | 0.512 / 0.507 | 0.434 / 0.429 | match |
+| soybean (21 cols) | 8 | 0.994 / 1.000 | 0.991 / 1.000 | 0.993 / 1.000 | near (1 of 50 runs imperfect) |
+| chess_ten_fifteen | 3 | 0.807 / 0.756 | 0.380 / 0.347 | 0.311 / 0.316 | within paper std (0.086 / 0.122 / 0.111) |
+| ionosphere | 2 | 0.683 / 0.800 | 0.131 / 0.334 | 0.085 / 0.275 | no match (matches the plain row, 0.710) |
+| heart_cleveland_5 | 3 | 0.448 / 0.547 | 0.221 / 0.356 | 0.205 / 0.240 | no match |
+
+Heart-5 comes close only away from the listed parameters: paper-mu 0.5 instead of
+0.3 gives 0.554-0.579 / 0.338-0.371 / 0.221-0.234 (gap 0.015). That is one dataset
+fitted over three parameters, so it is recorded as a lead, not adopted.
+
+### Deviations to declare when using this configuration
+
+1. `mu_convention="swapped"`: passes `1 - mu` into Eq. (26); the printed formula
+   collapses clusters at the mu values the paper recommends.
+2. Per-dataset `beta` (`TUNED_BETA`): inferred against the paper, never published.
+3. Soybean `mu = 0.2` (Table 14 lists none) and 21 columns.
+4. Algorithm 1 line 18 resolved as "first admissible row".
+
+The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
+schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid
+(2-5) and mu grid are the pipeline's own search space, not this replication.
 
 ## Caveats
 

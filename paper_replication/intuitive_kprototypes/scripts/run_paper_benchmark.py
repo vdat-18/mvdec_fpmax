@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import sys
 from dataclasses import dataclass
@@ -79,11 +80,13 @@ PAPER_CONFIGS: dict[str, DatasetConfig] = {
     "soybean_small": DatasetConfig(
         key="soybean_small",
         table="Table 14",
+        mu_param=0.2,  # Table 14 lists no mu; 0.2 is inside the paper's 0-0.4 range
         gamma=0.5,
     ),
     "soybean_small_no_constants": DatasetConfig(
         key="soybean_small_no_constants",
         table="Table 14 alternate",
+        mu_param=0.2,  # Table 14 lists no mu; 0.2 is inside the paper's 0-0.4 range
         gamma=0.5,
     ),
     "australian_credit_approval": DatasetConfig(
@@ -280,6 +283,22 @@ PAPER_NO_SELECT_ACCURACY_STD: dict[str, float] = {
 }
 
 
+# The paper never lists the weight index beta per dataset (Table 8 uses 2). These
+# values were chosen by sweeping beta against Tables 11-18 (see
+# INTUITIVE_REPRODUCTION_STATUS.md); they are inferred, not published.
+TUNED_BETA: dict[str, float] = {
+    "iris": 2.0,
+    "ionosphere": 2.0,
+    "bcw": 8.0,
+    "soybean_small": 8.0,
+    "soybean_small_no_constants": 8.0,
+    "australian_credit_approval": 50.0,
+    "heart_cleveland_2": 20.0,
+    "chess_ten_fifteen": 3.0,
+    "heart_cleveland_5": 3.0,
+}
+
+
 DEFAULT_DATASETS = (
     "iris",
     "ionosphere",
@@ -421,7 +440,9 @@ def _summarize(
         summary[f"{name}_mean"] = float(values.mean()) if len(values) else np.nan
         summary[f"{name}_std"] = float(values.std(ddof=0)) if len(values) else np.nan
 
-        paper = PAPER_WITH_SELECT_METRICS.get(config.key, {}).get(name)
+        paper = PAPER_WITH_SELECT_METRICS.get(
+            config.key.removesuffix("_no_constants"), {}
+        ).get(name)
         summary[f"{name}_paper"] = paper if paper is not None else np.nan
         summary[f"{name}_delta"] = (
             summary[f"{name}_mean"] - paper if paper is not None else np.nan
@@ -534,6 +555,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--beta-mode",
+        choices=["paper", "tuned"],
+        default="paper",
+        help=(
+            "'paper' uses beta = 2 for every dataset (the Table 8 example). "
+            "'tuned' uses TUNED_BETA, inferred by sweeping beta against the paper."
+        ),
+    )
+    parser.add_argument(
         "--init-strategy",
         choices=INIT_STRATEGIES,
         default="first",
@@ -586,6 +616,8 @@ def main() -> None:
             raise ValueError(msg)
 
         config = PAPER_CONFIGS[key]
+        if args.beta_mode == "tuned":
+            config = dataclasses.replace(config, beta=TUNED_BETA[key])
         meta = manifest[key]
         frame = pd.read_csv(data_dir / meta["processed_csv"])
         X_num, X_cat, y_true = _split_features(frame, meta)
