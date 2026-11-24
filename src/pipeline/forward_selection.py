@@ -5,18 +5,19 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from kmodes.kprototypes import KPrototypes
 from loguru import logger
 
-from config import KPROTOTYPES_N_INIT, RANDOM_STATE
+from config import RANDOM_STATE
 from pipeline.clustering import (
     DEFAULT_INIT_METHODS,
-    compute_mixed_gower_distance,
-    compute_silhouette_diagnostics,
     make_mixed_features,
+    run_kprototypes,
 )
 
 DEFAULT_FFS_MIN_IMPROVEMENT = 0.0
+# Gain a candidate must exceed in the FP-Max study; the legacy default accepts
+# floating-point noise and lets greedy selection chase it.
+STUDY_FFS_MIN_IMPROVEMENT = 0.005
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class ForwardSelectionResult:
     init: str | None
     silhouette_sample_std: float
     silhouette_negative_fraction: float
+    n_candidates_evaluated: int = 0
 
 
 @dataclass(frozen=True)
@@ -100,72 +102,42 @@ def run_forward_selection_candidate(
 
     context = _FORWARD_SELECTION_CANDIDATE_CONTEXT
     candidate_binary_df = context.binary_df[list(candidate.candidate_names)]
-    combined_df, categorical_idx, _ = make_mixed_features(
-        continuous_df=context.continuous_df,
-        binary_df=candidate_binary_df,
-    )
-    distance_matrix = compute_mixed_gower_distance(
-        context.continuous_df,
-        candidate_binary_df,
-    )
-
-    if not np.isfinite(distance_matrix).all():
-        msg = f"Gower matrix contains non-finite values for {candidate.feature_name}."
-        raise ValueError(msg)
-
-    best_score = -np.inf
-    best_labels: np.ndarray | None = None
-    best_init: str | None = None
-    best_sample_std = np.nan
-    best_negative_fraction = np.nan
-    logs: list[tuple[str, str, float]] = []
-
-    for init in context.init_methods:
-        model = KPrototypes(
-            n_clusters=context.n_clusters,
-            init=init,
-            n_init=KPROTOTYPES_N_INIT,
+    try:
+        result = run_kprototypes(
+            context.continuous_df,
+            candidate_binary_df,
+            context.n_clusters,
+            init_methods=context.init_methods,
             random_state=context.random_state,
-            verbose=0,
+            verbose=False,
         )
-        try:
-            labels = model.fit_predict(
-                combined_df.to_numpy(),
-                categorical=categorical_idx,
-            )
-        except ValueError as error:
-            if "could not initialize" not in str(error):
-                raise
-            logger.warning(
-                "Skip candidate {} with init={} because K-Prototypes could not "
-                "initialize.",
-                candidate.feature_name,
-                init,
-            )
-            continue
-        score, sample_std, negative_fraction = compute_silhouette_diagnostics(
-            distance_matrix,
-            labels,
+    except RuntimeError:
+        logger.warning(
+            "Skip candidate {}: no valid K-Prototypes partition.",
+            candidate.feature_name,
         )
-        logs.append((candidate.feature_name, init, float(score)))
-
-        if score > best_score:
-            best_score = score
-            best_labels = labels
-            best_init = init
-            best_sample_std = sample_std
-            best_negative_fraction = negative_fraction
+        return ForwardSelectionCandidateResult(
+            idx=candidate.idx,
+            candidate_names=candidate.candidate_names,
+            labels=None,
+            init=None,
+            score=-np.inf,
+            best_observed_score=-np.inf,
+            logs=(),
+            silhouette_sample_std=np.nan,
+            silhouette_negative_fraction=np.nan,
+        )
 
     return ForwardSelectionCandidateResult(
         idx=candidate.idx,
         candidate_names=candidate.candidate_names,
-        labels=best_labels,
-        init=best_init,
-        score=float(best_score),
-        best_observed_score=float(best_score),
-        logs=tuple(logs),
-        silhouette_sample_std=float(best_sample_std),
-        silhouette_negative_fraction=float(best_negative_fraction),
+        labels=result.labels,
+        init=result.init,
+        score=result.score,
+        best_observed_score=result.score,
+        logs=((candidate.feature_name, result.init, result.score),),
+        silhouette_sample_std=result.silhouette_sample_std,
+        silhouette_negative_fraction=result.silhouette_negative_fraction,
     )
 
 
@@ -200,6 +172,7 @@ def run_forward_selection(
     best_sample_std = np.nan
     best_negative_fraction = np.nan
     best_observed_score = -np.inf
+    n_candidates_evaluated = 0
     candidate_context = ForwardSelectionCandidateContext(
         continuous_df=continuous_df,
         binary_df=binary_df,
@@ -240,6 +213,7 @@ def run_forward_selection(
                 for candidate in candidate_jobs
             ]
 
+        n_candidates_evaluated += len(candidate_results)
         for result in candidate_results:
             for feature_name, init, score in result.logs:
                 if verbose:
@@ -309,6 +283,7 @@ def run_forward_selection(
         init=best_init,
         silhouette_sample_std=float(best_sample_std),
         silhouette_negative_fraction=float(best_negative_fraction),
+        n_candidates_evaluated=n_candidates_evaluated,
     )
 
 

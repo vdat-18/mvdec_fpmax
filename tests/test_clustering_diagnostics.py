@@ -131,6 +131,8 @@ def test_forward_selection_kprototypes_n_init_is_explicit(monkeypatch) -> None:
     captured: list[dict[str, object]] = []
 
     class FakeKPrototypes:
+        cost_ = 1.0
+
         def __init__(self, **kwargs) -> None:
             captured.append(kwargs)
 
@@ -138,7 +140,7 @@ def test_forward_selection_kprototypes_n_init_is_explicit(monkeypatch) -> None:
             del matrix, categorical
             return np.array([0, 0, 0, 1, 1, 1])
 
-    monkeypatch.setattr(forward_selection, "KPrototypes", FakeKPrototypes)
+    monkeypatch.setattr(clustering, "KPrototypes", FakeKPrototypes)
     forward_selection.run_forward_selection(
         continuous_df=pd.DataFrame({"x": [0.0, 0.1, 0.2, 4.8, 4.9, 5.0]}),
         binary_df=pd.DataFrame({"pattern": [1, 1, 1, 0, 0, 0]}),

@@ -219,7 +219,7 @@ option to the model and records it in `IntuitiveClusteringResult.mu_convention`;
 **Interfaces:**
 - Consumes: `is_valid_partition`, and `run_kprototypes` as chosen by cost (Task 4).
 - Produces:
-  - `DEFAULT_FFS_MIN_IMPROVEMENT = 0.005`.
+  - `STUDY_FFS_MIN_IMPROVEMENT = 0.005` (the legacy `DEFAULT_FFS_MIN_IMPROVEMENT = 0.0` is kept so existing runs and tests are unchanged; the study runner passes the new value explicitly).
   - Candidates whose best partition is invalid get `score = -inf` and are never selected.
   - Silhouette is computed only for valid partitions.
   - `ForwardSelectionResult.n_candidates_evaluated: int`, so the search size can be reported.
