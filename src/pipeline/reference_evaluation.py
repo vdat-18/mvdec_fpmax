@@ -17,9 +17,11 @@ from sklearn.metrics import (
     davies_bouldin_score,
     silhouette_score,
 )
+from sklearn.metrics.pairwise import cosine_distances
 
 from pipeline.clustering import is_valid_partition
 
+REFERENCE_METRICS = ("gower", "cosine")
 DEFAULT_MAX_ROWS = 3000
 EMBEDDING_DIMENSIONS = 10
 
@@ -55,13 +57,32 @@ def _classical_mds(distance: np.ndarray, n_components: int) -> np.ndarray:
     return vectors[:, order] * np.sqrt(top_values)
 
 
+def gower_distance_matrix(df: pd.DataFrame) -> np.ndarray:
+    """Gower distances for mixed numeric and text columns."""
+
+    # gower cannot interpret pandas' extension string dtype; plain object works.
+    text_columns = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+    prepared = df.reset_index(drop=True).astype(
+        {column: object for column in text_columns}
+    )
+    return np.asarray(gower.gower_matrix(prepared), dtype=float)
+
+
 def build_reference_distance(
     df: pd.DataFrame,
     max_rows: int = DEFAULT_MAX_ROWS,
     random_state: int = 0,
+    metric: str = "gower",
 ) -> ReferenceSpace:
-    """Build the Gower reference space, subsampling rows above ``max_rows``."""
+    """Build the reference space, subsampling rows above ``max_rows``.
 
+    ``metric="gower"`` handles mixed columns; ``"cosine"`` needs a numeric frame
+    (tf-idf rows) and ignores row scale.
+    """
+
+    if metric not in REFERENCE_METRICS:
+        msg = f"metric must be one of {REFERENCE_METRICS}, got {metric!r}."
+        raise ValueError(msg)
     n_rows = len(df)
     if n_rows > max_rows:
         rng = np.random.default_rng(random_state)
@@ -69,12 +90,11 @@ def build_reference_distance(
     else:
         row_index = np.arange(n_rows)
     sample = df.iloc[row_index].reset_index(drop=True)
-    # gower cannot interpret pandas' extension string dtype; plain object works.
-    text_columns = [
-        c for c in sample.columns if not pd.api.types.is_numeric_dtype(sample[c])
-    ]
-    sample = sample.astype({column: object for column in text_columns})
-    distance = np.asarray(gower.gower_matrix(sample), dtype=float)
+    if metric == "cosine":
+        distance = np.asarray(cosine_distances(sample.to_numpy(dtype=float)))
+        np.fill_diagonal(distance, 0.0)
+    else:
+        distance = gower_distance_matrix(sample)
     embedding = _classical_mds(distance, min(EMBEDDING_DIMENSIONS, len(sample) - 1))
     return ReferenceSpace(
         distance=distance,

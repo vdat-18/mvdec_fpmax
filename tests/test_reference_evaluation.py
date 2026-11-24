@@ -2,10 +2,12 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pipeline.clustering import compute_mixed_gower_distance
 from pipeline.reference_evaluation import (
     build_reference_distance,
+    gower_distance_matrix,
     pairwise_ari_stability,
     score_internal,
 )
@@ -122,3 +124,41 @@ def test_cluster_lost_by_subsampling_scores_nan() -> None:
 
     assert 2 not in set(labels[space.row_index].tolist())
     assert np.isnan(scores.silhouette)
+
+
+def test_cosine_reference_space_ignores_row_scale() -> None:
+    X = pd.DataFrame({"a": [1.0, 5.0, 0.0], "b": [0.0, 0.0, 1.0]})
+
+    space = build_reference_distance(X, metric="cosine")
+
+    assert space.distance[0, 1] == pytest.approx(0.0)
+    assert space.distance[0, 2] == pytest.approx(1.0)
+
+
+def test_cosine_space_subsamples_and_scores_full_labelling() -> None:
+    rng = np.random.default_rng(4)
+    labels = np.repeat([0, 1], 200)
+    directions = np.where(labels[:, None] == 0, [1.0, 0.1], [0.1, 1.0])
+    X = pd.DataFrame(
+        np.abs(directions + rng.normal(0, 0.05, size=(400, 2))), columns=["a", "b"]
+    )
+    space = build_reference_distance(X, max_rows=100, metric="cosine")
+
+    scores = score_internal(space, labels)
+
+    assert space.distance.shape == (100, 100)
+    assert scores.silhouette > 0.5
+
+
+def test_unknown_metric_is_rejected() -> None:
+    with pytest.raises(ValueError, match="metric"):
+        build_reference_distance(pd.DataFrame({"a": [1.0, 2.0]}), metric="l2")
+
+
+def test_gower_distance_matrix_accepts_string_columns() -> None:
+    df = pd.DataFrame({"num": [0.0, 1.0], "cat": pd.array(["u", "v"], dtype="string")})
+
+    distance = gower_distance_matrix(df)
+
+    assert distance.shape == (2, 2)
+    assert distance[0, 1] > 0
