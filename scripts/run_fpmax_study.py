@@ -1,0 +1,66 @@
+"""Run one (dataset, algorithm) group of the FP-Max study.
+
+One process per group, so groups can be sharded across background processes.
+"""
+
+import argparse
+import dataclasses
+from pathlib import Path
+
+from pipeline.study_arms import ALGORITHMS
+from pipeline.study_config import (
+    DEFAULT_STUDY_CONFIG_PATH,
+    PROJECT_DIR,
+    StudyConfig,
+    load_study_config,
+)
+from pipeline.study_data import (
+    StudyData,
+    load_application_study_data,
+    load_uci_study_data,
+)
+from pipeline.study_runner import run_group
+
+
+def load_named_dataset(name: str, study: StudyConfig) -> StudyData:
+    """Build StudyData for a UCI key or an application name from the config."""
+
+    if name in study.uci_datasets:
+        return load_uci_study_data(name, PROJECT_DIR / study.uci_data_dir)
+    if name in study.applications:
+        spec = study.applications[name]
+        return load_application_study_data(
+            name, PROJECT_DIR / spec.csv_path, spec.n_clusters
+        )
+    known = sorted([*study.uci_datasets, *study.applications])
+    msg = f"Unknown dataset {name!r}; configured datasets: {known}."
+    raise ValueError(msg)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_CONFIG_PATH)
+    parser.add_argument("--dataset", required=True)
+    parser.add_argument("--algorithm", required=True, choices=ALGORITHMS)
+    parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument(
+        "--report-seeds",
+        type=int,
+        default=None,
+        help="Use only the first N report seeds (smoke runs).",
+    )
+    args = parser.parse_args()
+
+    study = load_study_config(args.config)
+    if args.report_seeds is not None:
+        if args.report_seeds < 1:
+            parser.error("--report-seeds must be at least 1.")
+        study = dataclasses.replace(
+            study, report_seeds=study.report_seeds[: args.report_seeds]
+        )
+    data = load_named_dataset(args.dataset, study)
+    print(run_group(data, args.algorithm, study, args.out_dir))
+
+
+if __name__ == "__main__":
+    main()
