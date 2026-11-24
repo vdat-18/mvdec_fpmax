@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from kmodes.kprototypes import KPrototypes
 from loguru import logger
+from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
 
 from config import KPROTOTYPES_N_INIT, RANDOM_STATE
@@ -36,6 +37,8 @@ class KPrototypesResult:
     labels_hash: str
     silhouette_sample_std: float
     silhouette_negative_fraction: float
+    cost: float = float("nan")
+    backend: str = "kprototypes"
 
 
 @dataclass(frozen=True)
@@ -321,60 +324,84 @@ def run_kprototypes(
     random_state: int = RANDOM_STATE,
     verbose: bool = True,
 ) -> KPrototypesResult:
-    """Cluster continuous data with the provided binary features."""
+    """Cluster continuous data with the provided binary features.
+
+    Restarts are compared by the algorithm's own cost, never by silhouette, so the
+    reported silhouette is not the quantity that was optimised. Partitions with an
+    empty or singleton cluster are discarded. Without binary features there is
+    nothing for K-Prototypes to match on, so plain K-Means is used instead.
+    """
 
     combined_df, categorical_idx, binary_feature_names = make_mixed_features(
         continuous_df=continuous_df,
         binary_df=binary_df,
     )
     distance_matrix = compute_mixed_gower_distance(continuous_df, binary_df)
+    has_binary = bool(categorical_idx)
 
-    best_result: KPrototypesResult | None = None
-    for init in init_methods:
+    best: tuple[float, np.ndarray, str, float] | None = None
+    for init in init_methods if has_binary else ("k-means++",):
         fit_start = perf_counter()
-        model = KPrototypes(
-            n_clusters=n_clusters,
-            init=init,
-            n_init=KPROTOTYPES_N_INIT,
-            random_state=random_state,
-            verbose=0,
-        )
-        labels = model.fit_predict(combined_df.to_numpy(), categorical=categorical_idx)
+        if has_binary:
+            model = KPrototypes(
+                n_clusters=n_clusters,
+                init=init,
+                n_init=KPROTOTYPES_N_INIT,
+                random_state=random_state,
+                verbose=0,
+            )
+            labels = model.fit_predict(
+                combined_df.to_numpy(),
+                categorical=categorical_idx,
+            )
+            cost = float(model.cost_)
+        else:
+            model = KMeans(
+                n_clusters=n_clusters,
+                n_init=KPROTOTYPES_N_INIT,
+                random_state=random_state,
+            )
+            labels = model.fit_predict(continuous_df.to_numpy(dtype=float))
+            cost = float(model.inertia_)
         fit_time = perf_counter() - fit_start
-        score, sample_std, negative_fraction = compute_silhouette_diagnostics(
-            distance_matrix,
-            labels,
-        )
 
+        valid = is_valid_partition(labels, n_clusters)
         if verbose:
             logger.info(
-                "backend=kprototypes init={:<5} silhouette={:.4f} "
-                "time={:.3f}s sizes={}",
+                "backend={} init={:<5} cost={:.4f} valid={} time={:.3f}s sizes={}",
+                "kprototypes" if has_binary else "kmeans_equivalent",
                 init,
-                score,
+                cost,
+                valid,
                 fit_time,
                 cluster_sizes(labels, n_clusters),
             )
+        if valid and (best is None or cost < best[0]):
+            best = (cost, labels, init, fit_time)
 
-        if best_result is None or score > best_result.score:
-            best_result = KPrototypesResult(
-                matrix=combined_df.to_numpy(),
-                binary_feature_names=binary_feature_names,
-                labels=labels,
-                score=score,
-                init=init,
-                fit_time_seconds=fit_time,
-                cluster_sizes=cluster_sizes(labels, n_clusters),
-                labels_hash=labels_hash(labels),
-                silhouette_sample_std=sample_std,
-                silhouette_negative_fraction=negative_fraction,
-            )
-
-    if best_result is None:
-        msg = "No clustering result was produced."
+    if best is None:
+        msg = "No valid clustering result was produced."
         raise RuntimeError(msg)
 
-    return best_result
+    cost, labels, init, fit_time = best
+    score, sample_std, negative_fraction = compute_silhouette_diagnostics(
+        distance_matrix,
+        labels,
+    )
+    return KPrototypesResult(
+        matrix=combined_df.to_numpy(),
+        binary_feature_names=binary_feature_names,
+        labels=labels,
+        score=score,
+        init=init,
+        fit_time_seconds=fit_time,
+        cluster_sizes=cluster_sizes(labels, n_clusters),
+        labels_hash=labels_hash(labels),
+        silhouette_sample_std=sample_std,
+        silhouette_negative_fraction=negative_fraction,
+        cost=cost,
+        backend="kprototypes" if has_binary else "kmeans_equivalent",
+    )
 
 
 def run_intuitive_kprototypes(

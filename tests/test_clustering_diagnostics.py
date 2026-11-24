@@ -104,6 +104,8 @@ def test_kprototypes_n_init_is_explicit(monkeypatch) -> None:
     captured: list[dict[str, object]] = []
 
     class FakeKPrototypes:
+        cost_ = 1.0
+
         def __init__(self, **kwargs) -> None:
             captured.append(kwargs)
 
