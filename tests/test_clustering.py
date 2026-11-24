@@ -153,3 +153,43 @@ def test_unrelated_value_error_is_not_swallowed(monkeypatch):
 
     with pytest.raises(ValueError, match="bad input shape"):
         clustering.run_kprototypes(continuous, binary, 2, verbose=False)
+
+
+def test_categorical_only_uses_kmodes():
+    rng = np.random.default_rng(1)
+    group = np.repeat([0, 1], 20)
+    values = np.where(
+        rng.random((40, 3)) < 0.9, group[:, None], 1 - group[:, None]
+    ).astype(str)
+    frame = pd.DataFrame(values, columns=["a", "b", "c"]).astype(object)
+
+    fit = clustering.fit_kprototypes_by_cost(
+        frame,
+        [0, 1, 2],
+        [],
+        2,
+        ("huang", "cao"),
+        random_state=0,
+    )
+
+    assert fit.backend == "kmodes"
+    assert clustering.is_valid_partition(fit.labels, 2)
+
+
+def test_fit_kprototypes_by_cost_matches_run_kprototypes():
+    continuous, binary = _two_blobs()
+    combined, categorical_idx, _ = clustering.make_mixed_features(continuous, binary)
+
+    fit = clustering.fit_kprototypes_by_cost(
+        combined,
+        categorical_idx,
+        list(continuous.columns),
+        2,
+        clustering.DEFAULT_INIT_METHODS,
+        random_state=clustering.RANDOM_STATE,
+    )
+    result = clustering.run_kprototypes(continuous, binary, 2, verbose=False)
+
+    assert np.array_equal(fit.labels, result.labels)
+    assert fit.init == result.init
+    assert fit.backend == "kprototypes"

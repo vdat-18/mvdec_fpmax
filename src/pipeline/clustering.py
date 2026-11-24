@@ -8,6 +8,7 @@ from typing import Literal
 import gower
 import numpy as np
 import pandas as pd
+from kmodes.kmodes import KModes
 from kmodes.kprototypes import KPrototypes
 from loguru import logger
 from sklearn.cluster import KMeans
@@ -316,6 +317,113 @@ def make_mixed_features(
     return combined_df, categorical_idx, binary_feature_names
 
 
+@dataclass(frozen=True)
+class KPrototypesFit:
+    """Best valid restart of a K-Prototypes-family fit."""
+
+    labels: np.ndarray
+    init: str
+    cost: float
+    fit_seconds: float
+    backend: str
+
+
+def fit_kprototypes_by_cost(
+    combined_df: pd.DataFrame,
+    categorical_idx: list[int],
+    numeric_cols: list[str],
+    n_clusters: int,
+    init_methods: tuple[str, ...],
+    random_state: int,
+    verbose: bool = False,
+) -> KPrototypesFit:
+    """Fit K-Prototypes, K-Modes or K-Means and keep the cheapest valid restart.
+
+    Restarts are compared by the algorithm's own cost, never by silhouette, so a
+    reported silhouette is not the quantity that was optimised. Partitions with an
+    empty or singleton cluster are discarded. kmodes' ``KPrototypes`` needs both
+    kinds of columns, so categorical-only data uses ``KModes`` and numeric-only data
+    uses ``KMeans``.
+    """
+
+    if not categorical_idx:
+        backend = "kmeans_equivalent"
+    elif not numeric_cols:
+        backend = "kmodes"
+    else:
+        backend = "kprototypes"
+
+    best: KPrototypesFit | None = None
+    for init in init_methods if backend != "kmeans_equivalent" else ("k-means++",):
+        fit_start = perf_counter()
+        if backend == "kmeans_equivalent":
+            model = KMeans(
+                n_clusters=n_clusters,
+                n_init=KPROTOTYPES_N_INIT,
+                random_state=random_state,
+            )
+            labels = model.fit_predict(combined_df[numeric_cols].to_numpy(dtype=float))
+            cost = float(model.inertia_)
+        else:
+            if backend == "kmodes":
+                model = KModes(
+                    n_clusters=n_clusters,
+                    # KModes special-cases the capitalised spelling of the init.
+                    init=init.capitalize(),
+                    n_init=KPROTOTYPES_N_INIT,
+                    random_state=random_state,
+                    verbose=0,
+                )
+                fit_kwargs: dict[str, object] = {}
+            else:
+                model = KPrototypes(
+                    n_clusters=n_clusters,
+                    init=init,
+                    n_init=KPROTOTYPES_N_INIT,
+                    random_state=random_state,
+                    verbose=0,
+                )
+                fit_kwargs = {"categorical": categorical_idx}
+            try:
+                labels = model.fit_predict(combined_df.to_numpy(), **fit_kwargs)
+            except ValueError as error:
+                if "could not initialize" not in str(error):
+                    raise
+                logger.warning(
+                    "{} init={} could not initialize; trying the next.",
+                    backend,
+                    init,
+                )
+                continue
+            cost = float(model.cost_)
+        fit_seconds = perf_counter() - fit_start
+
+        valid = is_valid_partition(labels, n_clusters)
+        if verbose:
+            logger.info(
+                "backend={} init={:<5} cost={:.4f} valid={} time={:.3f}s sizes={}",
+                backend,
+                init,
+                cost,
+                valid,
+                fit_seconds,
+                cluster_sizes(labels, n_clusters),
+            )
+        if valid and (best is None or cost < best.cost):
+            best = KPrototypesFit(
+                labels=labels,
+                init=init,
+                cost=cost,
+                fit_seconds=fit_seconds,
+                backend=backend,
+            )
+
+    if best is None:
+        msg = "No valid clustering result was produced."
+        raise RuntimeError(msg)
+    return best
+
+
 def run_kprototypes(
     continuous_df: pd.DataFrame,
     binary_df: pd.DataFrame,
@@ -326,10 +434,7 @@ def run_kprototypes(
 ) -> KPrototypesResult:
     """Cluster continuous data with the provided binary features.
 
-    Restarts are compared by the algorithm's own cost, never by silhouette, so the
-    reported silhouette is not the quantity that was optimised. Partitions with an
-    empty or singleton cluster are discarded. Without binary features there is
-    nothing for K-Prototypes to match on, so plain K-Means is used instead.
+    Restart choice and fallbacks are described in ``fit_kprototypes_by_cost``.
     """
 
     combined_df, categorical_idx, binary_feature_names = make_mixed_features(
@@ -337,79 +442,32 @@ def run_kprototypes(
         binary_df=binary_df,
     )
     distance_matrix = compute_mixed_gower_distance(continuous_df, binary_df)
-    has_binary = bool(categorical_idx)
-
-    best: tuple[float, np.ndarray, str, float] | None = None
-    for init in init_methods if has_binary else ("k-means++",):
-        fit_start = perf_counter()
-        if has_binary:
-            model = KPrototypes(
-                n_clusters=n_clusters,
-                init=init,
-                n_init=KPROTOTYPES_N_INIT,
-                random_state=random_state,
-                verbose=0,
-            )
-            try:
-                labels = model.fit_predict(
-                    combined_df.to_numpy(),
-                    categorical=categorical_idx,
-                )
-            except ValueError as error:
-                if "could not initialize" not in str(error):
-                    raise
-                logger.warning(
-                    "K-Prototypes init={} could not initialize; trying the next.",
-                    init,
-                )
-                continue
-            cost = float(model.cost_)
-        else:
-            model = KMeans(
-                n_clusters=n_clusters,
-                n_init=KPROTOTYPES_N_INIT,
-                random_state=random_state,
-            )
-            labels = model.fit_predict(continuous_df.to_numpy(dtype=float))
-            cost = float(model.inertia_)
-        fit_time = perf_counter() - fit_start
-
-        valid = is_valid_partition(labels, n_clusters)
-        if verbose:
-            logger.info(
-                "backend={} init={:<5} cost={:.4f} valid={} time={:.3f}s sizes={}",
-                "kprototypes" if has_binary else "kmeans_equivalent",
-                init,
-                cost,
-                valid,
-                fit_time,
-                cluster_sizes(labels, n_clusters),
-            )
-        if valid and (best is None or cost < best[0]):
-            best = (cost, labels, init, fit_time)
-
-    if best is None:
-        msg = "No valid clustering result was produced."
-        raise RuntimeError(msg)
-
-    cost, labels, init, fit_time = best
+    fit = fit_kprototypes_by_cost(
+        combined_df,
+        categorical_idx,
+        list(continuous_df.columns),
+        n_clusters,
+        init_methods,
+        random_state,
+        verbose=verbose,
+    )
     score, sample_std, negative_fraction = compute_silhouette_diagnostics(
         distance_matrix,
-        labels,
+        fit.labels,
     )
     return KPrototypesResult(
         matrix=combined_df.to_numpy(),
         binary_feature_names=binary_feature_names,
-        labels=labels,
+        labels=fit.labels,
         score=score,
-        init=init,
-        fit_time_seconds=fit_time,
-        cluster_sizes=cluster_sizes(labels, n_clusters),
-        labels_hash=labels_hash(labels),
+        init=fit.init,
+        fit_time_seconds=fit.fit_seconds,
+        cluster_sizes=cluster_sizes(fit.labels, n_clusters),
+        labels_hash=labels_hash(fit.labels),
         silhouette_sample_std=sample_std,
         silhouette_negative_fraction=negative_fraction,
-        cost=cost,
-        backend="kprototypes" if has_binary else "kmeans_equivalent",
+        cost=fit.cost,
+        backend=fit.backend,
     )
 
 
