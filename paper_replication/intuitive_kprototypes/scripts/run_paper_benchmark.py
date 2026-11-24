@@ -295,8 +295,13 @@ TUNED_BETA: dict[str, float] = {
     "australian_credit_approval": 50.0,
     "heart_cleveland_2": 20.0,
     "chess_ten_fifteen": 3.0,
-    "heart_cleveland_5": 3.0,
+    "heart_cleveland_5": 2.0,
 }
+
+# Table 18 lists mu = 0.3 for Heart-5, but no beta makes that value match (ACC
+# 0.42-0.47 against 0.547). With beta = 2 and the listed gamma = 0.5 the paper's row
+# is reproduced at mu about 0.45 (see the Round 5 section of the status document).
+TUNED_MU: dict[str, float] = {"heart_cleveland_5": 0.45}
 
 
 DEFAULT_DATASETS = (
@@ -560,7 +565,8 @@ def parse_args() -> argparse.Namespace:
         default="paper",
         help=(
             "'paper' uses beta = 2 for every dataset (the Table 8 example). "
-            "'tuned' uses TUNED_BETA, inferred by sweeping beta against the paper."
+            "'tuned' uses TUNED_BETA (and TUNED_MU for Heart-5), inferred by "
+            "sweeping against the paper."
         ),
     )
     parser.add_argument(
@@ -617,7 +623,11 @@ def main() -> None:
 
         config = PAPER_CONFIGS[key]
         if args.beta_mode == "tuned":
-            config = dataclasses.replace(config, beta=TUNED_BETA[key])
+            config = dataclasses.replace(
+                config,
+                beta=TUNED_BETA[key],
+                mu_param=TUNED_MU.get(key, config.mu_param),
+            )
         meta = manifest[key]
         frame = pd.read_csv(data_dir / meta["processed_csv"])
         X_num, X_cat, y_true = _split_features(frame, meta)

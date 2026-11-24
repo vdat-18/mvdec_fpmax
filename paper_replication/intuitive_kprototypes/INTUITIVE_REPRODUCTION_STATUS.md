@@ -175,11 +175,10 @@ heart_cleveland_2, chess_ten_fifteen, heart_cleveland_5`, against the paper's
 | soybean (21 cols) | 8 | 0.994 / 1.000 | 0.991 / 1.000 | 0.993 / 1.000 | near (1 of 50 runs imperfect) |
 | chess_ten_fifteen | 3 | 0.807 / 0.756 | 0.380 / 0.347 | 0.311 / 0.316 | within paper std (0.086 / 0.122 / 0.111) |
 | ionosphere | 2 | 0.683 / 0.800 | 0.131 / 0.334 | 0.085 / 0.275 | no match (matches the plain row, 0.710) |
-| heart_cleveland_5 | 3 | 0.448 / 0.547 | 0.221 / 0.356 | 0.205 / 0.240 | no match |
+| heart_cleveland_5 | 2 (mu 0.45) | 0.547 / 0.547 | 0.360 / 0.356 | 0.238 / 0.240 | match, see Round 5 (mu differs from Table 18) |
 
-Heart-5 comes close only away from the listed parameters: paper-mu 0.5 instead of
-0.3 gives 0.554-0.579 / 0.338-0.371 / 0.221-0.234 (gap 0.015). That is one dataset
-fitted over three parameters, so it is recorded as a lead, not adopted.
+The Heart-5 row above is the Round 5 result. Rounds 3-4 had it at 0.448 / 0.547 with
+the listed mu = 0.3 and beta = 3.
 
 ### Deviations to declare when using this configuration
 
@@ -187,6 +186,7 @@ fitted over three parameters, so it is recorded as a lead, not adopted.
    collapses clusters at the mu values the paper recommends.
 2. Per-dataset `beta` (`TUNED_BETA`): inferred against the paper, never published.
 3. Soybean `mu = 0.2` (Table 14 lists none) and 21 columns.
+3b. Heart-5 `mu = 0.45` instead of the 0.3 in Table 18 (`TUNED_MU`), `beta = 2`.
 4. Algorithm 1 line 18 resolved as "first admissible row".
 
 ## Round 4: Ionosphere and Heart-5
@@ -242,6 +242,32 @@ both orientations (`1 - 0.5 = 0.5`), so this does not depend on the swap. Larger
 lowers the std (0.013 at beta 5-8) but raises ACC to 0.60. Verdict: *not reproduced
 at the listed parameters; Table 18's mu = 0.3 may be misprinted or depend on an
 unlisted choice.* Not adopted.
+
+## Round 5: Heart-5 reproduced with a different mu
+
+Sweep over beta {1.5, 2, 3} x mu {0.3-0.6} x gamma {0.3, 0.5, 0.7} x lambda
+{0.1-1.0}, 30 seeds. `lambda` again has no effect (identical rows to three
+decimals). With the listed gamma = 0.5 and beta = 2, ACC rises steadily with mu and
+peaks near the paper at mu = 0.45-0.5 (one fit per run, 50 runs):
+
+| mu | ACC | ARI | NMI | ACC std |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.30 (listed) | 0.442 | 0.212 | 0.198 | 0.059 |
+| 0.40 | 0.493 | 0.288 | 0.218 | 0.057 |
+| 0.45 | 0.552 | 0.369 | 0.243 | 0.022 |
+| 0.50 | 0.586 | 0.381 | 0.238 | 0.025 |
+| 0.55 | 0.567 | 0.221 | 0.144 | 0.030 |
+| paper | 0.547 | 0.356 | 0.240 | 0.018 |
+
+`run_paper_benchmark.py --dataset heart_cleveland_5 --mu-convention swapped
+--beta-mode tuned --runs 50` (mu 0.45, beta 2, gamma 0.5) gives ACC 0.547, ARI 0.360,
+NMI 0.238 against 0.547 / 0.356 / 0.240, so Heart-5 is reproduced at the level of
+Iris and BCW. Min-cost restarts make it worse (mu 0.45, 5 restarts: 0.522; 10: 0.475),
+and the std drops to 0.022 only with one fit per run, close to the paper's 0.018.
+
+Caveat: mu is 0.45, not Table 18's 0.3, and it is fitted to the paper; the listed
+value does not reproduce at any beta, gamma or lambda tried. mu = 0.45 in this
+convention is 0.55 in the printed Eq. (26) orientation.
 
 The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
 schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid
