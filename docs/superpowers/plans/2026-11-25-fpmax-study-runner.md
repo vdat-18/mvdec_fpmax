@@ -467,6 +467,29 @@ setting with the fewest itemsets, which drifts toward `none` by construction. De
 - Step 4 must aggregate across settings (distribution over settings, per-setting paired
   tests with Holm correction over all of them), never by picking the best setting.
 
+## Runtime measurements for the Step 3 budget (full grid, 1 report seed)
+
+Measured with the final runner, one background process per group, 16 logical CPUs
+shared by six processes (so wall times are pessimistic):
+
+| group | wall time for 1 seed | mean single fit | mean FFS candidates per run |
+|---|---|---|---|
+| iris intuitive | 48 s (finished) | 0.4 s | 14 |
+| bcw kprototypes | 238 s (finished) | 1.5 s | 21 |
+| heart_cleveland_2 intuitive | > 9 min (stopped) | 1.8 s | 25 |
+| heart_cleveland_2 kprototypes | > 9 min (stopped) | 2.8 s | 31 |
+| ionosphere kprototypes | > 9 min (stopped) | 3.6 s | 30 |
+| chess_ten_fifteen intuitive | > 9 min (stopped, 9 rows) | 48 s | 2 |
+
+Scaling to 10 report seeds multiplies these by 10. Extrapolation: Iris and BCW groups
+take minutes to an hour; Heart, Ionosphere and Australian take a few hours each;
+**Chess × Intuitive is infeasible as configured** (about 48 s per fit with 5 restarts,
+several FFS candidates per step, up to 14 settings and 10 seeds: tens of hours). The
+Step 3 plan must decide how to cut it: fewer FFS candidates (cap on itemsets for FFS),
+fewer restarts on large datasets, a row subsample for fitting, or running FFS only on
+a few settings. Whatever is chosen must be applied identically to all arms of a
+dataset and recorded in the config.
+
 ## Out of scope (next plans)
 
 - **Step 3 plan:** run all eight UCI datasets and both applications; train DEKM
