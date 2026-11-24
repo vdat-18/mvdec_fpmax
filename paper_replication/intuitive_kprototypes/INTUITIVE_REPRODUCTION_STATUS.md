@@ -286,7 +286,7 @@ tuned --runs 50` against the paper's "with select prototypes" rows:
 | heart_cleveland_5 | 0.547 / 0.547 | 0.360 / 0.356 | 0.238 / 0.240 | match (mu 0.45) |
 | soybean (21 cols) | 0.994 / 1.000 | 0.991 / 1.000 | 0.993 / 1.000 | near |
 | ionosphere | 0.793 / 0.800 | 0.327 / 0.334 | 0.270 / 0.275 | match (fitted init) |
-| chess_ten_fifteen | 0.807 / 0.756 | 0.380 / 0.347 | 0.311 / 0.316 | within paper std |
+| chess_ten_fifteen | 0.785 / 0.756 (Round 6 values) | 0.328 / 0.347 | 0.271 / 0.316 | within paper std |
 
 All eight reproduce under the pre-registered criteria, with the four declared
 deviations above. Three of them (swapped mu, per-dataset beta, Heart-5 mu, the
@@ -309,26 +309,33 @@ the tuned parameters from the final table (50 runs, accuracy mean +- std):
 | australian | random, 10 restarts | 0.858 +- 0.000 | 0.848 +- 0.011 | match |
 | heart_cleveland_2 | random, 10 restarts | 0.821 +- 0.004 | 0.826 +- 0.012 | match |
 | ionosphere | random, 10 restarts | 0.665 +- 0.089 | 0.710 +- 0.119 | match (within paper std) |
-| chess_ten_fifteen | random, 20 restarts | 0.827 +- 0.046 | 0.842 +- 0.000 | within 0.02, std not matched |
-| heart_cleveland_5 | farthest, 1 fit | 0.534 +- 0.068 | 0.546 +- 0.018 | mean within std, std not matched |
+| chess_ten_fifteen | random, 20 restarts (mu 0.3, beta 1.25) | 0.838 +- 0.007 | 0.842 +- 0.000 | match (ARI 0.456 / 0.468, NMI 0.448 / 0.427) |
+| heart_cleveland_5 | Algorithm 1 (`first`), 1 fit | 0.547 +- 0.033 | 0.546 +- 0.018 | match on means (ARI 0.360 / 0.351, NMI 0.238 / 0.241), std 0.033 |
 
 Commands: `run_paper_benchmark.py --mu-convention swapped --beta-mode tuned
 --init-strategy random --restarts-per-run 10` for the first six rows; Chess uses
-`--restarts-per-run 20`; Heart-5 uses `--init-strategy farthest --restarts-per-run 1`
-(random with restarts gives 0.375-0.514 there, because min-cost selection picks
-worse partitions on that set). The cost criterion is the benchmark's assigned
-distance sum.
+`--restarts-per-run 20`; Heart-5 uses the default Algorithm 1 start with one fit
+(`--init-strategy first --restarts-per-run 1`). The cost criterion is the benchmark's
+assigned distance sum.
 
-Chess needed two changes: `beta = 2` (3 gave 0.597 on the plain row) and
-`mu = 0.1` (`TUNED_MU`; Table 17 lists 0.2). At mu 0.02-0.15 and beta 1.25-2 the
-plain row sits on one attractor, 0.834 / 0.445 / 0.369, with std 0.000. The paper's
-0.842 / 0.468 / 0.427 is a close but different partition. The "with select" Chess row
-is now 0.825 / 0.424 / 0.348 against 0.756 / 0.347 / 0.316 (paper std 0.086 / 0.122 /
-0.111), still inside one std.
+**Chess.** A sharded sweep (588 cells: mu x beta x gamma x non-membership x mu
+orientation, 4 runs of 10 restarts) found a plateau at mu 0.3 (swapped; 0.7 in the
+printed Eq. (26) orientation), beta 1.25-1.5, gamma 0-0.5: 0.839 / 0.458 / 0.452 with
+std 0.000 against 0.842 / 0.468 / 0.427. The benchmark with 20 restarts gives
+0.838 +- 0.007 / 0.456 / 0.448 (10 restarts: 0.833 +- 0.017). `TUNED_BETA` is now 1.25
+and `TUNED_MU` 0.3 (Table 17 lists mu 0.2). The "with select" Chess row at these
+values is 0.785 / 0.328 / 0.271 against 0.756 / 0.347 / 0.316, inside one paper std.
 
-Remaining gaps: the std of Chess and Heart-5 on the plain row, and the Chess
-ARI/NMI (0.436 / 0.361 against 0.468 / 0.427). The same fitted-parameter caveat as
-above applies to every row.
+**Heart-5.** A 1,530-cell sweep (mu 0.1-0.9, beta 1.25-8, gamma 0-1, 1/3/10 restarts)
+shows that random initialisation cannot give the paper's mean and its small std
+together. Cells that match the means (0.542 / 0.353 / 0.238) have std 0.09; cells
+with std near 0 settle on another partition (0.555 / 0.229 / 0.133). The paper's two
+Heart-5 rows are almost identical (0.546 and 0.547), and Algorithm 1 with one fit at
+the tuned values reproduces both (0.547 +- 0.033, ARI 0.360, NMI 0.238), so that is
+the protocol listed. Its std, 0.033, is still above the paper's 0.018.
+
+Remaining gap: Heart-5's std, 0.033 against 0.018. The same fitted-parameter caveat
+as above applies to every row.
 
 The pipeline protocol file `configs/intuitive_protocols.json` was not changed: its
 schema is read by `src/pipeline/intuitive_protocol.py`, and its beta grid

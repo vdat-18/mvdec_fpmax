@@ -294,14 +294,14 @@ TUNED_BETA: dict[str, float] = {
     "soybean_small_no_constants": 8.0,
     "australian_credit_approval": 50.0,
     "heart_cleveland_2": 20.0,
-    "chess_ten_fifteen": 2.0,
+    "chess_ten_fifteen": 1.25,
     "heart_cleveland_5": 2.0,
 }
 
 # Table 18 lists mu = 0.3 for Heart-5, but no beta makes that value match (ACC
 # 0.42-0.47 against 0.547). With beta = 2 and the listed gamma = 0.5 the paper's row
 # is reproduced at mu about 0.45 (see the Round 5 section of the status document).
-TUNED_MU: dict[str, float] = {"heart_cleveland_5": 0.45, "chess_ten_fifteen": 0.1}
+TUNED_MU: dict[str, float] = {"heart_cleveland_5": 0.45, "chess_ten_fifteen": 0.3}
 
 # Ionosphere's 0.800 / 0.334 / 0.275 with std 0.000 is only reached at beta near 1
 # with the Chebyshev farthest-point rule, which works through first-index
