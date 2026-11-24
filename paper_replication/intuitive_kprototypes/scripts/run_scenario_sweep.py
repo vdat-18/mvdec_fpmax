@@ -26,7 +26,6 @@ import numpy as np
 import pandas as pd
 
 SANDBOX_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SANDBOX_DIR / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from intuitive_kprototypes import IntuitiveKPrototypes

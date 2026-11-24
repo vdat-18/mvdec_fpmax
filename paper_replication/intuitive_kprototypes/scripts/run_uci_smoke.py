@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from itertools import permutations
 from pathlib import Path
 from typing import Any
@@ -36,8 +35,6 @@ from sklearn.metrics import (
 )
 
 SANDBOX_DIR = Path(__file__).resolve().parents[1]
-SANDBOX_SRC = SANDBOX_DIR / "src"
-sys.path.insert(0, str(SANDBOX_SRC))
 
 from intuitive_kprototypes import IntuitiveKPrototypes  # noqa: E402
 

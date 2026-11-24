@@ -642,7 +642,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-output", type=Path, required=True)
     parser.add_argument(
         "--init-strategy",
-        choices=["farthest_first", "paper"],
+        choices=["farthest_first", "first"],
         default="farthest_first",
     )
     parser.add_argument("--strict-init", action="store_true")

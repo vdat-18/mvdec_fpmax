@@ -1,11 +1,14 @@
 """Intuitive-K-prototypes clustering backend for the main pipeline."""
 
 from intuitive_kprototypes.model import (
+    INIT_STRATEGIES,
+    MU_CONVENTIONS,
     AttributeWeights,
-    InitialPrototypeStrategy,
+    InitStrategy,
     IntuitionisticCentroids,
     IntuitiveKPrototypes,
     IntuitiveKPrototypesResult,
+    MuConvention,
     NonMembershipStrategy,
     NumericComplexityDetails,
     NumericSimilarityDetails,
@@ -15,7 +18,6 @@ from intuitive_kprototypes.model import (
     categorical_weights,
     compute_intuitionistic_centroids,
     mixed_initial_distance_matrix,
-    select_farthest_first_prototypes,
     select_initial_prototypes,
 )
 
@@ -24,7 +26,10 @@ __all__ = [
     "IntuitionisticCentroids",
     "IntuitiveKPrototypes",
     "IntuitiveKPrototypesResult",
-    "InitialPrototypeStrategy",
+    "INIT_STRATEGIES",
+    "MU_CONVENTIONS",
+    "InitStrategy",
+    "MuConvention",
     "NonMembershipStrategy",
     "NumericComplexityDetails",
     "NumericSimilarityDetails",
@@ -34,6 +39,5 @@ __all__ = [
     "categorical_weights",
     "compute_intuitionistic_centroids",
     "mixed_initial_distance_matrix",
-    "select_farthest_first_prototypes",
     "select_initial_prototypes",
 ]

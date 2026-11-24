@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import csv
-import sys
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -17,8 +16,6 @@ import pandas as pd
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 SANDBOX_DIR = Path(__file__).resolve().parents[1]
-SANDBOX_SRC = SANDBOX_DIR / "src"
-sys.path.insert(0, str(SANDBOX_SRC))
 
 from intuitive_kprototypes import IntuitiveKPrototypes  # noqa: E402
 from run_paper_benchmark import PAPER_WITH_SELECT_METRICS  # noqa: E402

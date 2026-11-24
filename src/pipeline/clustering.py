@@ -442,7 +442,7 @@ def run_intuitive_kprototypes(
         converged=bool(result.converged),
         n_iter=int(result.n_iter),
         init_strategy=init_strategy,
-        lambda_init=lambda_init if init_strategy == "paper" else None,
+        lambda_init=lambda_init if init_strategy == "first" else None,
         mu_param=mu_param,
         gamma=gamma,
         beta=beta,
