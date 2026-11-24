@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "seeds": {
+    "selection": [100, 101, 102],
+    "report": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  },
+  "fpmax": {
+    "strategies": ["uniform", "quantile"],
+    "n_bins": [3, 5],
+    "min_supports": [0.4, 0.3, 0.2],
+    "max_itemsets": 60
+  },
+  "ffs": {
+    "min_improvement": 0.005,
+    "max_rows": 1500
+  },
+  "kprototypes": {
+    "init_methods": ["huang", "cao"]
+  },
+  "intuitive": {
+    "mu_convention": "swapped",
+    "init_strategy": "farthest_first",
+    "restarts": 5,
+    "max_iter": 100,
+    "defaults": {"beta": 2.0, "mu": 0.5, "gamma": 0.5},
+    "per_dataset": {
+      "iris": {"beta": 2.0, "mu": 0.5, "gamma": 0.0},
+      "ionosphere": {"beta": 1.05, "mu": 0.5, "gamma": 0.0},
+      "bcw": {"beta": 8.0, "mu": 0.2, "gamma": 0.4},
+      "soybean_small_no_constants": {"beta": 8.0, "mu": 0.2, "gamma": 0.5},
+      "australian_credit_approval": {"beta": 50.0, "mu": 0.2, "gamma": 0.7},
+      "heart_cleveland_2": {"beta": 20.0, "mu": 0.3, "gamma": 0.2},
+      "chess_ten_fifteen": {"beta": 1.25, "mu": 0.3, "gamma": 0.0},
+      "heart_cleveland_5": {"beta": 2.0, "mu": 0.44, "gamma": 0.5}
+    }
+  },
+  "data": {
+    "uci_data_dir": "paper_replication/intuitive_kprototypes/data/uci",
+    "uci_datasets": [
+      "iris",
+      "ionosphere",
+      "bcw",
+      "soybean_small_no_constants",
+      "australian_credit_approval",
+      "heart_cleveland_2",
+      "heart_cleveland_5",
+      "chess_ten_fifteen"
+    ],
+    "applications": {
+      "tiki": {"csv_path": "data/preprocessed_data/tiki_preprocessed.csv", "n_clusters": 5},
+      "airpollution": {"csv_path": "data/preprocessed_data/data_demvk.csv", "n_clusters": 4}
+    }
+  }
+}

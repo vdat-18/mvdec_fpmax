@@ -1,0 +1,250 @@
+"""Strict loader for the FP-Max study configuration."""
+
+import json
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+from pipeline.fpmax import BIN_LABELS_BY_SIZE
+
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_STUDY_CONFIG_PATH = PROJECT_DIR / "configs" / "fpmax_study.json"
+STUDY_CONFIG_SCHEMA_VERSION = 1
+# "kmeans" binning is random, which would make FP-Max itemsets non-reproducible.
+STUDY_STRATEGIES = ("uniform", "quantile")
+INTUITIVE_MU_CONVENTIONS = ("eq26", "swapped")
+KPROTOTYPES_INITS = ("huang", "cao")
+
+
+@dataclass(frozen=True)
+class DatasetIntuitiveParams:
+    """Intuitive-K-prototypes parameters for one dataset."""
+
+    beta: float
+    mu: float
+    gamma: float
+
+
+@dataclass(frozen=True)
+class IntuitiveStudyParams:
+    """Intuitive options shared by every arm of a dataset."""
+
+    mu_convention: str
+    init_strategy: str
+    restarts: int
+    max_iter: int
+    defaults: DatasetIntuitiveParams
+    per_dataset: dict[str, DatasetIntuitiveParams]
+
+    def for_dataset(self, name: str) -> DatasetIntuitiveParams:
+        """Return the dataset's parameters, or the defaults for unknown names."""
+
+        return self.per_dataset.get(name, self.defaults)
+
+
+@dataclass(frozen=True)
+class ApplicationSpec:
+    """An unlabeled application dataset stored as a numeric CSV."""
+
+    csv_path: str
+    n_clusters: int
+
+
+@dataclass(frozen=True)
+class StudyConfig:
+    """Validated FP-Max study protocol."""
+
+    selection_seeds: tuple[int, ...]
+    report_seeds: tuple[int, ...]
+    fpmax_strategies: tuple[str, ...]
+    fpmax_n_bins: tuple[int, ...]
+    fpmax_min_supports: tuple[float, ...]
+    max_itemsets: int
+    ffs_min_improvement: float
+    ffs_max_rows: int
+    kprototypes_init_methods: tuple[str, ...]
+    intuitive: IntuitiveStudyParams
+    uci_data_dir: str
+    uci_datasets: tuple[str, ...]
+    applications: dict[str, ApplicationSpec]
+
+
+def _exact_keys(payload: object, expected: set[str], where: str) -> dict:
+    if not isinstance(payload, dict) or set(payload) != expected:
+        msg = f"Study config {where} must have exactly the fields {sorted(expected)}."
+        raise ValueError(msg)
+    return payload
+
+
+def _int_list(values: object, where: str) -> tuple[int, ...]:
+    if (
+        not isinstance(values, list)
+        or not values
+        or any(isinstance(v, bool) or not isinstance(v, int) for v in values)
+        or len(set(values)) != len(values)
+    ):
+        msg = f"Study config {where} must be a non-empty list of unique integers."
+        raise ValueError(msg)
+    return tuple(values)
+
+
+def _positive_int(value: object, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        msg = f"Study config {where} must be a positive integer."
+        raise ValueError(msg)
+    return value
+
+
+def _finite_number(value: object, where: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        msg = f"Study config {where} must be a finite number."
+        raise ValueError(msg)
+    return float(value)
+
+
+def _dataset_params(payload: object, where: str) -> DatasetIntuitiveParams:
+    raw = _exact_keys(payload, {"beta", "mu", "gamma"}, where)
+    beta = _finite_number(raw["beta"], f"{where}.beta")
+    mu = _finite_number(raw["mu"], f"{where}.mu")
+    gamma = _finite_number(raw["gamma"], f"{where}.gamma")
+    if beta <= 1 or not 0 <= mu <= 1 or not 0 <= gamma <= 1:
+        msg = f"Study config {where} needs beta > 1 and mu, gamma in [0, 1]."
+        raise ValueError(msg)
+    return DatasetIntuitiveParams(beta=beta, mu=mu, gamma=gamma)
+
+
+def _subset(values: object, allowed: tuple[str, ...], where: str) -> tuple[str, ...]:
+    if (
+        not isinstance(values, list)
+        or not values
+        or any(value not in allowed for value in values)
+        or len(set(values)) != len(values)
+    ):
+        msg = f"Study config {where} must be a unique non-empty subset of {allowed}."
+        raise ValueError(msg)
+    return tuple(values)
+
+
+def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
+    """Load and validate the study configuration."""
+
+    with Path(path).open(encoding="utf-8") as file:
+        payload = json.load(file)
+    raw = _exact_keys(
+        payload,
+        {"schema_version", "seeds", "fpmax", "ffs", "kprototypes", "intuitive", "data"},
+        "root",
+    )
+    if raw["schema_version"] != STUDY_CONFIG_SCHEMA_VERSION:
+        msg = f"Unsupported study config schema: {raw['schema_version']!r}."
+        raise ValueError(msg)
+
+    seeds = _exact_keys(raw["seeds"], {"selection", "report"}, "seeds")
+    selection = _int_list(seeds["selection"], "seeds.selection")
+    report = _int_list(seeds["report"], "seeds.report")
+    if set(selection) & set(report):
+        msg = "Study config selection and report seeds must be disjoint."
+        raise ValueError(msg)
+
+    fpmax = _exact_keys(
+        raw["fpmax"],
+        {"strategies", "n_bins", "min_supports", "max_itemsets"},
+        "fpmax",
+    )
+    strategies = _subset(fpmax["strategies"], STUDY_STRATEGIES, "fpmax.strategies")
+    n_bins = _int_list(fpmax["n_bins"], "fpmax.n_bins")
+    if any(b not in BIN_LABELS_BY_SIZE for b in n_bins):
+        msg = "Study config fpmax.n_bins must be a subset of the supported bin sizes."
+        raise ValueError(msg)
+    supports = fpmax["min_supports"]
+    if not isinstance(supports, list) or not supports:
+        msg = "Study config fpmax.min_supports must be a non-empty list."
+        raise ValueError(msg)
+    min_supports = tuple(_finite_number(v, "fpmax.min_supports") for v in supports)
+    if any(not 0 < v <= 1 for v in min_supports) or len(set(min_supports)) != len(
+        min_supports
+    ):
+        msg = "Study config fpmax.min_supports must be unique values in (0, 1]."
+        raise ValueError(msg)
+
+    ffs = _exact_keys(raw["ffs"], {"min_improvement", "max_rows"}, "ffs")
+    min_improvement = _finite_number(ffs["min_improvement"], "ffs.min_improvement")
+    if min_improvement < 0:
+        msg = "Study config ffs.min_improvement must be non-negative."
+        raise ValueError(msg)
+
+    kproto = _exact_keys(raw["kprototypes"], {"init_methods"}, "kprototypes")
+    init_methods = _subset(
+        kproto["init_methods"], KPROTOTYPES_INITS, "kprototypes.init_methods"
+    )
+
+    intuitive = _exact_keys(
+        raw["intuitive"],
+        {
+            "mu_convention",
+            "init_strategy",
+            "restarts",
+            "max_iter",
+            "defaults",
+            "per_dataset",
+        },
+        "intuitive",
+    )
+    if intuitive["mu_convention"] not in INTUITIVE_MU_CONVENTIONS:
+        msg = "Study config intuitive.mu_convention must be 'eq26' or 'swapped'."
+        raise ValueError(msg)
+    per_dataset_raw = intuitive["per_dataset"]
+    if not isinstance(per_dataset_raw, dict):
+        msg = "Study config intuitive.per_dataset must be an object."
+        raise ValueError(msg)
+
+    data = _exact_keys(
+        raw["data"], {"uci_data_dir", "uci_datasets", "applications"}, "data"
+    )
+    applications_raw = data["applications"]
+    if not isinstance(applications_raw, dict):
+        msg = "Study config data.applications must be an object."
+        raise ValueError(msg)
+    applications = {}
+    for name, spec in applications_raw.items():
+        spec = _exact_keys(
+            spec, {"csv_path", "n_clusters"}, f"data.applications.{name}"
+        )
+        applications[name] = ApplicationSpec(
+            csv_path=str(spec["csv_path"]),
+            n_clusters=_positive_int(spec["n_clusters"], f"{name}.n_clusters"),
+        )
+    uci_datasets = data["uci_datasets"]
+    if not isinstance(uci_datasets, list) or not uci_datasets:
+        msg = "Study config data.uci_datasets must be a non-empty list."
+        raise ValueError(msg)
+
+    return StudyConfig(
+        selection_seeds=selection,
+        report_seeds=report,
+        fpmax_strategies=strategies,
+        fpmax_n_bins=n_bins,
+        fpmax_min_supports=min_supports,
+        max_itemsets=_positive_int(fpmax["max_itemsets"], "fpmax.max_itemsets"),
+        ffs_min_improvement=min_improvement,
+        ffs_max_rows=_positive_int(ffs["max_rows"], "ffs.max_rows"),
+        kprototypes_init_methods=init_methods,
+        intuitive=IntuitiveStudyParams(
+            mu_convention=intuitive["mu_convention"],
+            init_strategy=str(intuitive["init_strategy"]),
+            restarts=_positive_int(intuitive["restarts"], "intuitive.restarts"),
+            max_iter=_positive_int(intuitive["max_iter"], "intuitive.max_iter"),
+            defaults=_dataset_params(intuitive["defaults"], "intuitive.defaults"),
+            per_dataset={
+                name: _dataset_params(value, f"intuitive.per_dataset.{name}")
+                for name, value in per_dataset_raw.items()
+            },
+        ),
+        uci_data_dir=str(data["uci_data_dir"]),
+        uci_datasets=tuple(str(name) for name in uci_datasets),
+        applications=applications,
+    )
