@@ -10,6 +10,7 @@ import pandas as pd
 from pipeline.clustering import minmax_scale_block
 from pipeline.public_artifacts import load_public_artifact
 from pipeline.public_data import TWENTY_NEWS_SKLEARN_SOURCE, load_dekm_public_dataset
+from pipeline.study_config import dekm_study_name
 
 BACKBONES = ("raw", "dekm")
 
@@ -94,13 +95,35 @@ def load_application_study_data(
     )
 
 
-def load_dekm_study_data(
+DEKM_BUNDLE_KEYS = (
+    "embedding",
+    "reference",
+    "labels",
+    "row_index",
+    "dataset",
+    "n_clusters",
+    "source_sha256",
+    "embedding_seed",
+)
+
+
+def write_dekm_study_bundle(
     artifact_path: Path,
     dataset_name: str,
     dataset_root: Path,
+    out_path: Path,
+    n_rows: int,
+    row_seed: int = 0,
     twenty_news_source: str = TWENTY_NEWS_SKLEARN_SOURCE,
-) -> StudyData:
-    """Load a DEKM embedding as the numeric block, scored against the tf-idf rows."""
+) -> Path:
+    """Save the study rows of one DEKM run as a self-contained ``.npz``.
+
+    DEKM is trained on every row; the study clusters a fixed sample of ``n_rows``
+    rows drawn with ``row_seed`` and without labels, so every embedding seed and
+    every arm sees the same objects. The bundle holds those rows' embedding, their
+    tf-idf vectors (the fixed cosine scoring space) and their true labels, so the
+    study needs neither the text sources nor pickles on the machine that runs it.
+    """
 
     artifact = load_public_artifact(Path(artifact_path))
     if not isinstance(artifact, dict) or "embedding" not in artifact:
@@ -111,25 +134,68 @@ def load_dekm_study_data(
         Path(dataset_root),
         twenty_news_source=twenty_news_source,
     )
-    embedding = np.asarray(artifact["embedding"], dtype=float)
     if artifact.get("source_sha256") != dataset.source_sha256:
         msg = "DEKM artifact was not produced from the loaded dataset source."
         raise ValueError(msg)
-    if len(embedding) != len(dataset.X):
+    embedding = np.asarray(artifact["embedding"], dtype=np.float32)
+    n_total = len(dataset.y)
+    if len(embedding) != n_total:
         msg = (
             f"DEKM artifact rows ({len(embedding)}) do not match the dataset "
-            f"({len(dataset.X)})."
+            f"({n_total})."
         )
         raise ValueError(msg)
-    numeric = _scaled_numeric(pd.DataFrame(embedding))
+    if not 1 <= n_rows <= n_total:
+        msg = f"n_rows must lie in [1, {n_total}], got {n_rows}."
+        raise ValueError(msg)
+    rows = np.sort(
+        np.random.default_rng(row_seed).choice(n_total, size=n_rows, replace=False)
+    )
+    reference = dataset.X[rows]
+    if hasattr(reference, "toarray"):
+        reference = reference.toarray()
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        out_path,
+        embedding=embedding[rows],
+        reference=np.asarray(reference, dtype=np.float32),
+        labels=np.asarray(dataset.y)[rows],
+        row_index=rows,
+        dataset=np.array(dataset.spec.name),
+        n_clusters=np.array(int(dataset.spec.n_clusters)),
+        source_sha256=np.array(str(dataset.source_sha256)),
+        embedding_seed=np.array(int(artifact.get("random_seed") or -1)),
+    )
+    return out_path
+
+
+def load_dekm_study_bundle(path: Path, n_rows: int | None = None) -> StudyData:
+    """Load a bundle written by ``write_dekm_study_bundle`` (cosine scoring space)."""
+
+    with np.load(Path(path), allow_pickle=False) as bundle:
+        missing = sorted(set(DEKM_BUNDLE_KEYS) - set(bundle.files))
+        if missing:
+            msg = f"DEKM study bundle {path} lacks {missing}."
+            raise ValueError(msg)
+        values = {key: bundle[key] for key in DEKM_BUNDLE_KEYS}
+    embedding = values["embedding"]
+    n = len(embedding)
+    if len(values["reference"]) != n or len(values["labels"]) != n:
+        msg = f"DEKM study bundle {path} has inconsistent row counts."
+        raise ValueError(msg)
+    if n_rows is not None and n != n_rows:
+        msg = f"DEKM study bundle {path} has {n} rows, the config expects {n_rows}."
+        raise ValueError(msg)
+    numeric = _scaled_numeric(pd.DataFrame(np.asarray(embedding, dtype=float)))
     numeric.columns = [f"emb_{index}" for index in range(numeric.shape[1])]
     return StudyData(
-        name=dataset_name,
+        name=dekm_study_name(str(values["dataset"])),
         backbone="dekm",
         numeric=numeric,
         categorical=pd.DataFrame(index=numeric.index),
-        labels=np.asarray(dataset.y),
-        n_clusters=dataset.spec.n_clusters,
-        reference_df=pd.DataFrame(np.asarray(dataset.X, dtype=float)),
+        labels=np.asarray(values["labels"]),
+        n_clusters=int(values["n_clusters"]),
+        reference_df=pd.DataFrame(np.asarray(values["reference"], dtype=float)),
         reference_metric="cosine",
     )

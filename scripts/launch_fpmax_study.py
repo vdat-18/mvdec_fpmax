@@ -1,7 +1,7 @@
 """Run the FP-Max study as independent subprocesses, one per (dataset, algorithm, seed).
 
 ``multiprocessing`` pools are unreliable on this machine, so jobs are plain
-subprocesses kept at a fixed worker count. Jobs whose output CSV already exists are
+subprocesses kept at a fixed worker count. Jobs with a completion marker are
 skipped, so rerunning the same command resumes an interrupted run.
 """
 
@@ -64,6 +64,19 @@ def job_is_done(out_dir: Path, job: Job) -> bool:
     """A job is done only when its completion marker exists (a CSV may be partial)."""
 
     return done_marker_path(job_output_path(out_dir, job)).exists()
+
+
+def missing_inputs(study: StudyConfig, jobs: list[Job]) -> list[Path]:
+    """DEKM bundles that pending jobs need but that do not exist yet."""
+
+    paths = {
+        PROJECT_DIR
+        / study.dekm.bundle_dir
+        / study.dekm.bundle_name(job.dataset, job.seed)
+        for job in jobs
+        if job.dataset in study.dekm.study_names
+    }
+    return sorted(path for path in paths if not path.exists())
 
 
 def job_command(config: Path, out_dir: Path, job: Job) -> list[str]:
@@ -145,8 +158,9 @@ def main() -> int:
     args = parser.parse_args()
 
     study = load_study_config(args.config)
-    datasets = args.datasets or [*study.uci_datasets, *study.applications]
-    unknown = sorted(set(datasets) - {*study.uci_datasets, *study.applications})
+    configured = [*study.uci_datasets, *study.applications, *study.dekm.study_names]
+    datasets = args.datasets or configured
+    unknown = sorted(set(datasets) - set(configured))
     if unknown:
         parser.error(f"Unknown datasets: {unknown}")
     bad = sorted(set(args.algorithms) - set(ALGORITHM_CHOICES))
@@ -161,6 +175,14 @@ def main() -> int:
             print(job_output_path(args.out_dir, job).name)
         print(f"{len(jobs)} jobs")
         return 0
+    pending = [job for job in jobs if not job_is_done(args.out_dir, job)]
+    missing = missing_inputs(study, pending)
+    if missing:
+        names = ", ".join(path.name for path in missing[:5])
+        parser.error(
+            f"{len(missing)} DEKM bundles are missing ({names}, ...); export them "
+            "from the Kaggle run or pass --datasets without the DEKM datasets."
+        )
     failed = run_jobs(jobs, args.config, args.out_dir, args.workers)
     print(f"done: {len(jobs)} jobs, {len(failed)} failed")
     for job in failed:

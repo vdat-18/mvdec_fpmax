@@ -75,6 +75,9 @@ def test_min_supports_must_be_strictly_descending(tmp_path):
         (("ffs", "max_steps"), 0, "max_steps"),
         (("ffs", "max_rows"), 1, "max_rows"),
         (("data", "uci_datasets"), ["iris", "iris"], "unique"),
+        (("data", "dekm", "datasets"), ["MNIST"], "dekm.datasets"),
+        (("data", "dekm", "embedding_seed_offset"), -1, "embedding_seed_offset"),
+        (("data", "dekm", "n_rows"), 5, "n_rows"),
     ],
 )
 def test_invalid_values_are_rejected(tmp_path, path, value, match):
@@ -110,4 +113,22 @@ def test_ffs_restarts_cannot_exceed_intuitive_restarts(tmp_path):
     payload["ffs"]["restarts"] = 9
 
     with pytest.raises(ValueError, match="restarts"):
+        load_study_config(_write(tmp_path, payload))
+
+
+def test_dekm_pairs_each_report_seed_with_one_embedding_seed():
+    dekm = load_study_config(DEFAULT_STUDY_CONFIG_PATH).dekm
+
+    assert dekm.study_names == ("dekm_reuters", "dekm_rcv1", "dekm_20news")
+    assert dekm.bundle_name("dekm_reuters", 0) == "dekm_reuters__seed-42.npz"
+    assert dekm.bundle_name("dekm_20news", 9) == "dekm_20news__seed-51.npz"
+    with pytest.raises(ValueError, match="DEKM"):
+        dekm.bundle_name("iris", 0)
+
+
+def test_dataset_names_must_not_collide_across_sources(tmp_path):
+    payload = _payload()
+    payload["data"]["uci_datasets"].append("dekm_reuters")
+
+    with pytest.raises(ValueError, match="unique across"):
         load_study_config(_write(tmp_path, payload))

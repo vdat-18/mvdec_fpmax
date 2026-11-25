@@ -7,12 +7,14 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.sparse import csr_matrix
 
 from pipeline import study_data
 from pipeline.study_data import (
     load_application_study_data,
-    load_dekm_study_data,
+    load_dekm_study_bundle,
     load_uci_study_data,
+    write_dekm_study_bundle,
 )
 
 
@@ -82,14 +84,14 @@ def test_application_data_is_unlabeled(tmp_path):
     assert data.categorical.shape == (3, 0)
 
 
-def _dekm_fixture(tmp_path, monkeypatch, *, sha="sha", rows=6):
+def _dekm_fixture(tmp_path, monkeypatch, *, sha="sha", rows=6, sparse=False):
     X = np.arange(12, dtype=float).reshape(6, 2) + 1.0
     y = np.array([0, 0, 0, 1, 1, 1])
     dataset = SimpleNamespace(
-        X=X,
+        X=csr_matrix(X) if sparse else X,
         y=y,
         source_sha256="sha",
-        spec=SimpleNamespace(n_clusters=2),
+        spec=SimpleNamespace(name="REUTERS", n_clusters=2),
     )
     monkeypatch.setattr(
         study_data, "load_dekm_public_dataset", lambda *_a, **_k: dataset
@@ -97,35 +99,74 @@ def _dekm_fixture(tmp_path, monkeypatch, *, sha="sha", rows=6):
     artifact = {
         "embedding": np.arange(rows * 3, dtype=float).reshape(rows, 3),
         "source_sha256": sha,
+        "random_seed": 42,
     }
     path = tmp_path / "artifact.pkl"
     with path.open("wb") as file:
         pickle.dump(artifact, file, protocol=4)
-    return path
+    return path, X, y
 
 
-def test_dekm_loader_uses_embedding_and_cosine_reference(tmp_path, monkeypatch):
-    path = _dekm_fixture(tmp_path, monkeypatch)
+def test_dekm_bundle_round_trip_keeps_rows_aligned(tmp_path, monkeypatch):
+    path, X, y = _dekm_fixture(tmp_path, monkeypatch)
 
-    data = load_dekm_study_data(path, "REUTERS", tmp_path)
+    bundle = write_dekm_study_bundle(
+        path, "REUTERS", tmp_path, tmp_path / "b.npz", n_rows=4
+    )
+    data = load_dekm_study_bundle(bundle, n_rows=4)
+    rows = np.load(bundle)["row_index"]
 
+    assert data.name == "dekm_reuters"
     assert data.backbone == "dekm"
-    assert data.numeric.shape == (6, 3)
+    assert data.numeric.shape == (4, 3)
     assert data.numeric.to_numpy().max() == 1.0
     assert data.reference_metric == "cosine"
-    assert data.reference_df.shape == (6, 2)
-    assert data.labels.tolist() == [0, 0, 0, 1, 1, 1]
+    np.testing.assert_allclose(data.reference_df.to_numpy(), X[rows])
+    assert data.labels.tolist() == y[rows].tolist()
+    assert int(np.load(bundle)["embedding_seed"]) == 42
 
 
-def test_dekm_loader_rejects_source_mismatch(tmp_path, monkeypatch):
-    path = _dekm_fixture(tmp_path, monkeypatch, sha="other")
+def test_dekm_bundle_rows_depend_only_on_row_seed(tmp_path, monkeypatch):
+    path, _, _ = _dekm_fixture(tmp_path, monkeypatch)
+
+    first = write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "1.npz", 3)
+    second = write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "2.npz", 3)
+
+    assert np.load(first)["row_index"].tolist() == np.load(second)["row_index"].tolist()
+
+
+def test_dekm_bundle_accepts_sparse_tfidf(tmp_path, monkeypatch):
+    path, X, _ = _dekm_fixture(tmp_path, monkeypatch, sparse=True)
+
+    bundle = write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 6)
+
+    np.testing.assert_allclose(load_dekm_study_bundle(bundle).reference_df, X)
+
+
+def test_dekm_bundle_rejects_source_mismatch(tmp_path, monkeypatch):
+    path, _, _ = _dekm_fixture(tmp_path, monkeypatch, sha="other")
 
     with pytest.raises(ValueError, match="source"):
-        load_dekm_study_data(path, "REUTERS", tmp_path)
+        write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 4)
 
 
-def test_dekm_loader_rejects_row_count_mismatch(tmp_path, monkeypatch):
-    path = _dekm_fixture(tmp_path, monkeypatch, rows=5)
+def test_dekm_bundle_rejects_row_count_mismatch(tmp_path, monkeypatch):
+    path, _, _ = _dekm_fixture(tmp_path, monkeypatch, rows=5)
 
     with pytest.raises(ValueError, match="rows"):
-        load_dekm_study_data(path, "REUTERS", tmp_path)
+        write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 4)
+
+
+def test_dekm_bundle_rejects_too_many_rows(tmp_path, monkeypatch):
+    path, _, _ = _dekm_fixture(tmp_path, monkeypatch)
+
+    with pytest.raises(ValueError, match="n_rows"):
+        write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 7)
+
+
+def test_dekm_bundle_load_checks_expected_rows(tmp_path, monkeypatch):
+    path, _, _ = _dekm_fixture(tmp_path, monkeypatch)
+    bundle = write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 4)
+
+    with pytest.raises(ValueError, match="expects 5"):
+        load_dekm_study_bundle(bundle, n_rows=5)

@@ -12,6 +12,7 @@ from scripts.launch_fpmax_study import (
     job_command,
     job_is_done,
     job_output_path,
+    missing_inputs,
     run_jobs,
 )
 
@@ -94,3 +95,21 @@ def test_partial_csv_is_not_done_until_the_marker_exists(tmp_path):
     )
 
     assert job_is_done(tmp_path, job)
+
+
+def test_missing_dekm_bundles_are_reported_once_per_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "PROJECT_DIR", tmp_path)
+    study = dataclasses.replace(
+        STUDY,
+        dekm=dataclasses.replace(STUDY.dekm, bundle_dir="bundles"),
+    )
+    jobs = build_jobs(study, ["dekm_reuters", "iris"], ["kmeans", "intuitive"])
+    (tmp_path / "bundles").mkdir()
+    (tmp_path / "bundles" / "dekm_reuters__seed-42.npz").write_bytes(b"x")
+
+    missing = missing_inputs(study, jobs)
+
+    assert [path.name for path in missing] == [
+        "dekm_reuters__seed-43.npz",
+        "dekm_reuters__seed-44.npz",
+    ]

@@ -55,6 +55,40 @@ class ApplicationSpec:
     n_clusters: int
 
 
+def dekm_study_name(public_name: str) -> str:
+    """Study name of a DEKM text dataset: ``REUTERS`` becomes ``dekm_reuters``."""
+
+    return f"dekm_{public_name.lower()}"
+
+
+@dataclass(frozen=True)
+class DekmSpec:
+    """DEKM backbone: study bundles exported from the GPU runs.
+
+    Report seed ``s`` clusters the embedding trained with seed
+    ``embedding_seed_offset + s``; every bundle holds the same ``n_rows`` objects.
+    """
+
+    bundle_dir: str
+    datasets: tuple[str, ...]
+    embedding_seed_offset: int
+    n_rows: int
+
+    @property
+    def study_names(self) -> tuple[str, ...]:
+        """Study dataset names, e.g. ``dekm_reuters``."""
+
+        return tuple(dekm_study_name(name) for name in self.datasets)
+
+    def bundle_name(self, study_name: str, report_seed: int) -> str:
+        """File name of the bundle a (dataset, report seed) job clusters."""
+
+        if study_name not in self.study_names:
+            msg = f"{study_name!r} is not a configured DEKM dataset."
+            raise ValueError(msg)
+        return f"{study_name}__seed-{self.embedding_seed_offset + report_seed}.npz"
+
+
 @dataclass(frozen=True)
 class StudyConfig:
     """Validated FP-Max study protocol."""
@@ -74,6 +108,7 @@ class StudyConfig:
     uci_data_dir: str
     uci_datasets: tuple[str, ...]
     applications: dict[str, ApplicationSpec]
+    dekm: DekmSpec
 
 
 def _exact_keys(payload: object, expected: set[str], where: str) -> dict:
@@ -134,6 +169,31 @@ def _subset(values: object, allowed: tuple[str, ...], where: str) -> tuple[str, 
         msg = f"Study config {where} must be a unique non-empty subset of {allowed}."
         raise ValueError(msg)
     return tuple(values)
+
+
+def _dekm_spec(payload: object) -> DekmSpec:
+    raw = _exact_keys(
+        payload,
+        {"bundle_dir", "datasets", "embedding_seed_offset", "n_rows"},
+        "data.dekm",
+    )
+    datasets = _subset(
+        raw["datasets"], tuple(PUBLIC_DATASET_SPECS), "data.dekm.datasets"
+    )
+    offset = raw["embedding_seed_offset"]
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        msg = "Study config data.dekm.embedding_seed_offset must be a non-negative int."
+        raise ValueError(msg)
+    n_rows = _positive_int(raw["n_rows"], "data.dekm.n_rows")
+    if n_rows < MIN_FFS_ROWS:
+        msg = f"Study config data.dekm.n_rows must be at least {MIN_FFS_ROWS}."
+        raise ValueError(msg)
+    return DekmSpec(
+        bundle_dir=str(raw["bundle_dir"]),
+        datasets=datasets,
+        embedding_seed_offset=offset,
+        n_rows=n_rows,
+    )
 
 
 def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
@@ -229,7 +289,7 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         raise ValueError(msg)
 
     data = _exact_keys(
-        raw["data"], {"uci_data_dir", "uci_datasets", "applications"}, "data"
+        raw["data"], {"uci_data_dir", "uci_datasets", "applications", "dekm"}, "data"
     )
     applications_raw = data["applications"]
     if not isinstance(applications_raw, dict):
@@ -253,7 +313,12 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
     ):
         msg = "Study config data.uci_datasets must be a non-empty list of unique names."
         raise ValueError(msg)
-    known = {*uci_datasets, *applications, *PUBLIC_DATASET_SPECS}
+    dekm = _dekm_spec(data["dekm"])
+    names = [*uci_datasets, *applications, *dekm.study_names]
+    if len(set(names)) != len(names):
+        msg = "Study config dataset names must be unique across all sources."
+        raise ValueError(msg)
+    known = {*names, *PUBLIC_DATASET_SPECS}
     unknown = sorted(set(per_dataset_raw) - known)
     if unknown:
         msg = f"Study config intuitive.per_dataset names unknown datasets: {unknown}."
@@ -285,4 +350,5 @@ def load_study_config(path: Path = DEFAULT_STUDY_CONFIG_PATH) -> StudyConfig:
         uci_data_dir=str(data["uci_data_dir"]),
         uci_datasets=tuple(str(name) for name in uci_datasets),
         applications=applications,
+        dekm=dekm,
     )

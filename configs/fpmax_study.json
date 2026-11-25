@@ -51,6 +51,12 @@
     "applications": {
       "tiki": {"csv_path": "data/preprocessed_data/tiki_preprocessed.csv", "n_clusters": 5},
       "airpollution": {"csv_path": "data/preprocessed_data/data_demvk.csv", "n_clusters": 4}
+    },
+    "dekm": {
+      "bundle_dir": "output/dekm_bundles",
+      "datasets": ["REUTERS", "RCV1", "20NEWS"],
+      "embedding_seed_offset": 42,
+      "n_rows": 2000
     }
   }
 }

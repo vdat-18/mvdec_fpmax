@@ -17,14 +17,32 @@ from pipeline.study_config import (
 from pipeline.study_data import (
     StudyData,
     load_application_study_data,
+    load_dekm_study_bundle,
     load_uci_study_data,
 )
 from pipeline.study_runner import run_group, shard_suffix
 
 
-def load_named_dataset(name: str, study: StudyConfig) -> StudyData:
-    """Build StudyData for a UCI key or an application name from the config."""
+def load_named_dataset(
+    name: str,
+    study: StudyConfig,
+    report_seed: int | None = None,
+) -> StudyData:
+    """Build StudyData for a configured UCI, application or DEKM dataset.
 
+    A DEKM dataset has one embedding per report seed, so it needs ``report_seed``.
+    """
+
+    if name in study.dekm.study_names:
+        if report_seed is None:
+            msg = f"{name} has one embedding per seed; run it one seed at a time."
+            raise ValueError(msg)
+        path = (
+            PROJECT_DIR
+            / study.dekm.bundle_dir
+            / study.dekm.bundle_name(name, report_seed)
+        )
+        return load_dekm_study_bundle(path, n_rows=study.dekm.n_rows)
     if name in study.uci_datasets:
         return load_uci_study_data(name, PROJECT_DIR / study.uci_data_dir)
     if name in study.applications:
@@ -32,7 +50,7 @@ def load_named_dataset(name: str, study: StudyConfig) -> StudyData:
         return load_application_study_data(
             name, PROJECT_DIR / spec.csv_path, spec.n_clusters
         )
-    known = sorted([*study.uci_datasets, *study.applications])
+    known = sorted([*study.uci_datasets, *study.applications, *study.dekm.study_names])
     msg = f"Unknown dataset {name!r}; configured datasets: {known}."
     raise ValueError(msg)
 
@@ -83,7 +101,8 @@ def main() -> None:
         study = dataclasses.replace(
             study, report_seeds=study.report_seeds[: args.report_seeds]
         )
-    data = load_named_dataset(args.dataset, study)
+    single_seed = study.report_seeds[0] if len(study.report_seeds) == 1 else None
+    data = load_named_dataset(args.dataset, study, single_seed)
     print(run_group(data, args.algorithm, study, args.out_dir, stem_suffix=suffix))
 
 
