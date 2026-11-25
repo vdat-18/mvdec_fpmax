@@ -7,7 +7,8 @@
 > `gamma = 0.2`, `beta` 6 and 20, seeds 0-4, Algorithm 1 initialisation), the
 > official code and this model (`mu_convention="swapped"`, `init_strategy="first"`,
 > `lambda_init=1.0`, the official `belt`) give identical partitions in all 10 runs
-> (ARI 1.000 between them). The official code stays outside the repository.
+> (ARI 1.000 between them). The official code is kept in `official/`; its full
+> audit (7 datasets, 47 of 47 identical runs) is `official/AUDIT.md`.
 > Other details the code settles: Algorithm 1 uses `belt = 1.0` and takes the first
 > admissible row in index order; the authors' Heart-2 demo uses random initial
 > prototypes with `beta = 6` (ACC 0.838, ARI 0.456, NMI 0.360). Their preprocessing:
