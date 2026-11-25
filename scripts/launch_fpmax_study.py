@@ -19,7 +19,7 @@ from pipeline.study_config import (
     StudyConfig,
     load_study_config,
 )
-from pipeline.study_runner import shard_suffix
+from pipeline.study_runner import done_marker_path, shard_suffix
 
 RUN_SCRIPT = PROJECT_DIR / "scripts" / "run_fpmax_study.py"
 ALGORITHM_CHOICES = ("kmeans", "kprototypes", "intuitive")
@@ -54,10 +54,16 @@ def build_jobs(
 
 
 def job_output_path(out_dir: Path, job: Job) -> Path:
-    """CSV the job writes (the existence of this file marks the job as finished)."""
+    """CSV the job writes; completion is the marker next to it, see ``job_is_done``."""
 
     suffix = shard_suffix((job.seed,))
     return Path(out_dir) / f"{job.dataset}__{job.algorithm}{suffix}.csv"
+
+
+def job_is_done(out_dir: Path, job: Job) -> bool:
+    """A job is done only when its completion marker exists (a CSV may be partial)."""
+
+    return done_marker_path(job_output_path(out_dir, job)).exists()
 
 
 def job_command(config: Path, out_dir: Path, job: Job) -> list[str]:
@@ -95,10 +101,8 @@ def run_jobs(
 
     log_dir = Path(out_dir) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
-    pending = [job for job in jobs if not job_output_path(out_dir, job).exists()]
-    print(
-        f"{len(jobs)} jobs, {len(jobs) - len(pending)} done, {len(pending)} to run"
-    )
+    pending = [job for job in jobs if not job_is_done(out_dir, job)]
+    print(f"{len(jobs)} jobs, {len(jobs) - len(pending)} done, {len(pending)} to run")
     running: list[tuple[Job, subprocess.Popen, object]] = []
     failed: list[Job] = []
     finished = 0

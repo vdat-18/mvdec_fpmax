@@ -244,3 +244,21 @@ def test_rerunning_a_shard_overwrites_its_files(tmp_path):
     path = run_group(_data(), "kmeans", STUDY, tmp_path, stem_suffix="__seeds-0")
 
     assert len(pd.read_csv(path)) == len(STUDY.report_seeds)
+
+
+def test_completed_group_writes_a_done_marker(tmp_path):
+    path = run_group(_data(), "kmeans", STUDY, tmp_path)
+
+    assert path.with_suffix(".done").exists()
+
+
+def test_failed_group_has_no_done_marker(tmp_path, monkeypatch):
+    def always_fail(data, algorithm, itemsets, seed, study, restarts=None):
+        return ArmFit(None, "error", float("nan"), "bad", 0.0, None)
+
+    monkeypatch.setattr(study_runner, "fit_arm", always_fail)
+
+    with pytest.raises(RuntimeError):
+        run_group(_data(), "kmeans", STUDY, tmp_path)
+
+    assert not (tmp_path / "toy__kmeans.done").exists()

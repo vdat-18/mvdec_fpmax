@@ -195,6 +195,12 @@ def _write_outputs(
     return csv_path
 
 
+def done_marker_path(csv_path: Path) -> Path:
+    """Marker file written when a group finished; a bare CSV may be partial."""
+
+    return csv_path.with_suffix(".done")
+
+
 def shard_suffix(seeds: tuple[int, ...]) -> str:
     """File-name suffix identifying a seed shard."""
 
@@ -345,4 +351,6 @@ def run_group(
         # Every baseline fit failed: a systemic problem (config or code), not data.
         msg = f"All {algorithm} fits on {data.name} failed: {none_rows[0]['error']}"
         raise RuntimeError(msg)
+    # The CSV is rewritten after every stage, so only this marker proves completion.
+    done_marker_path(csv_path).write_text("done", encoding="utf-8")
     return csv_path

@@ -4,11 +4,13 @@ import dataclasses
 import sys
 
 from pipeline.study_config import DEFAULT_STUDY_CONFIG_PATH, load_study_config
+from pipeline.study_runner import done_marker_path
 from scripts import launch_fpmax_study as launcher
 from scripts.launch_fpmax_study import (
     Job,
     build_jobs,
     job_command,
+    job_is_done,
     job_output_path,
     run_jobs,
 )
@@ -51,6 +53,11 @@ def test_existing_output_is_skipped_and_failures_are_reported(tmp_path, monkeypa
     todo_ok = Job("iris", "kmeans", 1)
     todo_bad = Job("iris", "kmeans", 2)
     job_output_path(tmp_path, done).write_text("x", encoding="utf-8")
+    done_marker_path(job_output_path(tmp_path, done)).write_text(
+        "done", encoding="utf-8"
+    )
+    # a partial CSV without a marker must not count as finished
+    job_output_path(tmp_path, todo_ok).write_text("partial", encoding="utf-8")
     started: list[Job] = []
 
     class FakeProcess:
@@ -74,3 +81,16 @@ def test_existing_output_is_skipped_and_failures_are_reported(tmp_path, monkeypa
 
     assert started == [todo_ok, todo_bad]
     assert failed == [todo_bad]
+
+
+def test_partial_csv_is_not_done_until_the_marker_exists(tmp_path):
+    job = Job("iris", "kmeans", 0)
+    job_output_path(tmp_path, job).write_text("partial", encoding="utf-8")
+
+    assert not job_is_done(tmp_path, job)
+
+    done_marker_path(job_output_path(tmp_path, job)).write_text(
+        "done", encoding="utf-8"
+    )
+
+    assert job_is_done(tmp_path, job)
