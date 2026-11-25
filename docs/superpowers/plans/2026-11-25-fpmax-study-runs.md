@@ -131,3 +131,52 @@ runtime-measurement section).
   runner support them; running them needs artifacts that do not exist locally.
 - **Step 4:** statistics and tables (Wilcoxon with Holm over every setting,
   `pairwise_ari_stability`, deduplication by `itemset_signature`).
+
+## Outcome: the 8 UCI datasets (2026-11-25)
+
+- **Jobs.** 220 of 220 UCI jobs finished with 0 failures. The launcher ran from
+  2026-11-24 evening to 2026-11-25 17:30, with one reboot in between; finished shards
+  were skipped on resume. Tiki and AIRPOLLUTION (60 jobs) were still running at this
+  point.
+- **Rows by status.**
+
+  | Arm | ok | Other |
+  | --- | ---: | --- |
+  | `none` | 220 | — |
+  | `fpmax` | 2440 | 66 `no_itemsets`, 32 `too_many_itemsets`, 22 `skipped_after_too_many_itemsets` |
+  | `fpmax_ffs` | 2440 | — |
+
+  No `error` and no `invalid_partition` rows.
+- **Summary.** `results/summary_uci/`, made by `scripts/summarize_fpmax_study.py` on the
+  finished UCI shards only.
+
+Each delta is `arm - none` for the same algorithm and seed. The value per dataset is the
+median over distinct itemset blocks of the seed mean. The test is a Wilcoxon over 8
+datasets, Holm-adjusted over all 8 external tests.
+
+| Metric | Algorithm | Arm | Median delta | Wins / losses | p | p (Holm) |
+| --- | --- | --- | ---: | --- | ---: | ---: |
+| ARI | K-Prototypes | fpmax | -0.025 | 1 / 7 | 0.039 | 0.23 |
+| ARI | K-Prototypes | fpmax_ffs | +0.005 | 4 / 1 | 0.31 | 0.63 |
+| ARI | Intuitive | fpmax | -0.060 | 2 / 5 | 0.078 | 0.39 |
+| ARI | Intuitive | fpmax_ffs | -0.055 | 1 / 6 | 0.078 | 0.39 |
+| NMI | K-Prototypes | fpmax | -0.009 | 2 / 6 | 0.11 | 0.39 |
+| NMI | K-Prototypes | fpmax_ffs | +0.001 | 4 / 1 | 0.31 | 0.63 |
+| NMI | Intuitive | fpmax | -0.053 | 1 / 6 | 0.031 | 0.22 |
+| NMI | Intuitive | fpmax_ffs | -0.039 | 0 / 7 | 0.016 | 0.13 |
+
+Findings:
+
+- **No arm differs significantly from `none` after Holm.**
+- **Adding every itemset tends to hurt** both algorithms.
+- **FFS turns the K-Prototypes effect slightly positive.** The ARI median is +0.005, with
+  4 datasets better and 1 worse. The largest gains are on Chess (+0.082), Iris (+0.036)
+  and Soybean (+0.025).
+- **FFS does not rescue Intuitive.** NMI is lower on 7 of 8 datasets; Heart-5 is the
+  only gain (+0.032 ARI).
+- **Intuitive starts from a much stronger baseline.** Its `none` ARI is:
+  Australian 0.512 (K-Prototypes 0.334), BCW 0.807, Soybean 1.000, Iris 0.886. The
+  Intuitive baselines match the paper.
+- **Stability.** The median pairwise ARI across seeds is above 0.95 for every arm.
+  `fpmax_ffs` is slightly more stable than `none`: 0.980 vs 0.957 for Intuitive, and
+  1.000 vs 0.991 for K-Prototypes.

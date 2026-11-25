@@ -1,0 +1,5 @@
+metric,algorithm,arm,n_datasets,median_delta,wins,losses,p_value,effect_rank_biserial,p_holm
+ref_silhouette,intuitive,fpmax,8,-0.018483174245715044,0,7,0.015625,-1.0,0.0625
+ref_silhouette,intuitive,fpmax_ffs,8,-0.0020749861130574584,3,4,0.375,-0.42857142857142855,0.75
+ref_silhouette,kprototypes,fpmax,8,-0.007475364172031361,1,6,0.078125,-0.7857142857142857,0.234375
+ref_silhouette,kprototypes,fpmax_ffs,8,0.0,2,3,1.0,-0.06666666666666667,1.0
