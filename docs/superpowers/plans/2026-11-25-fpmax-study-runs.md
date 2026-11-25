@@ -180,3 +180,38 @@ Findings:
 - **Stability.** The median pairwise ARI across seeds is above 0.95 for every arm.
   `fpmax_ffs` is slightly more stable than `none`: 0.980 vs 0.957 for Intuitive, and
   1.000 vs 0.991 for K-Prototypes.
+
+## DEKM backbone (branch `dekm-backbone`)
+
+**Why bundles.**
+- At full size (10,000–18,846 rows), one study job would take tens of hours on this
+  CPU. Chess, with 4,151 rows, already took about 3 h per job.
+- DEKM is therefore trained on every row on a Kaggle GPU. The study then clusters a
+  fixed, label-free sample of `data.dekm.n_rows = 2000` rows.
+- A study bundle (`write_dekm_study_bundle`) holds those rows' embedding, their tf-idf
+  vectors (the cosine scoring space) and their labels.
+- The CPU study needs neither the text sources nor pickles.
+- Report seed `s` clusters the embedding of seed `42 + s`, so backbone variance enters
+  the seed spread. Every arm of a seed uses the same embedding.
+
+**Steps.**
+
+1. **Train and export on Kaggle.** Run the three Kaggle notebooks with a GPU and
+   internet on. Each trains seeds 42–51 with the frozen canonical protocol and writes
+   `dekm-fpmax-<dataset>.zip`. The notebooks are:
+   - `notebooks/dekm_fpmax_bundles_reuters_seeds42_51_kaggle.ipynb`
+   - `notebooks/dekm_fpmax_bundles_rcv1_seeds42_51_kaggle.ipynb`
+   - `notebooks/dekm_fpmax_bundles_20news_seeds42_51_kaggle.ipynb`
+2. **Bring the results back.** Unzip each archive at the repository root. This yields
+   `output/dekm_bundles/dekm_<dataset>__seed-<42..51>.npz` and the run records in
+   `output/dekm_runs/<dataset>/`.
+3. **Launch the study** on the DEKM datasets only:
+   `uv run --python 3.12 --link-mode=copy python scripts/launch_fpmax_study.py
+   --out-dir output/fpmax_study --workers 12 --datasets dekm_reuters dekm_rcv1
+   dekm_20news`.
+   The launcher refuses to start if any bundle is missing.
+4. **Summarize.** Summarize `output/fpmax_study` as for the UCI datasets. The DEKM rows
+   carry `backbone = dekm`.
+
+**Intuitive parameters.** Intuitive uses the config defaults on these datasets
+(`beta = 2`, `mu = 0.5`, `gamma = 0.5`); the embedding is numeric-only.
