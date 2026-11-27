@@ -10,9 +10,14 @@ from pipeline.study_stats import (
     dataset_level,
     holm_adjust,
     load_results,
+    method_rows,
+    method_summary,
     paired_deltas,
+    per_seed_table,
     primary_table,
     rank_biserial,
+    select_label_free,
+    select_oracle,
     setting_table,
     stability_table,
     status_table,
@@ -180,3 +185,65 @@ def test_status_table_keeps_failures_visible():
     table = status_table(_frame(rows))
 
     assert set(table["status"]) == {"ok", "error"}
+
+
+def _scored(dataset, arm, seed, ari, silhouette, support, signature):
+    row = _row(dataset, "kprototypes", arm, seed, ari, signature=signature)
+    row.update(ref_silhouette=silhouette, acc=ari)
+    if arm != "none":
+        row.update(min_support=support)
+    return row
+
+
+def _two_settings():
+    rows = []
+    for seed in range(3):
+        rows.append(_scored("d", "none", seed, 0.5, 0.1, None, ""))
+        # Setting A: higher silhouette, lower ARI. Setting B: the reverse.
+        rows.append(_scored("d", "fpmax", seed, 0.4, 0.3, 0.5, "A"))
+        rows.append(_scored("d", "fpmax", seed, 0.9, 0.2, 0.2, "B"))
+    return _frame(rows)
+
+
+def test_label_free_selection_picks_the_highest_silhouette_per_seed():
+    chosen = select_label_free(_two_settings())
+
+    assert set(chosen["arm"]) == {"fpmax_auto"}
+    assert chosen["itemset_signature"].tolist() == ["A", "A", "A"]
+    assert chosen["seed"].tolist() == [0, 1, 2]
+
+
+def test_oracle_picks_the_setting_with_the_best_seed_mean_metric():
+    chosen = select_oracle(_two_settings(), "ari")
+
+    assert set(chosen["arm"]) == {"fpmax_oracle"}
+    assert chosen["itemset_signature"].tolist() == ["B", "B", "B"]
+
+
+def test_method_rows_stack_none_auto_and_oracle():
+    methods = method_rows(_two_settings(), "ari")
+
+    assert sorted(methods["arm"].unique()) == ["fpmax_auto", "fpmax_oracle", "none"]
+
+
+def test_per_seed_table_tests_each_dataset_over_its_seeds():
+    rows = []
+    for seed in range(6):
+        rows.append(_scored("d", "none", seed, 0.5, 0.1, None, ""))
+        rows.append(_scored("d", "fpmax_auto", seed, 0.6 + seed / 100, 0.2, 0.5, "A"))
+    table = per_seed_table(_frame(rows), ("ari",))
+
+    row = table.iloc[0]
+    assert (row["dataset"], row["arm"], row["n_seeds"]) == ("d", "fpmax_auto", 6)
+    assert row["wins"] == 6 and row["losses"] == 0
+    assert row["p_value"] == pytest.approx(2 / 64)
+    assert row["p_holm"] == pytest.approx(2 / 64)
+    assert row["mean_delta"] == pytest.approx(0.125)
+
+
+def test_method_summary_reports_mean_and_sd_over_seeds():
+    summary = method_summary(method_rows(_two_settings(), "ari"), ("ari",))
+
+    none = summary[summary["arm"] == "none"].iloc[0]
+    assert none["ari_mean"] == pytest.approx(0.5)
+    assert none["n_seeds"] == 3

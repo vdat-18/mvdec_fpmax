@@ -6,6 +6,9 @@ from pathlib import Path
 from pipeline.study_stats import (
     EXTERNAL_METRICS,
     load_results,
+    method_rows,
+    method_summary,
+    per_seed_table,
     primary_table,
     setting_table,
     stability_table,
@@ -13,6 +16,7 @@ from pipeline.study_stats import (
 )
 
 REFERENCE_METRICS = ("ref_silhouette",)
+LABELLED_METRICS = ("acc", "nmi", "ari")
 
 
 def main() -> None:
@@ -24,12 +28,15 @@ def main() -> None:
     out_dir = args.out_dir or args.results_dir / "summary"
     out_dir.mkdir(parents=True, exist_ok=True)
     results = load_results(args.results_dir)
+    methods = method_rows(results, oracle_metric="ari")
 
     tables = {
         "status.csv": status_table(results),
         "primary_external.csv": primary_table(results, EXTERNAL_METRICS),
         "primary_reference.csv": primary_table(results, REFERENCE_METRICS),
         "stability.csv": stability_table(args.results_dir, results),
+        "methods.csv": method_summary(methods, (*LABELLED_METRICS, *REFERENCE_METRICS)),
+        "per_seed_tests.csv": per_seed_table(methods, LABELLED_METRICS),
     }
     for metric in (*EXTERNAL_METRICS, *REFERENCE_METRICS):
         tables[f"settings_{metric}.csv"] = setting_table(results, metric)

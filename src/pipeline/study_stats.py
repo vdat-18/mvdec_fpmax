@@ -1,9 +1,11 @@
 """Paired statistics for the FP-Max study results (long-format CSVs).
 
 Comparisons are always arm versus ``none`` of the same dataset, algorithm and seed.
-No grid setting is ever picked as "best": every distinct set of mined itemsets
-(``itemset_signature``) counts once, and the outcome per dataset is the median over
-those settings, so the headline statistic cannot be inflated by choosing among them.
+The over-datasets table never picks a grid setting: every distinct set of mined
+itemsets (``itemset_signature``) counts once and the outcome per dataset is the median
+over those settings. The per-seed tables add the setting a user without labels would
+pick (highest reference silhouette, ``*_auto``) and, as an upper bound only, the
+setting with the best labelled score (``*_oracle``), which is never tested.
 """
 
 from pathlib import Path
@@ -17,6 +19,9 @@ from pipeline.reference_evaluation import pairwise_ari_stability
 KEY = ["dataset", "algorithm"]
 ARMS = ("fpmax", "fpmax_ffs")
 EXTERNAL_METRICS = ("ari", "nmi")
+SELECTION_CRITERION = "ref_silhouette"
+AUTO_SUFFIX = "_auto"
+ORACLE_SUFFIX = "_oracle"
 SETTING_COLUMNS = ["strategy", "n_bins", "min_support"]
 
 
@@ -241,3 +246,112 @@ def status_table(results: pd.DataFrame) -> pd.DataFrame:
         .rename("n_rows")
         .reset_index()
     )
+
+
+def _seeded_ok(results: pd.DataFrame) -> pd.DataFrame:
+    return results[(results["status"] == "ok") & results["seed"].notna()]
+
+
+def _grid_order(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.sort_values(
+        [*KEY, "arm", "strategy", "n_bins", "min_support"],
+        ascending=[True, True, True, True, True, False],
+        kind="stable",
+    )
+
+
+def select_label_free(
+    results: pd.DataFrame, criterion: str = SELECTION_CRITERION
+) -> pd.DataFrame:
+    """Per seed, the setting with the highest label-free ``criterion`` (``*_auto``).
+
+    Ties go to the first setting in grid order.
+    """
+
+    arms = _seeded_ok(results)
+    arms = _grid_order(arms[arms["arm"].isin(ARMS) & np.isfinite(arms[criterion])])
+    best = arms.loc[arms.groupby([*KEY, "arm", "seed"], sort=False)[criterion].idxmax()]
+    best = best.assign(arm=best["arm"] + AUTO_SUFFIX)
+    return best.sort_values([*KEY, "arm", "seed"]).reset_index(drop=True)
+
+
+def select_oracle(results: pd.DataFrame, metric: str) -> pd.DataFrame:
+    """The setting with the best seed-mean ``metric`` per arm (``*_oracle``).
+
+    It uses the labels, so it is an upper bound to report, never a method to test.
+    """
+
+    arms = _seeded_ok(results)
+    arms = _grid_order(arms[arms["arm"].isin(ARMS)])
+    arms = arms.drop_duplicates(subset=[*KEY, "arm", "itemset_signature", "seed"])
+    means = arms.groupby([*KEY, "arm", "itemset_signature"], sort=False)[metric].mean()
+    best = means.groupby(level=[0, 1, 2], sort=False).idxmax().tolist()
+    chosen = arms.set_index([*KEY, "arm", "itemset_signature"]).loc[best]
+    chosen = chosen.reset_index()
+    chosen = chosen.assign(arm=chosen["arm"] + ORACLE_SUFFIX)
+    return chosen.sort_values([*KEY, "arm", "seed"]).reset_index(drop=True)
+
+
+def method_rows(results: pd.DataFrame, oracle_metric: str) -> pd.DataFrame:
+    """Per-seed rows of ``none``, the label-free choices and the upper bound."""
+
+    ok = _seeded_ok(results)
+    return pd.concat(
+        [
+            ok[ok["arm"] == "none"],
+            select_label_free(results),
+            select_oracle(results, oracle_metric),
+        ],
+        ignore_index=True,
+    )
+
+
+def per_seed_table(methods: pd.DataFrame, metrics: tuple[str, ...]) -> pd.DataFrame:
+    """Wilcoxon over the seeds of each dataset, method versus ``none``; Holm per metric.
+
+    Upper-bound (``*_oracle``) rows are excluded: they were chosen with the labels.
+    """
+
+    tested = methods[
+        (methods["arm"] != "none") & ~methods["arm"].str.endswith(ORACLE_SUFFIX)
+    ]
+    tables = []
+    for metric in metrics:
+        none = methods[methods["arm"] == "none"][[*KEY, "seed", metric]].rename(
+            columns={metric: "baseline"}
+        )
+        merged = tested[[*KEY, "arm", "seed", metric]].merge(none, on=[*KEY, "seed"])
+        rows = []
+        for (dataset, algorithm, arm), group in merged.groupby([*KEY, "arm"]):
+            deltas = (group[metric] - group["baseline"]).to_numpy(dtype=float)
+            deltas = deltas[np.isfinite(deltas)]
+            rows.append(
+                {
+                    "metric": metric,
+                    "dataset": dataset,
+                    "algorithm": algorithm,
+                    "arm": arm,
+                    "n_seeds": len(deltas),
+                    "mean_delta": float(np.mean(deltas)) if len(deltas) else np.nan,
+                    "wins": int((deltas > 0).sum()),
+                    "losses": int((deltas < 0).sum()),
+                    "p_value": wilcoxon_p(deltas) if len(deltas) >= 2 else np.nan,
+                    "effect_rank_biserial": rank_biserial(deltas),
+                }
+            )
+        table = pd.DataFrame(rows)
+        if not table.empty:
+            table["p_holm"] = holm_adjust(table["p_value"].tolist())
+        tables.append(table)
+    return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+
+
+def method_summary(methods: pd.DataFrame, metrics: tuple[str, ...]) -> pd.DataFrame:
+    """Mean and standard deviation over seeds per dataset, algorithm and method."""
+
+    grouped = methods.groupby([*KEY, "arm"])
+    summary = grouped["seed"].nunique().rename("n_seeds").to_frame()
+    for metric in metrics:
+        summary[f"{metric}_mean"] = grouped[metric].mean()
+        summary[f"{metric}_sd"] = grouped[metric].std()
+    return summary.reset_index()
