@@ -13,7 +13,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_STUDY_CONFIG_PATH = PROJECT_DIR / "configs" / "fpmax_study.json"
 STUDY_CONFIG_SCHEMA_VERSION = 1
 # "kmeans" binning is random, which would make FP-Max itemsets non-reproducible.
-STUDY_STRATEGIES = ("uniform", "quantile")
+STUDY_STRATEGIES = ("uniform", "quantile", "kmeans")
 INTUITIVE_MU_CONVENTIONS = ("eq26", "swapped")
 KPROTOTYPES_INITS = ("huang", "cao")
 MAX_RESTARTS = 1000  # restart seeds are seed * 1000 + restart

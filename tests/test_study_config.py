@@ -40,9 +40,18 @@ def test_unknown_or_missing_fields_rejected(tmp_path):
         load_study_config(_write(tmp_path, payload))
 
 
-def test_strategy_kmeans_is_rejected(tmp_path):
+def test_strategy_kmeans_is_accepted(tmp_path):
     payload = _payload()
     payload["fpmax"]["strategies"] = ["kmeans"]
+
+    study = load_study_config(_write(tmp_path, payload))
+
+    assert study.fpmax_strategies == ("kmeans",)
+
+
+def test_unknown_strategy_is_rejected(tmp_path):
+    payload = _payload()
+    payload["fpmax"]["strategies"] = ["jenks"]
 
     with pytest.raises(ValueError, match="strategies"):
         load_study_config(_write(tmp_path, payload))
