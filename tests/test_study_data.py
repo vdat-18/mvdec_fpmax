@@ -14,6 +14,7 @@ from pipeline.study_data import (
     load_application_study_data,
     load_dekm_study_bundle,
     load_uci_study_data,
+    tfidf_backbone,
     write_dekm_study_bundle,
 )
 
@@ -82,6 +83,7 @@ def test_application_data_is_unlabeled(tmp_path):
     assert data.numeric.to_numpy().min() == 0.0
     assert data.numeric.to_numpy().max() == 1.0
     assert data.categorical.shape == (3, 0)
+    assert data.reference_metric == "euclidean"
 
 
 def _dekm_fixture(tmp_path, monkeypatch, *, sha="sha", rows=6, sparse=False):
@@ -171,3 +173,27 @@ def test_dekm_bundle_load_checks_expected_rows(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="expects 5"):
         load_dekm_study_bundle(bundle, n_rows=5)
+
+
+def test_tfidf_backbone_clusters_the_same_rows_on_their_tfidf(tmp_path, monkeypatch):
+    path, X, y = _dekm_fixture(tmp_path, monkeypatch)
+    bundle = write_dekm_study_bundle(path, "REUTERS", tmp_path, tmp_path / "b.npz", 4)
+    dekm = load_dekm_study_bundle(bundle, n_rows=4)
+
+    data = tfidf_backbone(dekm)
+
+    assert data.name == "tfidf_reuters"
+    assert data.backbone == "tfidf"
+    np.testing.assert_allclose(data.numeric.to_numpy(), dekm.reference_df.to_numpy())
+    assert data.labels.tolist() == dekm.labels.tolist()
+    assert data.reference_metric == "cosine"
+    np.testing.assert_allclose(
+        data.reference_df.to_numpy(), dekm.reference_df.to_numpy()
+    )
+
+
+def test_tfidf_backbone_needs_dekm_rows(tmp_path):
+    data = load_uci_study_data("toy", _write_uci(tmp_path, ["n1"], ["c1"]))
+
+    with pytest.raises(ValueError, match="DEKM"):
+        tfidf_backbone(data)

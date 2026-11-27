@@ -19,6 +19,7 @@ from pipeline.study_data import (
     load_application_study_data,
     load_dekm_study_bundle,
     load_uci_study_data,
+    tfidf_backbone,
 )
 from pipeline.study_runner import run_group, shard_suffix
 
@@ -87,7 +88,15 @@ def main() -> None:
         default=None,
         help="Comma-separated subset of the report seeds (one shard of the group).",
     )
+    parser.add_argument(
+        "--tfidf",
+        action="store_true",
+        help="Cluster a DEKM dataset's rows on their tf-idf vectors instead of the "
+        "embedding (the traditional K-Means baseline); kmeans only.",
+    )
     args = parser.parse_args()
+    if args.tfidf and args.algorithm != "kmeans":
+        parser.error("--tfidf is the K-Means baseline; use --algorithm kmeans.")
 
     study = load_study_config(args.config)
     suffix = ""
@@ -103,6 +112,8 @@ def main() -> None:
         )
     single_seed = study.report_seeds[0] if len(study.report_seeds) == 1 else None
     data = load_named_dataset(args.dataset, study, single_seed)
+    if args.tfidf:
+        data = tfidf_backbone(data)
     print(run_group(data, args.algorithm, study, args.out_dir, stem_suffix=suffix))
 
 

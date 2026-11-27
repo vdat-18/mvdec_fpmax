@@ -162,3 +162,12 @@ def test_gower_distance_matrix_accepts_string_columns() -> None:
 
     assert distance.shape == (2, 2)
     assert distance[0, 1] > 0
+
+
+def test_euclidean_reference_space_uses_plain_distances() -> None:
+    X = pd.DataFrame({"a": [0.0, 3.0, 0.0], "b": [0.0, 4.0, 1.0]})
+
+    space = build_reference_distance(X, metric="euclidean")
+
+    assert space.distance[0, 1] == pytest.approx(5.0)
+    assert space.distance[0, 2] == pytest.approx(1.0)

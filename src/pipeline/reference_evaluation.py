@@ -17,11 +17,11 @@ from sklearn.metrics import (
     davies_bouldin_score,
     silhouette_score,
 )
-from sklearn.metrics.pairwise import cosine_distances
+from sklearn.metrics.pairwise import cosine_distances, euclidean_distances
 
 from pipeline.clustering import is_valid_partition
 
-REFERENCE_METRICS = ("gower", "cosine")
+REFERENCE_METRICS = ("gower", "cosine", "euclidean")
 DEFAULT_MAX_ROWS = 3000
 EMBEDDING_DIMENSIONS = 10
 
@@ -77,7 +77,8 @@ def build_reference_distance(
     """Build the reference space, subsampling rows above ``max_rows``.
 
     ``metric="gower"`` handles mixed columns; ``"cosine"`` needs a numeric frame
-    (tf-idf rows) and ignores row scale.
+    (tf-idf rows) and ignores row scale; ``"euclidean"`` is the K-Means distance
+    for an all-numeric frame.
     """
 
     if metric not in REFERENCE_METRICS:
@@ -92,6 +93,9 @@ def build_reference_distance(
     sample = df.iloc[row_index].reset_index(drop=True)
     if metric == "cosine":
         distance = np.asarray(cosine_distances(sample.to_numpy(dtype=float)))
+        np.fill_diagonal(distance, 0.0)
+    elif metric == "euclidean":
+        distance = np.asarray(euclidean_distances(sample.to_numpy(dtype=float)))
         np.fill_diagonal(distance, 0.0)
     else:
         distance = gower_distance_matrix(sample)

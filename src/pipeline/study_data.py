@@ -1,5 +1,6 @@
 """Uniform input for the FP-Max study: one object for every backbone."""
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from pipeline.public_artifacts import load_public_artifact
 from pipeline.public_data import TWENTY_NEWS_SKLEARN_SOURCE, load_dekm_public_dataset
 from pipeline.study_config import dekm_study_name
 
-BACKBONES = ("raw", "dekm")
+BACKBONES = ("raw", "dekm", "tfidf")
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,11 @@ def load_application_study_data(
     csv_path: Path,
     n_clusters: int,
 ) -> StudyData:
-    """Load an unlabeled numeric application dataset."""
+    """Load an unlabeled numeric application dataset.
+
+    It is scored with Euclidean distances on its scaled original columns, the
+    distance the K-Means baseline uses, so the baseline is never disadvantaged.
+    """
 
     frame = pd.read_csv(csv_path)
     numeric = _scaled_numeric(frame)
@@ -92,7 +97,7 @@ def load_application_study_data(
         labels=None,
         n_clusters=int(n_clusters),
         reference_df=numeric,
-        reference_metric="gower",
+        reference_metric="euclidean",
     )
 
 
@@ -202,4 +207,25 @@ def load_dekm_study_bundle(path: Path, n_rows: int | None = None) -> StudyData:
         n_clusters=int(values["n_clusters"]),
         reference_df=pd.DataFrame(np.asarray(values["reference"], dtype=float)),
         reference_metric="cosine",
+    )
+
+
+def tfidf_backbone(data: StudyData) -> StudyData:
+    """The same DEKM study rows, clustered on their tf-idf vectors instead.
+
+    This is the traditional K-Means baseline of the DEKM paper: identical rows,
+    labels and scoring space, with the DEKM embedding replaced by the input it
+    was learned from.
+    """
+
+    if data.backbone != "dekm":
+        msg = f"tfidf_backbone needs DEKM study rows, got backbone {data.backbone!r}."
+        raise ValueError(msg)
+    numeric = data.reference_df.copy()
+    numeric.columns = [f"tfidf_{index}" for index in range(numeric.shape[1])]
+    return dataclasses.replace(
+        data,
+        name=data.name.replace("dekm_", "tfidf_", 1),
+        backbone="tfidf",
+        numeric=numeric,
     )

@@ -41,3 +41,55 @@ def test_dekm_dataset_loads_the_bundle_of_its_embedding_seed(monkeypatch):
     assert load_named_dataset("dekm_rcv1", study, 3) == "data"
     assert seen["path"].name == "dekm_rcv1__seed-45.npz"
     assert seen["n_rows"] == 2000
+
+
+def test_tfidf_flag_runs_kmeans_on_the_tfidf_rows(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(run_fpmax_study, "load_named_dataset", lambda *a: "dekm rows")
+    monkeypatch.setattr(
+        run_fpmax_study, "tfidf_backbone", lambda data: f"tfidf of {data}"
+    )
+
+    def fake_run_group(data, algorithm, study, out_dir, stem_suffix=""):
+        seen.update(data=data, algorithm=algorithm)
+        return tmp_path
+
+    monkeypatch.setattr(run_fpmax_study, "run_group", fake_run_group)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run",
+            "--dataset",
+            "dekm_reuters",
+            "--algorithm",
+            "kmeans",
+            "--seeds",
+            "2",
+            "--out-dir",
+            str(tmp_path),
+            "--tfidf",
+        ],
+    )
+
+    run_fpmax_study.main()
+
+    assert seen == {"data": "tfidf of dekm rows", "algorithm": "kmeans"}
+
+
+def test_tfidf_flag_is_kmeans_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run",
+            "--dataset",
+            "dekm_reuters",
+            "--algorithm",
+            "kprototypes",
+            "--out-dir",
+            str(tmp_path),
+            "--tfidf",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        run_fpmax_study.main()
