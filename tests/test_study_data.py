@@ -119,7 +119,8 @@ def test_dekm_bundle_round_trip_keeps_rows_aligned(tmp_path, monkeypatch):
     assert data.name == "dekm_reuters"
     assert data.backbone == "dekm"
     assert data.numeric.shape == (4, 3)
-    assert data.numeric.to_numpy().max() == 1.0
+    embedding = np.arange(len(X) * 3, dtype=float).reshape(len(X), 3)
+    np.testing.assert_allclose(data.numeric.to_numpy(), embedding[rows])
     assert data.reference_metric == "cosine"
     np.testing.assert_allclose(data.reference_df.to_numpy(), X[rows])
     assert data.labels.tolist() == y[rows].tolist()

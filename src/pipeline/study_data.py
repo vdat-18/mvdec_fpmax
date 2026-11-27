@@ -19,11 +19,12 @@ BACKBONES = ("raw", "dekm")
 class StudyData:
     """Numeric and categorical blocks, optional labels and the reference data.
 
-    ``numeric`` is min-max scaled to [0, 1] and ``categorical`` holds the original
-    categorical attributes as strings; either may have zero columns. ``labels`` are
-    true labels used only for external evaluation. ``reference_df`` holds the
-    original attributes that define the fixed scoring space, which never contains a
-    method's own FP-Max columns. All frames use the index ``0..n-1``.
+    ``numeric`` is min-max scaled to [0, 1] for tabular data and kept unscaled for
+    DEKM embeddings (DEKM clusters the raw embedding). ``categorical`` holds the
+    original categorical attributes as strings; either may have zero columns.
+    ``labels`` are true labels used only for external evaluation. ``reference_df``
+    holds the original attributes that define the fixed scoring space, which never
+    contains a method's own FP-Max columns. All frames use the index ``0..n-1``.
     """
 
     name: str
@@ -171,7 +172,10 @@ def write_dekm_study_bundle(
 
 
 def load_dekm_study_bundle(path: Path, n_rows: int | None = None) -> StudyData:
-    """Load a bundle written by ``write_dekm_study_bundle`` (cosine scoring space)."""
+    """Load a bundle written by ``write_dekm_study_bundle`` (cosine scoring space).
+
+    The embedding is kept unscaled, as DEKM itself clusters it.
+    """
 
     with np.load(Path(path), allow_pickle=False) as bundle:
         missing = sorted(set(DEKM_BUNDLE_KEYS) - set(bundle.files))
@@ -187,7 +191,7 @@ def load_dekm_study_bundle(path: Path, n_rows: int | None = None) -> StudyData:
     if n_rows is not None and n != n_rows:
         msg = f"DEKM study bundle {path} has {n} rows, the config expects {n_rows}."
         raise ValueError(msg)
-    numeric = _scaled_numeric(pd.DataFrame(np.asarray(embedding, dtype=float)))
+    numeric = pd.DataFrame(np.asarray(embedding, dtype=float))
     numeric.columns = [f"emb_{index}" for index in range(numeric.shape[1])]
     return StudyData(
         name=dekm_study_name(str(values["dataset"])),
